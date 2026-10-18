@@ -247,6 +247,9 @@ data class ActivityEvent(
     val origin: String? = null,
     val preview: String? = null,
     val lastMessage: String? = null,
+    val eventId: String? = null,
+    val serverId: String? = null,
+    val createdAt: String? = null,
 )
 
 @Serializable
