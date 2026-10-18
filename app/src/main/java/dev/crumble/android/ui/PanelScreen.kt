@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -144,8 +146,9 @@ private fun MemoryPanel(model: AppModel) {
         item {
             if (scope != null && scope != "shared") return@item
             SectionCard(
-                title = "Shared",
+                title = "Shared · ${model.sharedMemories.size}",
                 footer = sharedFooter,
+                expandable = true,
             ) {
                 if (shared.isEmpty()) {
                     Text(
@@ -157,19 +160,15 @@ private fun MemoryPanel(model: AppModel) {
                 for (memory in shared) {
                     MemoryRow(model = model, memory = memory, agentID = null)
                 }
-                TextButton(onClick = { model.openMemoryForm("", agentID = null) }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("New Shared Memory")
-                }
             }
         }
 
         items(scopedAgents.filter { scope != "shared" }, key = { it.id }) { agent ->
             val memories = model.agentMemories[agent.id].orEmpty().filter(matches)
+            val totalMemories = model.agentMemories[agent.id].orEmpty().size
             SectionCard(
-                title = agent.name,
-                footer = "What ${agent.name} remembers between chats.",
+                title = "${agent.name} · $totalMemories",
+                expandable = true,
             ) {
                 if (memories.isEmpty()) {
                     Text(
@@ -180,16 +179,6 @@ private fun MemoryPanel(model: AppModel) {
                 }
                 for (memory in memories) {
                     MemoryRow(model = model, memory = memory, agentID = agent.id)
-                }
-                Text(
-                    text = "${memories.size} personal memor${if (memories.size == 1) "y" else "ies"}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(onClick = { model.openMemoryForm("", agentID = agent.id) }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("New Memory")
                 }
             }
         }
@@ -203,33 +192,27 @@ private fun MemoryRow(
     agentID: String?,
 ) {
     val isPending = memory.id.startsWith("pending-")
-    var expanded by remember(memory.id) { mutableStateOf(false) }
     var confirmingDelete by remember(memory.id) { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded }
-                .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
+                .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 text = memory.content,
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = if (expanded) Int.MAX_VALUE else 2,
-                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = { model.openMemoryForm(memory.id, agentID = agentID) }, enabled = !isPending) { Text("Edit") }
-            TextButton(onClick = { confirmingDelete = true }, enabled = !isPending) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            TextButton(
+                onClick = { confirmingDelete = true },
+                enabled = !isPending,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) { Text("Delete") }
         }
-        Text(
-            text = if (agentID == null) "Shared" else "Personal",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp),
-        )
     }
     if (confirmingDelete) {
         AlertDialog(
@@ -240,7 +223,9 @@ private fun MemoryRow(
                 TextButton(onClick = {
                     confirmingDelete = false
                     model.deleteMemory(memory.id, agentID = agentID)
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") } },
         )
@@ -762,23 +747,51 @@ private fun MCPServerRow(
 fun SectionCard(
     title: String,
     footer: String? = null,
+    expandable: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    var expanded by remember(title) { mutableStateOf(true) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
+        if (expandable) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    .clickable { expanded = !expanded }
+                    .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
+                    .heightIn(min = 48.dp)
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                content()
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Collapse $title" else "Expand $title",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        } else {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
+        if (!expandable || expanded) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    content()
+                }
             }
         }
         if (!footer.isNullOrEmpty()) {
