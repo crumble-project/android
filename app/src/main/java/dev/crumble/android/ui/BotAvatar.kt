@@ -1,5 +1,9 @@
 package dev.crumble.android.ui
 
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
@@ -7,9 +11,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -29,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import dev.crumble.android.model.Agent
 import kotlin.math.PI
 import kotlin.math.floor
@@ -225,9 +232,25 @@ fun BotAvatarView(
 ) {
     val look = remember(seed) { BotLook(seed) }
     val eyes = if (state == BotState.sleeping) BotEyes.sleepy else BotEyes.neutral
+    val context = LocalContext.current
+    val resolver = context.contentResolver
+    var animationsEnabled by remember(resolver) {
+        mutableStateOf(Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f)
+    }
+    DisposableEffect(resolver) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                animationsEnabled = Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
+            }
+        }
+        resolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false, observer)
+        observer.onChange(false)
+        onDispose { resolver.unregisterContentObserver(observer) }
+    }
+    val shouldAnimate = live && animationsEnabled
     var timeSec by remember { mutableDoubleStateOf(System.currentTimeMillis() / 1000.0) }
 
-    if (live) {
+    if (shouldAnimate) {
         LaunchedEffect(state, look.hash) {
             if (state == BotState.working || state == BotState.sleeping) {
                 while (isActive) {
@@ -247,8 +270,8 @@ fun BotAvatarView(
         }
     }
 
-    val pose = remember(live, state, timeSec, look.hash) {
-        if (!live) {
+    val pose = remember(shouldAnimate, state, timeSec, look.hash) {
+        if (!shouldAnimate) {
             BotPose.rest
         } else {
             when (state) {
