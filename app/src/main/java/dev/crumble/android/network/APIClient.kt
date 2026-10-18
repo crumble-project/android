@@ -16,6 +16,10 @@ import dev.crumble.android.model.ProviderStatus
 import dev.crumble.android.model.Schedule
 import dev.crumble.android.model.SharedSkill
 import dev.crumble.android.model.nilIfEmpty
+import dev.crumble.android.push.PushInfo
+import dev.crumble.android.push.PushPresence
+import dev.crumble.android.push.PushRegistration
+import dev.crumble.android.push.PushRegistrationResult
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -443,6 +447,35 @@ class APIClient(
 
     suspend fun activityFeed(): ActivityFeedResponse =
         call("GET", "/v1/activity/feed", ActivityFeedResponse.serializer())
+
+    suspend fun pushInfo(): PushInfo =
+        call("GET", "/v1/push", PushInfo.serializer())
+
+    suspend fun registerPushDevice(installationId: String, registration: PushRegistration): PushRegistrationResult {
+        val id = pushInstallationPath(installationId)
+        val payload = CrumblePatchJson.encodeToString(
+            PushRegistration.serializer(),
+            registration,
+        ).toByteArray(StandardCharsets.UTF_8)
+        return call("PUT", "/v1/push/devices/$id", PushRegistrationResult.serializer(), body = payload)
+    }
+
+    suspend fun unregisterPushDevice(installationId: String) {
+        perform("DELETE", "/v1/push/devices/${pushInstallationPath(installationId)}")
+    }
+
+    suspend fun updatePushPresence(installationId: String, presence: PushPresence) {
+        val payload = CrumblePatchJson.encodeToString(
+            PushPresence.serializer(),
+            presence,
+        ).toByteArray(StandardCharsets.UTF_8)
+        perform("PUT", "/v1/push/devices/${pushInstallationPath(installationId)}/presence", body = payload)
+    }
+
+    private fun pushInstallationPath(installationId: String): String {
+        require(installationId.isNotBlank()) { "installationId must not be blank" }
+        return escape(installationId)
+    }
 
     suspend fun providers(): List<ProviderStatus> =
         call("GET", "/v1/providers", ListSerializer(ProviderStatus.serializer()))

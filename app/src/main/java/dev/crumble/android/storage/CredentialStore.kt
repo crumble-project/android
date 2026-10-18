@@ -31,7 +31,10 @@ class InMemoryCredentialStore(
 /**
  * Stores server credentials encrypted with an Android Keystore AES-GCM key under `dev.crumble.android`.
  */
-class AndroidKeyStoreCredentials(context: Context) : CredentialStore {
+class AndroidKeyStoreCredentials(
+    context: Context,
+    private val synchronousWrites: Boolean = false,
+) : CredentialStore {
     private val prefs = context.applicationContext.getSharedPreferences(SERVICE, Context.MODE_PRIVATE)
 
     override fun read(account: String): String? {
@@ -45,7 +48,9 @@ class AndroidKeyStoreCredentials(context: Context) : CredentialStore {
 
     override fun write(account: String, value: String) {
         val encrypted = encrypt(value)
-        prefs.edit().putString(account, encrypted).apply()
+        val edit = prefs.edit().putString(account, encrypted)
+        if (synchronousWrites) check(edit.commit()) { "Could not persist notification state" }
+        else edit.apply()
     }
 
     private fun getOrCreateSecretKey(): SecretKey {

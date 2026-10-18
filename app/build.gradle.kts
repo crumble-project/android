@@ -4,6 +4,12 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
 }
 
+// Firebase's Google services plugin reads google-services.json. Keep it optional so
+// contributors can build and run the app without a Firebase project configured.
+if (file("google-services.json").isFile) {
+  apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "dev.crumble.android"
     compileSdk = 36
@@ -44,6 +50,15 @@ kotlin {
 }
 
 dependencies {
+  implementation(platform(libs.firebase.bom))
+  implementation(libs.firebase.messaging)
+  implementation(libs.androidx.work.runtime.ktx)
+  constraints {
+    implementation(libs.androidx.fragment) {
+      because("FCM's Play Services dependency requests Fragment 1.1.0, incompatible with Activity Result APIs")
+    }
+  }
+
   val composeBom = platform(libs.androidx.compose.bom)
   implementation(composeBom)
   androidTestImplementation(composeBom)

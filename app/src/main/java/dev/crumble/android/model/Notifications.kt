@@ -8,10 +8,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import dev.crumble.android.MainActivity
+import dev.crumble.android.R
 
 /** What the owner is looking at, which decides whether an event is worth a notification. */
 data class NotificationContext(
@@ -45,13 +47,21 @@ fun notification(forEvent: ActivityEvent, inContext: NotificationContext): Notif
 
 interface ReplyNotifier {
     fun post(event: ActivityEvent, title: String, body: String)
+
+    fun handle(event: ActivityEvent, context: NotificationContext) {
+        val note = notification(event, context) ?: return
+        post(event, note.title, note.body)
+    }
 }
 
 object NoOpNotifier : ReplyNotifier {
     override fun post(event: ActivityEvent, title: String, body: String) = Unit
 }
 
-class AndroidReplyNotifier(private val context: Context) : ReplyNotifier {
+class AndroidReplyNotifier(
+    private val context: Context,
+    private val connectionIdentity: () -> String? = { null },
+) : ReplyNotifier {
     init {
         createChannel()
     }
@@ -77,6 +87,11 @@ class AndroidReplyNotifier(private val context: Context) : ReplyNotifier {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_AGENT_ID, event.agentId)
+            putExtra(EXTRA_SERVER_ID, event.serverId)
+            putExtra(EXTRA_CONNECTION_ID, connectionIdentity())
+            data = Uri.Builder().scheme("crumble-notification").authority("reply")
+                .appendPath(event.serverId ?: connectionIdentity().orEmpty())
+                .appendPath(event.agentId).build()
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
@@ -85,7 +100,7 @@ class AndroidReplyNotifier(private val context: Context) : ReplyNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.sym_action_chat)
+            .setSmallIcon(R.drawable.ic_stat_crumble)
             .setContentTitle(title)
             .setContentText(body)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -101,5 +116,7 @@ class AndroidReplyNotifier(private val context: Context) : ReplyNotifier {
     companion object {
         const val CHANNEL_ID = "crumble_replies"
         const val EXTRA_AGENT_ID = "dev.crumble.android.AGENT_ID"
+        const val EXTRA_SERVER_ID = "dev.crumble.android.SERVER_ID"
+        const val EXTRA_CONNECTION_ID = "dev.crumble.android.CONNECTION_ID"
     }
 }

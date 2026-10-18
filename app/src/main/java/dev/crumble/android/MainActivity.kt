@@ -13,20 +13,28 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import dev.crumble.android.model.AndroidReplyNotifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.storage.AndroidKeyStoreCredentials
 import dev.crumble.android.theme.CrumbleTheme
 import dev.crumble.android.ui.CrumbleAppScreen
+import dev.crumble.android.push.PushRuntime
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var model: AppModel
+    private val push by lazy { PushRuntime.get(applicationContext) }
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) {}
+    ) { if (::model.isInitialized) model.client?.let { push.configure(it) } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,16 +43,33 @@ class MainActivity : ComponentActivity() {
 
         model = AppModel(
             credentials = AndroidKeyStoreCredentials(applicationContext),
-            notifier = AndroidReplyNotifier(applicationContext),
+            notifier = push,
             scope = lifecycleScope,
             environment = System.getenv(),
         )
+        model.client?.let { push.configure(it) }
         model.refresh()
         model.followActivity()
         handleIncomingIntent(intent)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (isActive) {
+                    push.refreshPresence()
+                    delay(30_000)
+                }
+            }
+        }
 
         enableEdgeToEdge()
         setContent {
+            LaunchedEffect(model) {
+                snapshotFlow { model.client }.collect { api -> api?.let { push.configure(it) } }
+            }
+            LaunchedEffect(model) {
+                snapshotFlow { model.appActive to model.route }.collect { (active, route) ->
+                    push.updatePresence(active, route)
+                }
+            }
             CrumbleTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -65,6 +90,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         if (::model.isInitialized) {
             model.appActive = true
+            model.client?.let { push.configure(it) }
+            push.updatePresence(true, model.route)
         }
     }
 
@@ -72,12 +99,13 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         if (::model.isInitialized) {
             model.appActive = false
+            push.updatePresence(false, model.route)
         }
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent == null || !::model.isInitialized) return
-        val agentId = intent.getStringExtra(AndroidReplyNotifier.EXTRA_AGENT_ID)
+        val agentId = push.agentFromIntent(intent)
         if (!agentId.isNullOrEmpty()) {
             model.selectAgent(agentId)
         }

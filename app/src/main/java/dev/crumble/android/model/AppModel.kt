@@ -574,8 +574,7 @@ class AppModel(
             }
         }
         val context = NotificationContext(appActive = appActive, route = route)
-        val note = notification(forEvent = event, inContext = context) ?: return
-        notifier.post(event, title = note.title, body = note.body)
+        notifier.handle(event, context)
     }
 
     fun loadOlder() {
