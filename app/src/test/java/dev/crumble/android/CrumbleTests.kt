@@ -8,6 +8,7 @@ import dev.crumble.android.model.AttachmentError
 import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
+import dev.crumble.android.model.displayLabel
 import dev.crumble.android.model.Memory
 import dev.crumble.android.model.MentionCompletion
 import dev.crumble.android.model.Message
@@ -47,6 +48,7 @@ import java.time.ZonedDateTime
 import java.util.Collections
 import kotlin.math.abs
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -95,8 +97,101 @@ class StubTransport(
     }
 }
 
+/** A transport whose response can be released after local optimistic state changes. */
+private class GatedTransport(
+    private val responseStatus: Int,
+    private val responseBody: String,
+) : HttpTransport {
+    val requests: MutableList<HttpRequestData> = Collections.synchronizedList(mutableListOf())
+    val gate = CompletableDeferred<Unit>()
+
+    override suspend fun execute(request: HttpRequestData): HttpResponseData {
+        requests.add(request)
+        gate.await()
+        return HttpResponseData(responseStatus, responseBody.toByteArray(StandardCharsets.UTF_8))
+    }
+
+    override suspend fun openStream(request: HttpRequestData): HttpStreamResponse {
+        throw UnsupportedOperationException("streaming is not used by gated mutation tests")
+    }
+}
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class CrumbleTests {
+
+    @Test
+    fun personalSkillFailureRestoresDraftAndSkillsWithoutClobberingNewerAgentFields() = runTest {
+        val oldSkill = Skill(id = "old", name = "Old", instructions = "Keep this")
+        val transport = GatedTransport(500, "{\"error\":\"busy\"}")
+        val client = APIClient(baseURL = "http://crumble.test/", token = "token", transport = transport)
+        val model = AppModel(client = client, scope = TestScope(StandardTestDispatcher(testScheduler)))
+        model.route = Route.Skills
+        model.agents = listOf(Agent(id = "a1", name = "Before", skills = listOf(oldSkill)))
+        model.skillDraft = dev.crumble.android.model.SkillDraft(
+            skillID = "",
+            agentID = "a1",
+            name = "New skill",
+            instructions = "Do something",
+        )
+
+        model.saveSkill()
+        testScheduler.runCurrent()
+        assertEquals("New skill", model.agents.single().skills?.last()?.name)
+        model.agents = model.agents.map { it.copy(name = "Newer name") }
+        transport.gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals("Newer name", model.agents.single().name)
+        assertEquals(listOf(oldSkill), model.agents.single().skills)
+        assertEquals("New skill", model.skillDraft?.name)
+        assertTrue(model.errorText.contains("busy"))
+    }
+
+    @Test
+    fun sharedSkillAssignmentFailureRollsBackMembershipWithoutClobberingNewerAgentFields() = runTest {
+        val transport = GatedTransport(500, "{\"error\":\"busy\"}")
+        val client = APIClient(baseURL = "http://crumble.test/", token = "token", transport = transport)
+        val model = AppModel(client = client, scope = TestScope(StandardTestDispatcher(testScheduler)))
+        model.sharedSkills = listOf(dev.crumble.android.model.SharedSkill(id = "shared-1", name = "Shared", instructions = "Use it"))
+        model.agents = listOf(Agent(id = "a1", name = "Before", sharedSkills = emptyList()))
+
+        model.setSharedSkillEnabled("a1", "shared-1", enabled = true)
+        testScheduler.runCurrent()
+        assertEquals(listOf("shared-1"), model.agents.single().sharedSkills)
+        model.agents = model.agents.map { it.copy(name = "Newer name") }
+        transport.gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals("Newer name", model.agents.single().name)
+        assertEquals(emptyList<String>(), model.agents.single().sharedSkills)
+        assertTrue(model.errorText.contains("busy"))
+    }
+
+    @Test
+    fun runningPartialChatShowsOnlyThinkingUntilTurnCompletes() {
+        val partial = ChatSnapshot(status = "running", partial = "draft text", agentId = "a1")
+        assertEquals(listOf(ChatRow.Thinking), ChatRow.rows(emptyList(), partial, hasMore = false))
+
+        val first = Message(id = "m1", role = "assistant", blocks = JsonPrimitive("first"))
+        val second = Message(id = "m2", role = "assistant", blocks = JsonPrimitive("second"))
+        val completed = ChatRow.rows(listOf(first, second), ChatSnapshot(status = "idle", partial = null), hasMore = false)
+        assertEquals(listOf("m1", "m2"), completed.filterIsInstance<ChatRow.MessageRow>().map { it.message.id })
+        assertTrue(completed.none { it is ChatRow.Partial || it is ChatRow.Thinking })
+    }
+
+    @Test
+    fun activityFeedDecodesOperationalRecordsAndDetails() = runTest {
+        val (client, stub) = StubTransport.client { req ->
+            assertEquals("/v1/activity/feed", req.pathWithQuery)
+            200 to """{"activities":[{"id":"evt-1","agentId":"a1","agentName":"Atlas","entryId":"run-1","timestamp":1720000000000,"kind":"tool-call","details":{"toolName":"search","query":"calendar"}}],"hasMore":true}"""
+        }
+        val feed = client.activityFeed()
+        assertTrue(feed.hasMore)
+        assertEquals("evt-1", feed.activities.single().id)
+        assertEquals("tool-call", feed.activities.single().kind)
+        assertEquals("search", feed.activities.single().displayLabel())
+        assertEquals("/v1/activity/feed", stub.requests.single().pathWithQuery)
+    }
 
     @Test
     fun agentsSendBearerAndDecode() = runTest {

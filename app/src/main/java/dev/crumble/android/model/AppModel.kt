@@ -100,6 +100,8 @@ data class MemoryDraft(
 data class SkillDraft(
     val id: UUID = UUID.randomUUID(),
     val skillID: String,
+    /** Null for a shared library skill; fixed bot owner for personal skills. */
+    var agentID: String? = null,
     var name: String = "",
     var instructions: String = "",
 )
@@ -257,6 +259,7 @@ class AppModel(
     var sharedSkills by mutableStateOf<List<SharedSkill>>(emptyList())
     var schedules by mutableStateOf<List<Schedule>>(emptyList())
     var executions by mutableStateOf<List<Execution>>(emptyList())
+    var activities by mutableStateOf<List<ActivityRecord>>(emptyList())
     var mcpServers by mutableStateOf<List<MCPServer>>(emptyList())
     var providers by mutableStateOf<List<ProviderStatus>>(emptyList())
     var models by mutableStateOf<List<ModelSummary>>(emptyList())
@@ -1226,8 +1229,8 @@ class AppModel(
             }
             Route.Activity -> {
                 request { api ->
-                    val items = api.executions()
-                    return@request { executions = items }
+                    val feed = api.activityFeed()
+                    return@request { activities = feed.activities }
                 }
             }
             Route.Integrations -> {
@@ -1771,11 +1774,14 @@ class AppModel(
     fun usableServers(forAgentID: String): List<MCPServer> =
         mcpServers.filter { it.agentId == null || it.agentId == forAgentID }
 
-    fun openSkillForm(id: String) {
-        var form = SkillDraft(skillID = id)
-        val skill = sharedSkills.firstOrNull { it.id == id }
-        if (skill != null) {
-            form = form.copy(name = skill.name, instructions = skill.instructions)
+    fun openSkillForm(id: String, agentID: String? = null) {
+        var form = SkillDraft(skillID = id, agentID = agentID)
+        if (agentID == null) {
+            val skill = sharedSkills.firstOrNull { it.id == id }
+            if (skill != null) form = form.copy(name = skill.name, instructions = skill.instructions)
+        } else {
+            val skill = agents.firstOrNull { it.id == agentID }?.skills.orEmpty().firstOrNull { it.id == id }
+            if (skill != null) form = form.copy(name = skill.name, instructions = skill.instructions)
         }
         skillDraft = form
     }
@@ -1789,6 +1795,10 @@ class AppModel(
             return
         }
         val isNew = form.skillID.isEmpty()
+        if (form.agentID != null) {
+            saveAgentSkill(form, name, instructions, isNew)
+            return
+        }
         val provisionalID = if (isNew) "pending-skill-${newRequestID()}" else form.skillID
         val provisional = SharedSkill(id = provisionalID, name = name, instructions = instructions, source = null, path = null)
         val old = sharedSkills.firstOrNull { it.id == form.skillID }
@@ -1828,6 +1838,57 @@ class AppModel(
         )
     }
 
+    private fun saveAgentSkill(form: SkillDraft, name: String, instructions: String, isNew: Boolean) {
+        val agentID = form.agentID ?: return
+        val oldSkills = agents.firstOrNull { it.id == agentID }?.skills.orEmpty()
+        if (agents.none { it.id == agentID }) return
+        val skillID = if (isNew) UUID.randomUUID().toString() else form.skillID
+        val updatedSkill = Skill(
+            id = skillID,
+            name = name,
+            instructions = instructions,
+        )
+        val updatedSkills = if (isNew) oldSkills + updatedSkill else oldSkills.map { if (it.id == form.skillID) updatedSkill else it }
+        skillDraft = null
+        optimisticMutation(
+            key = "agent-skills:$agentID",
+            update = { agents = agents.map { if (it.id == agentID) it.copy(skills = updatedSkills) else it } },
+            rollback = {
+                agents = agents.map { if (it.id == agentID) it.copy(skills = oldSkills) else it }
+                if (route == Route.Skills && skillDraft == null) skillDraft = form
+            },
+            work = { api ->
+                val patch = mapOf<String, JsonElement>(
+                    "skills" to CrumbleJson.encodeToJsonElement(ListSerializer(Skill.serializer()), updatedSkills),
+                )
+                val saved = api.updateAgent(agentID, patch)
+                return@optimisticMutation {
+                    agents = agents.map { current -> if (current.id == agentID) current.copy(skills = saved.skills) else current }
+                }
+            },
+        )
+    }
+
+    fun deleteAgentSkill(agentID: String, skillID: String) {
+        val oldSkills = agents.firstOrNull { it.id == agentID }?.skills.orEmpty()
+        if (agents.none { it.id == agentID }) return
+        val updatedSkills = oldSkills.filterNot { it.id == skillID }
+        optimisticMutation(
+            key = "agent-skills:$agentID",
+            update = { agents = agents.map { if (it.id == agentID) it.copy(skills = updatedSkills) else it } },
+            rollback = { agents = agents.map { if (it.id == agentID) it.copy(skills = oldSkills) else it } },
+            work = { api ->
+                val patch = mapOf<String, JsonElement>(
+                    "skills" to CrumbleJson.encodeToJsonElement(ListSerializer(Skill.serializer()), updatedSkills),
+                )
+                val saved = api.updateAgent(agentID, patch)
+                return@optimisticMutation {
+                    agents = agents.map { current -> if (current.id == agentID) current.copy(skills = saved.skills) else current }
+                }
+            },
+        )
+    }
+
     fun deleteSharedSkill(id: String) {
         val index = sharedSkills.indexOfFirst { it.id == id }
         if (index < 0) return
@@ -1860,6 +1921,25 @@ class AppModel(
             work = { api ->
                 api.deleteSharedSkill(id)
                 null
+            },
+        )
+    }
+
+    fun setSharedSkillEnabled(agentID: String, skillID: String, enabled: Boolean) {
+        if (agents.none { it.id == agentID } || sharedSkills.none { it.id == skillID && !it.isDefault }) return
+        val current = agents.first { it.id == agentID }.sharedSkills.orEmpty()
+        val next = if (enabled) (current + skillID).distinct() else current.filterNot { it == skillID }
+        if (next == current) return
+        optimisticMutation(
+            key = "agent-shared-skills:$agentID",
+            update = { agents = agents.map { if (it.id == agentID) it.copy(sharedSkills = next) else it } },
+            rollback = { agents = agents.map { if (it.id == agentID) it.copy(sharedSkills = current) else it } },
+            work = { api ->
+                val patch = mapOf<String, JsonElement>("sharedSkills" to JsonArray(next.map { JsonPrimitive(it) }))
+                val saved = api.updateAgent(agentID, patch)
+                return@optimisticMutation {
+                    agents = agents.map { agent -> if (agent.id == agentID) agent.copy(sharedSkills = saved.sharedSkills) else agent }
+                }
             },
         )
     }

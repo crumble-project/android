@@ -249,6 +249,34 @@ data class ActivityEvent(
     val lastMessage: String? = null,
 )
 
+@Serializable
+data class ActivityRecord(
+    val id: String = "",
+    val agentId: String = "",
+    val agentName: String = "",
+    val entryId: String? = null,
+    val timestamp: Long? = null,
+    val kind: String = "",
+    val details: JsonElement? = null,
+)
+
+@Serializable
+data class ActivityFeedResponse(
+    val activities: List<ActivityRecord> = emptyList(),
+    val hasMore: Boolean = false,
+)
+
+fun ActivityRecord.displayLabel(): String {
+    val objectDetails = details as? JsonObject
+    val communication = objectDetails?.get("communication") as? JsonObject
+    val from = (communication?.get("fromName") as? JsonPrimitive)?.contentOrNull
+    val to = (communication?.get("toName") as? JsonPrimitive)?.contentOrNull
+    if (!from.isNullOrEmpty() && !to.isNullOrEmpty()) return "$from → $to"
+    return listOf("name", "toolName", "serverName")
+        .firstNotNullOfOrNull { (objectDetails?.get(it) as? JsonPrimitive)?.contentOrNull }
+        ?: kind.replace('-', ' ').replaceFirstChar { it.uppercase() }
+}
+
 /** Reads the visible text of message content: a string, text parts, or a text object. */
 fun contentText(value: JsonElement?): String {
     when (value) {
@@ -313,10 +341,7 @@ sealed class ChatRow {
                 rows.add(MessageRow(message))
             }
             if (snapshot != null) {
-                val partial = snapshot.partial
-                if (!partial.isNullOrEmpty()) {
-                    rows.add(Partial(partial))
-                } else if (snapshot.isRunning) {
+                if (snapshot.isRunning) {
                     rows.add(Thinking)
                 }
                 val error = snapshot.error

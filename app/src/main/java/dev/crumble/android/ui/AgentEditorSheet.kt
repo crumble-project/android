@@ -379,112 +379,17 @@ fun AgentEditorDialog(
                 item {
                     SectionCard(
                         title = "Skills",
-                        footer = "Every bot follows the shared defaults, along with its personal skills and the optional shared skills you turn on. Manage shared skills under Skills.",
+                        footer = "Every bot follows the shared defaults, along with its personal skills and the optional shared skills you turn on.",
                     ) {
-                        draft.skills.forEachIndexed { idx, skill ->
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(10.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        OutlinedTextField(
-                                            value = skill.name,
-                                            onValueChange = { newName ->
-                                                val updated = draft.skills.toMutableList()
-                                                updated[idx] = skill.copy(name = newName)
-                                                model.agentDraft = draft.copy(skills = updated)
-                                            },
-                                            placeholder = { Text("Skill name") },
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        IconButton(
-                                            onClick = {
-                                                val updated = draft.skills.filterNot { it.id == skill.id }
-                                                model.agentDraft = draft.copy(skills = updated)
-                                            },
-                                        ) {
-                                            Icon(Icons.Default.Close, contentDescription = "Remove Skill")
-                                        }
-                                    }
-                                    OutlinedTextField(
-                                        value = skill.instructions,
-                                        onValueChange = { newInst ->
-                                            val updated = draft.skills.toMutableList()
-                                            updated[idx] = skill.copy(instructions = newInst)
-                                            model.agentDraft = draft.copy(skills = updated)
-                                        },
-                                        placeholder = { Text("What the agent should do") },
-                                        minLines = 2,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                }
-                            }
-                        }
-                        TextButton(
-                            onClick = {
-                                model.agentDraft = draft.copy(skills = draft.skills + Skill())
-                            },
-                        ) {
-                            Text("Add Skill…")
-                        }
-
-                        for (skill in model.sharedSkills) {
-                            if (skill.isDefault) {
-                                var expanded by remember(skill.id) { mutableStateOf(false) }
-                                Column(modifier = Modifier.fillMaxWidth()) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { expanded = !expanded }
-                                            .padding(vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text(skill.name, modifier = Modifier.weight(1f))
-                                        Text(
-                                            text = "Default · Every bot",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                        Icon(
-                                            imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                            contentDescription = null,
-                                        )
-                                    }
-                                    AnimatedVisibility(visible = expanded) {
-                                        Column(modifier = Modifier.padding(bottom = 6.dp)) {
-                                            Text(skill.instructions, style = MaterialTheme.typography.bodySmall)
-                                            if (!skill.path.isNullOrEmpty()) {
-                                                Text(
-                                                    text = "Source: ${skill.path}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                val checked = draft.sharedSkills.contains(skill.id)
-                                ToggleRow(
-                                    label = skill.name,
-                                    subtitle = "Shared skill",
-                                    checked = checked,
-                                    onCheckedChange = { enabled ->
-                                        val next = if (enabled) draft.sharedSkills + skill.id else draft.sharedSkills - skill.id
-                                        model.agentDraft = draft.copy(sharedSkills = next)
-                                    },
-                                )
-                            }
-                        }
+                        Text(
+                            text = "Manage skills in Workspace → Skills, where you can create, edit, delete, and assign them to bots.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "${draft.skills.size} personal · ${draft.sharedSkills.size} shared assigned",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
 

@@ -75,6 +75,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -246,11 +248,18 @@ fun ChatRowView(
         }
         is ChatRow.Thinking -> {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Working…" },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                BotAvatarView(
+                    agent = agent,
+                    size = 24.dp,
+                    state = BotState.working,
+                    live = true,
+                )
                 Text(
                     text = "${agent.name} is working…",
                     style = MaterialTheme.typography.bodySmall,
@@ -339,36 +348,47 @@ fun MessageView(
                     }
                     ReplyQuote(model = model, message = message)
                     SentAttachments(model = model, message = message)
+                    if (message.text.isEmpty() && message.attachments.orEmpty().isNotEmpty() && replyable) {
+                        ReplyButton(onClick = { model.replyTo = message })
+                    }
                     if (message.text.isNotEmpty()) {
-                        Box {
-                            ChatBubble(
-                                owner = owner,
-                                modifier = Modifier
-                                    .widthIn(max = 310.dp)
-                                    .combinedClickable(
-                                        onClick = {},
-                                        onLongClick = { menuExpanded = true },
-                                    ),
-                            ) {
-                                Text(
-                                    text = message.text,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = LocalContentColor.current,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            if (replyable) {
+                                ReplyButton(onClick = { model.replyTo = message })
+                            }
+                            Box {
+                                ChatBubble(
+                                    owner = owner,
+                                    modifier = Modifier
+                                        .widthIn(max = 310.dp)
+                                        .combinedClickable(
+                                            onClick = {},
+                                            onLongClick = { menuExpanded = true },
+                                        ),
+                                ) {
+                                    Text(
+                                        text = message.text,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = LocalContentColor.current,
+                                    )
+                                }
+                                MessageContextMenu(
+                                    expanded = menuExpanded,
+                                    onDismiss = { menuExpanded = false },
+                                    replyable = replyable,
+                                    onReply = {
+                                        model.replyTo = message
+                                        menuExpanded = false
+                                    },
+                                    onCopy = {
+                                        clipboard.setText(AnnotatedString(message.text))
+                                        menuExpanded = false
+                                    },
                                 )
                             }
-                            MessageContextMenu(
-                                expanded = menuExpanded,
-                                onDismiss = { menuExpanded = false },
-                                replyable = replyable,
-                                onReply = {
-                                    model.replyTo = message
-                                    menuExpanded = false
-                                },
-                                onCopy = {
-                                    clipboard.setText(AnnotatedString(message.text))
-                                    menuExpanded = false
-                                },
-                            )
                         }
                     }
                     if (message.deliveryState != MessageDeliveryState.confirmed) {
@@ -433,22 +453,25 @@ fun MessageView(
                         },
                     )
                 }
-                if (replyable) {
-                    IconButton(
-                        onClick = { model.replyTo = message },
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Reply,
-                            contentDescription = "Reply",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                if (replyable) ReplyButton(onClick = { model.replyTo = message })
                 Spacer(modifier = Modifier.width(24.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun ReplyButton(onClick: () -> Unit) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.size(32.dp),
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.Reply,
+            contentDescription = "Reply",
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

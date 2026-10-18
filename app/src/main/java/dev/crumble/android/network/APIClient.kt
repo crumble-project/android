@@ -1,6 +1,7 @@
 package dev.crumble.android.network
 
 import dev.crumble.android.model.Agent
+import dev.crumble.android.model.ActivityFeedResponse
 import dev.crumble.android.model.ChatHistoryResponse
 import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
@@ -439,6 +440,9 @@ class APIClient(
 
     suspend fun executions(): List<Execution> =
         call("GET", "/v1/executions", ListSerializer(Execution.serializer()))
+
+    suspend fun activityFeed(): ActivityFeedResponse =
+        call("GET", "/v1/activity/feed", ActivityFeedResponse.serializer())
 
     suspend fun providers(): List<ProviderStatus> =
         call("GET", "/v1/providers", ListSerializer(ProviderStatus.serializer()))
