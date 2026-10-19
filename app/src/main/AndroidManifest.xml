@@ -39,7 +39,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <!-- This callback has no URI host; Android ignores path filters without one. -->
-                <data android:scheme="dev.crumble.android" />
+                <data android:scheme="${applicationId}" />
             </intent-filter>
         </activity>
     </application>

@@ -1,5 +1,6 @@
 package dev.crumble.android.push
 
+import dev.crumble.android.BuildConfig
 import dev.crumble.android.model.ActivityEvent
 import dev.crumble.android.model.CrumbleJson
 import kotlinx.serialization.Serializable
@@ -19,7 +20,7 @@ data class PushRegistration(
     val transport: String = "fcm",
     val token: String,
     val environment: String = "production",
-    val bundleId: String? = "dev.crumble.android",
+    val bundleId: String? = BuildConfig.APPLICATION_ID,
     val enabled: Boolean = true,
 )
 

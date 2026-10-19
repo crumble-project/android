@@ -18,7 +18,7 @@ python3 scripts/contract.py check
 
 ## Connect to a server
 
-Open the navigation drawer › **Settings**, enter the server URL (`http://10.0.2.2:7337` on the Android Emulator for a host server on `127.0.0.1:7337`, or a LAN/HTTPS address on a physical device) and `server-token`, and tap **Save Connection**. Credentials are stored encrypted in the Android Keystore.
+Open the navigation drawer › **Settings**, enter the server URL (`http://10.0.2.2:7337` on the Android Emulator for a host server on `127.0.0.1:7337`, or a LAN/HTTPS address on a physical device) and `server-token`, and tap **Save Connection**. Credentials are stored encrypted in the Android Keystore. Debug builds install as **Crumble Dev** (`ng.crumbli.android.dev`) beside the release app (`ng.crumbli.android`), so each keeps its own connection; the sign-in callback scheme is the application ID, for example `ng.crumbli.android:/oauth/callback`.
 
 ## Shared API contract
 
@@ -33,4 +33,4 @@ python3 scripts/contract.py update --local EXPORT_DIR       # Update from a loca
 
 ## Push notifications (optional)
 
-Without `app/google-services.json`, the app builds cleanly and posts local notifications while connected to `/v1/events`. To enable background delivery via Firebase Cloud Messaging (FCM), place `google-services.json` in `app/` for `dev.crumble.android` and set `CRUMBLE_FCM_SERVICE_ACCOUNT_PATH` on the server (see `bot/docs/native-push.md`).
+Without `app/google-services.json`, the app builds cleanly and posts local notifications while connected to `/v1/events`. To enable background delivery via Firebase Cloud Messaging (FCM), place `google-services.json` registering `ng.crumbli.android` and `ng.crumbli.android.dev` in `app/` and set `CRUMBLE_FCM_SERVICE_ACCOUNT_PATH` on the server (see `bot/docs/native-push.md`).

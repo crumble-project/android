@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.crumble.android.BuildConfig
 import dev.crumble.android.network.APIClient
 import dev.crumble.android.network.APIError
 import dev.crumble.android.network.friendlyError
@@ -1627,7 +1628,7 @@ class AppModel(
     }
 
     companion object {
-        const val oauthCallbackScheme = "dev.crumble.android"
+        const val oauthCallbackScheme = BuildConfig.APPLICATION_ID
         const val oauthRedirectURI = "$oauthCallbackScheme:/oauth/callback"
     }
 
