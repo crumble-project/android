@@ -179,14 +179,6 @@ fun AgentEditorDialog(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        OutlinedTextField(
-                            value = draft.folder,
-                            onValueChange = { model.agentDraft = draft.copy(folder = it) },
-                            label = { Text("Folder") },
-                            placeholder = { Text("Personal") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
