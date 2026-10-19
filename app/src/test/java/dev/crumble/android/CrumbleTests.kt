@@ -352,7 +352,7 @@ class CrumbleTests {
         val start = client.startMCPSignIn("s1", redirectURI = AppModel.oauthRedirectURI)
         assertTrue(start.authorizationUrl?.startsWith("https://auth.example.com/") == true)
         val sent = String(stub.requests.last().body ?: ByteArray(0), StandardCharsets.UTF_8)
-        assertTrue(sent.contains("dev.crumble.android:/oauth/callback"))
+        assertTrue(sent.contains(AppModel.oauthRedirectURI))
         val server = client.finishMCPSignIn("s1", code = "c", state = "x", iss = "https://auth.example.com")
         assertEquals("oauth", server.auth)
         val finished = String(stub.requests.last().body ?: ByteArray(0), StandardCharsets.UTF_8)
@@ -944,22 +944,22 @@ class CrumbleTests {
 
     @Test
     fun signInCallbacksCarryACodeOrAReason() {
-        val ok = oauthResult("dev.crumble.android:/oauth/callback?code=abc&state=xyz")
+        val ok = oauthResult("${AppModel.oauthRedirectURI}?code=abc&state=xyz")
         assertEquals("abc", ok.code)
         assertEquals("xyz", ok.state)
         assertNull(ok.iss)
 
-        val issued = oauthResult("dev.crumble.android:/oauth/callback?code=abc&state=xyz&iss=https%3A%2F%2Fexecutor.sh%2Fapi%2Fauth")
+        val issued = oauthResult("${AppModel.oauthRedirectURI}?code=abc&state=xyz&iss=https%3A%2F%2Fexecutor.sh%2Fapi%2Fauth")
         assertEquals("https://executor.sh/api/auth", issued.iss)
 
         try {
-            oauthResult("dev.crumble.android:/oauth/callback?error=access_denied&error_description=User%20declined")
+            oauthResult("${AppModel.oauthRedirectURI}?error=access_denied&error_description=User%20declined")
             fail("expected SignInError")
         } catch (_: SignInError) {
         }
 
         try {
-            oauthResult("dev.crumble.android:/oauth/callback")
+            oauthResult("${AppModel.oauthRedirectURI}")
             fail("expected SignInError")
         } catch (_: SignInError) {
         }

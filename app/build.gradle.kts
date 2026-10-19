@@ -14,7 +14,7 @@ android {
     namespace = "dev.crumble.android"
     compileSdk = 36
     defaultConfig {
-        applicationId = "dev.crumble.android"
+        applicationId = "ng.crumbli.android"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
@@ -22,6 +22,10 @@ android {
     }
 
     buildTypes {
+        // A separate application ID lets a debug build sit beside the installed app with its own storage.
+        debug {
+            applicationIdSuffix = ".dev"
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -34,7 +38,7 @@ android {
     buildFeatures {
       compose = true
       aidl = false
-      buildConfig = false
+      buildConfig = true
       shaders = false
     }
 
