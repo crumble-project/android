@@ -39,7 +39,6 @@ data class Agent(
     val enabled: Boolean = false,
     val provider: String? = null,
     val model: String? = null,
-    val folder: String? = null,
     val tools: List<String>? = null,
     val delegates: List<String>? = null,
     val skills: List<Skill>? = null,
