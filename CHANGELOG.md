@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Replace the local glossary with a link to the canonical glossary in the spec repository.
 - Preserve admitted task execution fields for navigation and reject non-admitted or incomplete starts instead of reporting success.
 
 - Pin the bot's `1.0.0` contract as a checksum-verified local export with committed source provenance.
