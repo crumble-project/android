@@ -627,7 +627,18 @@ data class ScheduleRun(
 @Serializable
 data class ScheduleRunResult(
     val `id`: String? = null,
+    val `agentId`: String? = null,
+    val `conversationId`: String? = null,
+    val `scheduleId`: String? = null,
+    val `submissionId`: String? = null,
+    val `requestId`: String? = null,
+    val `prompt`: String? = null,
+    val `replyTo`: String? = null,
+    val `attachmentsDigest`: String? = null,
     val `status`: String? = null,
+    val `error`: String? = null,
+    val `createdAt`: String? = null,
+    val `updatedAt`: String? = null,
 )
 
 @Serializable

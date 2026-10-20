@@ -327,7 +327,16 @@ class APIClient(
     suspend fun createSchedule(payload: Map<String, JsonElement>): Schedule = operations.createSchedule(request(payload)).domain()
     suspend fun updateSchedule(id: String, patch: Map<String, JsonElement>): Schedule = requireNotNull(operations.updateSchedule(request(patch), id)).domain()
     suspend fun deleteSchedule(id: String) = operations.deleteSchedule(id)
-    suspend fun runSchedule(id: String): Execution = operations.runSchedule(id).result.let { Execution(id = it?.id.orEmpty(), status = it?.status) }
+    suspend fun runSchedule(id: String): Execution {
+        val response = operations.runSchedule(id)
+        check(response.admitted) { "Task was not admitted" }
+        val result = checkNotNull(response.result) { "Task admission returned no execution" }
+        return Execution(
+            id = checkNotNull(result.id) { "Task admission returned no execution ID" },
+            agentId = result.agentId, conversationId = result.conversationId, status = result.status,
+            prompt = result.prompt, error = result.error, createdAt = result.createdAt, updatedAt = result.updatedAt,
+        )
+    }
     suspend fun executions(): List<Execution> = operations.listExecutions().map { it.domain() }
     suspend fun activityFeed(): ActivityFeedResponse = operations.getActivityFeed().domain()
     suspend fun pushInfo(): PushInfo = operations.getPushStatus().domain()

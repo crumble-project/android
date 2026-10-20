@@ -96,6 +96,27 @@ class GeneratedContractTests {
     }
 
     @Test
+    fun scheduleAdmissionRetainsExecutionFieldsNeededForNavigation() = runTest {
+        val (client, _) = StubTransport.client { 202 to """{"admitted":true,"result":$executionFixture}""" }
+        val execution = client.runSchedule("s1")
+        assertEquals("a1", execution.agentId)
+        assertEquals("chat", execution.conversationId)
+        assertEquals("pending", execution.status)
+    }
+
+    @Test
+    fun rejectedOrIncompleteScheduleAdmissionIsNotASuccess() = runTest {
+        for (body in listOf("""{"admitted":false}""", """{"admitted":true}""")) {
+            val (client, _) = StubTransport.client { 202 to body }
+            try {
+                client.runSchedule("s1")
+                fail("expected failed task admission")
+            } catch (_: IllegalStateException) {
+            }
+        }
+    }
+
+    @Test
     fun generatedMessageOperationPreservesAttachmentTimeoutAndOptionalOmission() = runTest {
         val (client, transport) = StubTransport.client { 202 to executionFixture }
         client.sendChatMessage("a1", "text", "request", "")

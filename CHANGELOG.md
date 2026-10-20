@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve admitted task execution fields for navigation and reject non-admitted or incomplete starts instead of reporting success.
+
 - Pin the bot's `1.0.0` contract as a checksum-verified local export with committed source provenance.
 - Generate Kotlin HTTP operations and serializable wire types with repository-owned generator `1.0.0` and a pinned transport template.
 - Route every `APIClient` endpoint through generated operations while retaining `HttpTransport`, `HttpURLConnection`, coroutines, bearer authentication, and existing timeouts.
