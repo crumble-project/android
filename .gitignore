@@ -15,3 +15,4 @@ build/
 local.properties
 app/google-services.json
 .kotlin/
+__pycache__/

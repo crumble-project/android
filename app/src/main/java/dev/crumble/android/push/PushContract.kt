@@ -13,8 +13,7 @@ data class PushInfo(
     val transports: Map<String, Boolean> = emptyMap(),
 )
 
-/** A device registration sent to the server's push registry. */
-@Serializable
+/** App registration preferences, mapped to the generated request at the API boundary. */
 data class PushRegistration(
     val platform: String = "android",
     val transport: String = "fcm",
@@ -31,7 +30,6 @@ data class PushRegistrationResult(
 )
 
 /** Presence used to suppress a notification for the chat currently on screen. */
-@Serializable
 data class PushPresence(
     val active: Boolean,
     val agentId: String? = null,

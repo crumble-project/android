@@ -135,13 +135,7 @@ data class AttachmentInfo(
         get() = kind == "image"
 }
 
-/** A file on its way to the server, in the shape the messages endpoint takes. */
-@Serializable
-data class OutgoingAttachment(
-    val name: String,
-    val mimeType: String,
-    val data: String,
-)
+typealias OutgoingAttachment = dev.crumble.android.generated.SendMessageRequestAttachmentsItem
 
 @Serializable
 data class ChatSnapshot(

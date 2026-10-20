@@ -34,7 +34,7 @@ class PushContractTests {
     fun pushApiUsesEscapedInstallationIdAndExplicitPresenceNull() = runTest {
         val (client, stub) = StubTransport.client(token = "token") { request ->
             when (request.method) {
-                "GET" -> 200 to """{"serverId":"s1","transports":{"fcm":true}}"""
+                "GET" -> 200 to """{"serverId":"s1","transports":{"apns":false,"fcm":true}}"""
                 "PUT" -> if (request.pathWithQuery.endsWith("/presence")) 204 to "" else 200 to """{"serverId":"s1","remoteDelivery":true}"""
                 "DELETE" -> 204 to ""
                 else -> 500 to ""
