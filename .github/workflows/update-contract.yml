@@ -1,0 +1,53 @@
+name: Update bot contract
+
+on:
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-bot-contract
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Download, verify, regenerate, and test
+        run: python3 scripts/contract.py update-latest
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: python3 scripts/contract.py check
+      - run: ./gradlew lintDebug
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ github.token }}
+          branch: automation/shared-api-contract
+          base: main
+          add-paths: |
+            contract/assets/
+            contract/pin.json
+            app/src/main/java/dev/crumble/android/generated/
+          commit-message: 'chore(api): update the pinned bot contract'
+          title: 'chore(api): update the pinned bot contract'
+          body-path: .github/contract-update-pr.md

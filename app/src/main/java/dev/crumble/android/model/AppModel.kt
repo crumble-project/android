@@ -508,12 +508,7 @@ class AppModel(
         var backoffMs = 500L
         while (scope.isActive) {
             try {
-                api.chatEvents(id, limit = 5) { payload ->
-                    val snap = try {
-                        CrumbleJson.decodeFromString(ChatSnapshot.serializer(), payload)
-                    } catch (_: Exception) {
-                        null
-                    } ?: return@chatEvents
+                api.chatEvents(id, limit = 5) { snap ->
                     if (selectionVersion != version || client !== api) return@chatEvents
                     applySnapshot(snap)
                     streamStatus = ""
@@ -544,12 +539,7 @@ class AppModel(
             var backoffMs = 500L
             while (isActive && generation == gen) {
                 try {
-                    api.activityEvents { payload ->
-                        val event = try {
-                            CrumbleJson.decodeFromString(ActivityEvent.serializer(), payload)
-                        } catch (_: Exception) {
-                            null
-                        } ?: return@activityEvents
+                    api.activityEvents { event ->
                         if (generation != gen) return@activityEvents
                         handleActivity(event)
                     }

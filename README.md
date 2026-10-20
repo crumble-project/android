@@ -17,11 +17,104 @@ Build the debug APK:
 ./gradlew assembleDebug
 ```
 
-Run the unit tests:
+Run the unit tests, contract checks, and Android lint without server credentials or Firebase configuration:
 
 ```bash
-./gradlew testDebugUnitTest
+python3 -m unittest discover -s scripts -p 'test_*.py'
+python3 scripts/contract.py check
+./gradlew test lintDebug
 ```
+
+## Shared API contract
+
+The bot repository owns the HTTP and server-sent event (SSE) schemas. Android commits their verified assets and generated Kotlin code.
+Builds never download contracts or run a generator. Public CI requires no server token, Firebase account, or signing account.
+
+`contract/pin.json` records the source, independent contract version, source commit, payload checksums, and generator hashes.
+`contract/assets/` contains `openapi.json`, three event JSON Schemas, `SHA256SUMS`, the contract changelog, and `source-commit.txt`.
+Checksums cover every payload, including provenance and the changelog. The checksum file does not checksum itself.
+
+The initial pin is an explicit **local export** of bot commit `21ded3ab865cb5d13580b26474c1c5a1b941c590`, with contract version `1.0.0`.
+It is not a published release. After bot publishes `contract-v1.0.0`, switch this pin to that release before merging the consumer update.
+
+### Generate Kotlin
+
+`scripts/generate-contract.py` is the repository-owned Kotlin generator, version `1.0.0`. It uses Python 3.10+ standard libraries only.
+Its transport template lives in `scripts/templates/ContractBoundary.kt`. Both source files have SHA-256 pins in the manifest.
+The existing Kotlin `2.3.20`, kotlinx.serialization `1.8.0`, and coroutines `1.10.2` versions remain in `gradle/libs.versions.toml`.
+
+OpenAPI Generator's Kotlin generator was evaluated at `7.26.0` against its [official feature table](https://openapi-generator.tech/docs/generators/kotlin/).
+It marks null, arbitrary JSON, unions, `oneOf`, and `anyOf` unsupported. Its default transports also differ from this app's transport.
+Templates alone do not provide documented support for those missing schema semantics.
+The small schema-driven generator preserves nullable fields, typed unions, open JSON as `JsonElement`, and the existing injectable `HttpTransport`.
+This choice requires maintaining the supported schema subset in this repository instead of adopting another networking stack.
+
+The generator emits serializable wire types and every HTTP operation, including binary downloads and streaming request paths.
+It projects the downloaded event schemas into OpenAPI components, rewrites local schema references, and generates event payloads with the same generator.
+The deterministic projection is committed beside the Kotlin output.
+Unknown schema keywords, unsupported compositions, unsupported media types, and model collisions fail generation.
+String enums remain strings for response forward compatibility. Value constraints such as string lengths and numeric limits remain server validation rules.
+Generated codecs enforce field types and required fields; they are not a replacement for server-side business validation.
+
+`APIClient` invokes generated operations for every endpoint. It retains runtime URLs, bearer tokens, cancellation, attachment and OAuth timeouts,
+bounded errors, and the `HttpURLConnection` implementation. A small SSE adapter handles framing and stream lifetime.
+It decodes generated payloads before passing app models to callers. Heartbeats and unknown event names do not interrupt chat updates.
+`OptionalField` distinguishes omitted request properties from explicit JSON null, including PATCH clears.
+
+`model/Models.kt` contains application and cached presentation state, including optimistic delivery state and local skill IDs.
+`network/ContractAdapters.kt` maps generated responses into that state. Domain serializers remain for cache and editor state, not HTTP or SSE decoding.
+The outgoing attachment model aliases the generated request type. Push preferences remain app inputs mapped to generated requests.
+
+Regenerate the current verified pin explicitly:
+
+```bash
+python3 scripts/contract.py generate
+python3 scripts/contract.py check
+./gradlew test
+```
+
+`check` verifies assets and generator hashes, regenerates into a temporary directory, and compares every output byte.
+It rejects stale files, manual edits, missing generated files, and unexpected files. Never edit generated output directly.
+
+### Update the contract
+
+To download the first immutable release, verify every asset, regenerate, and run `./gradlew test`:
+
+```bash
+python3 scripts/contract.py update --release contract-v1.0.0
+```
+
+For a later release, replace `contract-v1.0.0` with its exact `contract-vX.Y.Z` tag.
+The updater rejects draft or prerelease releases and tag/version mismatches. It verifies all checksums before generation.
+Review `contract/assets/CHANGELOG.md`, the pin, generated changes, and test results before committing.
+An unsupported schema fails before replacing the current assets. A failing test leaves the candidate diff available for review; do not commit it.
+
+Before a release exists, update from an explicit bot export directory:
+
+```bash
+python3 scripts/contract.py update --local EXPORT_DIRECTORY
+```
+
+Replace `EXPORT_DIRECTORY` with the directory produced by bot's `bun src/openapi.ts --bundle EXPORT_DIRECTORY` command.
+The directory must contain exactly the seven agreed assets. The local pin records provenance without claiming a release tag.
+Do not pin a moving branch or add a submodule.
+
+When changing the generator, update its explicit version in both Python scripts and refresh the pin with the updater.
+Review regenerated operations, payload types, optional/null behavior, and generator tests together.
+
+### Automated updates
+
+`.github/workflows/update-contract.yml` runs weekly and supports manual dispatch. It selects the latest published, stable `contract-v*` release by publication time.
+Unrelated bot releases are ignored. Before the first release, it reports the bootstrap state and still checks the current pin and runs tests.
+Download, authorization, and parsing failures fail the job rather than appearing as an absent release.
+
+The updater runs checksum verification, generator tests, byte-for-byte checks, `./gradlew test`, and Android lint before creating or updating a PR.
+It uses only the repository's `GITHUB_TOKEN`, with write permissions scoped to the updater job. Ordinary CI has read-only permissions.
+GitHub can suppress or require approval for follow-up runs created by `GITHUB_TOKEN`; the updater does not rely on those runs.
+See [GitHub workflow trigger behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+
+Repository policy must permit GitHub Actions to create pull requests. If policy blocks PR creation, an owner must enable that permission.
+The workflow does not change repository or organization settings.
 
 ## Connect to a server
 

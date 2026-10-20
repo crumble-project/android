@@ -35,15 +35,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.builtins.MapSerializer
-import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 
 data class APIError(
     val method: String,
@@ -202,26 +199,6 @@ class APIClient(
         return response.body
     }
 
-    private suspend fun <T> call(
-        method: String,
-        path: String,
-        deserializer: KSerializer<T>,
-        body: ByteArray? = null,
-        timeoutMs: Int = 20_000,
-    ): T {
-        val bytes = send(method, path, body, timeoutMs)
-        return CrumbleJson.decodeFromString(deserializer, String(bytes, StandardCharsets.UTF_8))
-    }
-
-    private suspend fun perform(
-        method: String,
-        path: String,
-        body: ByteArray? = null,
-        timeoutMs: Int = 20_000,
-    ) {
-        send(method, path, body, timeoutMs)
-    }
-
     companion object {
         fun escape(value: String): String =
             URLEncoder.encode(value, StandardCharsets.UTF_8.name())
@@ -229,96 +206,59 @@ class APIClient(
                 .replace("%7E", "~")
     }
 
-    suspend fun agents(): List<Agent> =
-        call("GET", "/v1/agents", ListSerializer(Agent.serializer()))
+    private val operations = dev.crumble.android.generated.ContractOperations(object : dev.crumble.android.generated.ContractBoundary {
+        override val json = CrumblePatchJson
+        override fun escape(value: String) = APIClient.escape(value)
+        override fun request(method: String, path: String, body: ByteArray?, timeoutMs: Int) = makeRequest(method, path, body, timeoutMs)
+        override suspend fun send(method: String, path: String, body: ByteArray?, timeoutMs: Int) = this@APIClient.send(method, path, body, timeoutMs)
+    })
 
-    suspend fun createAgent(agent: Agent): Agent {
-        val payload = CrumbleJson.encodeToString(Agent.serializer(), agent).toByteArray(StandardCharsets.UTF_8)
-        return call("POST", "/v1/agents", Agent.serializer(), body = payload)
+    private inline fun <reified T> request(fields: Map<String, JsonElement>): T =
+        CrumblePatchJson.decodeFromJsonElement(JsonObject(fields))
+
+    private fun strings(vararg pairs: Pair<String, String>): Map<String, JsonElement> =
+        pairs.associate { (key, value) -> key to JsonPrimitive(value) }
+
+    suspend fun agents(): List<Agent> = operations.listAgents().map { it.domain() }
+
+    suspend fun createAgent(agent: Agent): Agent = operations.createAgent(agent.wire()).domain()
+
+    suspend fun updateAgent(id: String, patch: Map<String, JsonElement>): Agent =
+        requireNotNull(operations.updateAgent(request(patch), id)).domain()
+
+    suspend fun deleteAgent(id: String) = operations.deleteAgent(id)
+    suspend fun duplicateAgent(id: String): Agent = requireNotNull(operations.duplicateAgent(id)).domain()
+    suspend fun chat(agentID: String, limit: Int? = null): ChatSnapshot = operations.getChat(agentID, limit?.toLong()).domain()
+    suspend fun chatHistory(agentID: String, before: String, limit: Int): ChatHistoryResponse =
+        operations.getChatHistory(agentID, before = before.nilIfEmpty, limit = limit.takeIf { it > 0 }?.toLong()).domain()
+
+    suspend fun sendChatMessage(agentID: String, content: String, requestID: String, replyTo: String, attachments: List<OutgoingAttachment> = emptyList()) {
+        val fields = strings("content" to content, "requestId" to requestID).toMutableMap()
+        replyTo.nilIfEmpty?.let { fields["replyTo"] = JsonPrimitive(it) }
+        if (attachments.isNotEmpty()) fields["attachments"] = CrumbleJson.encodeToJsonElement(ListSerializer(OutgoingAttachment.serializer()), attachments)
+        operations.sendMessage(request(fields), agentID, timeoutMs = if (attachments.isEmpty()) 20_000 else 120_000)
     }
 
-    suspend fun updateAgent(id: String, patch: Map<String, JsonElement>): Agent {
-        val payload = CrumblePatchJson.encodeToString(
-            MapSerializer(String.serializer(), JsonElement.serializer()),
-            patch,
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("PATCH", "/v1/agents/$id", Agent.serializer(), body = payload)
-    }
+    suspend fun attachment(agentID: String, entryID: String, index: Int): ByteArray = operations.getAttachment(agentID, entryID, index.toLong())
+    suspend fun abortChat(agentID: String) = operations.abortChat(agentID)
+    suspend fun compactChat(agentID: String) { operations.compactChat(agentID) }
 
-    suspend fun deleteAgent(id: String) =
-        perform("DELETE", "/v1/agents/$id")
+    suspend fun chatEvents(agentID: String, limit: Int? = null, onEvent: suspend (ChatSnapshot) -> Unit): Nothing =
+        events(operations.streamChatEvents(agentID, limit?.toLong(), timeoutMs = 24 * 60 * 60 * 1000), SSEParser()) {
+            onEvent(CrumblePatchJson.decodeFromString<dev.crumble.android.generated.SnapshotEventPayload>(it).domain())
+        }
 
-    suspend fun duplicateAgent(id: String): Agent =
-        call("POST", "/v1/agents/$id/duplicate", Agent.serializer())
-
-    suspend fun chat(agentID: String, limit: Int? = null): ChatSnapshot =
-        call("GET", "/v1/agents/$agentID/chat${limit?.let { "?limit=$it" }.orEmpty()}", ChatSnapshot.serializer())
-
-    suspend fun chatHistory(agentID: String, before: String, limit: Int): ChatHistoryResponse {
-        val query = mutableListOf<String>()
-        if (before.isNotEmpty()) query.add("before=${escape(before)}")
-        if (limit > 0) query.add("limit=$limit")
-        val suffix = if (query.isEmpty()) "" else "?" + query.joinToString("&")
-        return call("GET", "/v1/agents/$agentID/chat/history$suffix", ChatHistoryResponse.serializer())
-    }
-
-    @Serializable
-    private data class SendChatBody(
-        val content: String,
-        val requestId: String,
-        val replyTo: String? = null,
-        val attachments: List<OutgoingAttachment>? = null,
-    )
-
-    suspend fun sendChatMessage(
-        agentID: String,
-        content: String,
-        requestID: String,
-        replyTo: String,
-        attachments: List<OutgoingAttachment> = emptyList(),
-    ) {
-        val body = SendChatBody(
-            content = content,
-            requestId = requestID,
-            replyTo = replyTo.nilIfEmpty,
-            attachments = attachments.ifEmpty { null },
-        )
-        val payload = CrumbleJson.encodeToString(SendChatBody.serializer(), body).toByteArray(StandardCharsets.UTF_8)
-        perform(
-            "POST",
-            "/v1/agents/$agentID/messages",
-            body = payload,
-            timeoutMs = if (attachments.isEmpty()) 20_000 else 120_000,
-        )
-    }
-
-    /** The bytes of an attached image, by its position in the message's attachments. */
-    suspend fun attachment(agentID: String, entryID: String, index: Int): ByteArray =
-        send("GET", "/v1/agents/$agentID/attachments/${escape(entryID)}/$index")
-
-    suspend fun abortChat(agentID: String) =
-        perform("POST", "/v1/agents/$agentID/abort")
-
-    suspend fun compactChat(agentID: String) =
-        perform("POST", "/v1/agents/$agentID/compact")
-
-    /**
-     * Follows the bot chat's server-sent events, passing each snapshot payload to onEvent.
-     * It returns only by throwing: SSEClosedError when the server ends the stream.
-     */
-    suspend fun chatEvents(agentID: String, limit: Int? = null, onEvent: suspend (String) -> Unit): Nothing =
-        events("/v1/agents/$agentID/events${limit?.let { "?limit=$it" }.orEmpty()}", SSEParser(), onEvent)
-
-    /** Follows server-wide activity: finished replies and sidebar previews from every bot. */
-    suspend fun activityEvents(onEvent: suspend (String) -> Unit): Nothing =
-        events("/v1/events", SSEParser(accepting = setOf("activity")), onEvent)
+    suspend fun activityEvents(onEvent: suspend (dev.crumble.android.model.ActivityEvent) -> Unit): Nothing =
+        events(operations.streamActivityEvents(timeoutMs = 24 * 60 * 60 * 1000), SSEParser(accepting = setOf("activity"))) {
+            onEvent(CrumblePatchJson.decodeFromString<dev.crumble.android.generated.ActivityEventPayload>(it).domain())
+        }
 
     private suspend fun events(
-        path: String,
+        request: HttpRequestData,
         parser: SSEParser,
         onEvent: suspend (String) -> Unit,
     ): Nothing {
-        val request = makeRequest("GET", path, timeoutMs = 24 * 60 * 60 * 1000)
+        val path = request.pathWithQuery
         val response = transport.openStream(request)
         try {
             if (response.statusCode !in 200..299) {
@@ -367,177 +307,66 @@ class APIClient(
         }
     }
 
-    private fun memoryPath(agentID: String?): String =
-        if (agentID != null) "/v1/agents/$agentID/memories" else "/v1/memories"
-
     suspend fun memories(agentID: String?): List<Memory> =
-        call("GET", memoryPath(agentID), ListSerializer(Memory.serializer()))
-
-    suspend fun addMemory(agentID: String?, content: String): Memory {
-        val payload = CrumbleJson.encodeToString(
-            MapSerializer(String.serializer(), String.serializer()),
-            mapOf("content" to content),
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("POST", memoryPath(agentID), Memory.serializer(), body = payload)
+        (if (agentID == null) operations.listSharedMemories() else operations.listAgentMemories(agentID)).map { it.domain() }
+    suspend fun addMemory(agentID: String?, content: String): Memory =
+        (if (agentID == null) operations.createSharedMemory(request(strings("content" to content)))
+        else operations.createAgentMemory(request(strings("content" to content)), agentID)).domain()
+    suspend fun updateMemory(agentID: String?, memoryID: String, content: String): Memory =
+        requireNotNull(if (agentID == null) operations.updateSharedMemory(request(strings("content" to content)), memoryID)
+        else operations.updateAgentMemory(request(strings("content" to content)), agentID, memoryID)).domain()
+    suspend fun deleteMemory(agentID: String?, memoryID: String) {
+        if (agentID == null) operations.deleteSharedMemory(memoryID) else operations.deleteAgentMemory(agentID, memoryID)
     }
 
-    suspend fun updateMemory(agentID: String?, memoryID: String, content: String): Memory {
-        val payload = CrumbleJson.encodeToString(
-            MapSerializer(String.serializer(), String.serializer()),
-            mapOf("content" to content),
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("PATCH", "${memoryPath(agentID)}/$memoryID", Memory.serializer(), body = payload)
+    suspend fun sharedSkills(): List<SharedSkill> = operations.listSkills().map { it.domain() }
+    suspend fun createSharedSkill(name: String, instructions: String): SharedSkill = operations.createSkill(request(strings("name" to name, "instructions" to instructions))).domain()
+    suspend fun updateSharedSkill(id: String, name: String, instructions: String): SharedSkill = requireNotNull(operations.updateSkill(request(strings("name" to name, "instructions" to instructions)), id)).domain()
+    suspend fun deleteSharedSkill(id: String) = operations.deleteSkill(id)
+    suspend fun schedules(): List<Schedule> = operations.listSchedules().map { it.domain() }
+    suspend fun createSchedule(payload: Map<String, JsonElement>): Schedule = operations.createSchedule(request(payload)).domain()
+    suspend fun updateSchedule(id: String, patch: Map<String, JsonElement>): Schedule = requireNotNull(operations.updateSchedule(request(patch), id)).domain()
+    suspend fun deleteSchedule(id: String) = operations.deleteSchedule(id)
+    suspend fun runSchedule(id: String): Execution {
+        val response = operations.runSchedule(id)
+        check(response.admitted) { "Task was not admitted" }
+        val result = checkNotNull(response.result) { "Task admission returned no execution" }
+        return Execution(
+            id = checkNotNull(result.id) { "Task admission returned no execution ID" },
+            agentId = result.agentId, conversationId = result.conversationId, status = result.status,
+            prompt = result.prompt, error = result.error, createdAt = result.createdAt, updatedAt = result.updatedAt,
+        )
     }
+    suspend fun executions(): List<Execution> = operations.listExecutions().map { it.domain() }
+    suspend fun activityFeed(): ActivityFeedResponse = operations.getActivityFeed().domain()
+    suspend fun pushInfo(): PushInfo = operations.getPushStatus().domain()
 
-    suspend fun deleteMemory(agentID: String?, memoryID: String) =
-        perform("DELETE", "${memoryPath(agentID)}/$memoryID")
-
-    suspend fun sharedSkills(): List<SharedSkill> =
-        call("GET", "/v1/skills", ListSerializer(SharedSkill.serializer()))
-
-    suspend fun createSharedSkill(name: String, instructions: String): SharedSkill {
-        val payload = CrumbleJson.encodeToString(
-            MapSerializer(String.serializer(), String.serializer()),
-            mapOf("name" to name, "instructions" to instructions),
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("POST", "/v1/skills", SharedSkill.serializer(), body = payload)
-    }
-
-    suspend fun updateSharedSkill(id: String, name: String, instructions: String): SharedSkill {
-        val payload = CrumbleJson.encodeToString(
-            MapSerializer(String.serializer(), String.serializer()),
-            mapOf("name" to name, "instructions" to instructions),
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("PATCH", "/v1/skills/$id", SharedSkill.serializer(), body = payload)
-    }
-
-    suspend fun deleteSharedSkill(id: String) =
-        perform("DELETE", "/v1/skills/$id")
-
-    suspend fun schedules(): List<Schedule> =
-        call("GET", "/v1/schedules", ListSerializer(Schedule.serializer()))
-
-    suspend fun createSchedule(payload: Map<String, JsonElement>): Schedule {
-        val bytes = CrumblePatchJson.encodeToString(
-            MapSerializer(String.serializer(), JsonElement.serializer()),
-            payload,
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("POST", "/v1/schedules", Schedule.serializer(), body = bytes)
-    }
-
-    suspend fun updateSchedule(id: String, patch: Map<String, JsonElement>): Schedule {
-        val bytes = CrumblePatchJson.encodeToString(
-            MapSerializer(String.serializer(), JsonElement.serializer()),
-            patch,
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("PATCH", "/v1/schedules/$id", Schedule.serializer(), body = bytes)
-    }
-
-    suspend fun deleteSchedule(id: String) =
-        perform("DELETE", "/v1/schedules/$id")
-
-    @Serializable
-    private data class ScheduleRunEnvelope(val result: Execution)
-
-    suspend fun runSchedule(id: String): Execution =
-        call("POST", "/v1/schedules/$id/run", ScheduleRunEnvelope.serializer()).result
-
-    suspend fun executions(): List<Execution> =
-        call("GET", "/v1/executions", ListSerializer(Execution.serializer()))
-
-    suspend fun activityFeed(): ActivityFeedResponse =
-        call("GET", "/v1/activity/feed", ActivityFeedResponse.serializer())
-
-    suspend fun pushInfo(): PushInfo =
-        call("GET", "/v1/push", PushInfo.serializer())
-
-    suspend fun registerPushDevice(installationId: String, registration: PushRegistration): PushRegistrationResult {
-        val id = pushInstallationPath(installationId)
-        val payload = CrumblePatchJson.encodeToString(
-            PushRegistration.serializer(),
-            registration,
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("PUT", "/v1/push/devices/$id", PushRegistrationResult.serializer(), body = payload)
-    }
-
-    suspend fun unregisterPushDevice(installationId: String) {
-        perform("DELETE", "/v1/push/devices/${pushInstallationPath(installationId)}")
-    }
-
+    suspend fun registerPushDevice(installationId: String, registration: PushRegistration): PushRegistrationResult =
+        operations.putPushDevice(registration.wire(), pushInstallationPath(installationId)).domain()
+    suspend fun unregisterPushDevice(installationId: String) = operations.deletePushDevice(pushInstallationPath(installationId))
     suspend fun updatePushPresence(installationId: String, presence: PushPresence) {
-        val payload = CrumblePatchJson.encodeToString(
-            PushPresence.serializer(),
-            presence,
-        ).toByteArray(StandardCharsets.UTF_8)
-        perform("PUT", "/v1/push/devices/${pushInstallationPath(installationId)}/presence", body = payload)
+        operations.putPushPresence(dev.crumble.android.generated.PutPushPresenceRequest(presence.active, presence.agentId), pushInstallationPath(installationId))
     }
-
     private fun pushInstallationPath(installationId: String): String {
         require(installationId.isNotBlank()) { "installationId must not be blank" }
-        return escape(installationId)
+        return installationId
     }
 
-    suspend fun providers(): List<ProviderStatus> =
-        call("GET", "/v1/providers", ListSerializer(ProviderStatus.serializer()))
-
-    suspend fun models(provider: String): List<ModelSummary> =
-        call("GET", "/v1/models?provider=${escape(provider)}", ListSerializer(ModelSummary.serializer()))
-
-    suspend fun setProviderKey(provider: String, apiKey: String) {
-        val payload = CrumbleJson.encodeToString(
-            MapSerializer(String.serializer(), String.serializer()),
-            mapOf("apiKey" to apiKey),
-        ).toByteArray(StandardCharsets.UTF_8)
-        perform("PUT", "/v1/providers/$provider", body = payload)
-    }
-
-    suspend fun deleteProviderKey(provider: String) =
-        perform("DELETE", "/v1/providers/$provider")
-
-    suspend fun mcpServers(): List<MCPServer> =
-        call("GET", "/v1/mcp-servers", ListSerializer(MCPServer.serializer()))
-
-    suspend fun createMCPServer(payload: Map<String, JsonElement>): MCPServer {
-        val bytes = CrumblePatchJson.encodeToString(
-            MapSerializer(String.serializer(), JsonElement.serializer()),
-            payload,
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("POST", "/v1/mcp-servers", MCPServer.serializer(), body = bytes)
-    }
-
-    suspend fun updateMCPServer(id: String, patch: Map<String, JsonElement>): MCPServer {
-        val bytes = CrumblePatchJson.encodeToString(
-            MapSerializer(String.serializer(), JsonElement.serializer()),
-            patch,
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("PATCH", "/v1/mcp-servers/$id", MCPServer.serializer(), body = bytes)
-    }
-
-    suspend fun deleteMCPServer(id: String) =
-        perform("DELETE", "/v1/mcp-servers/$id")
-
-    suspend fun startMCPSignIn(id: String, redirectURI: String): OAuthStart {
-        val payload = CrumbleJson.encodeToString(
-            MapSerializer(String.serializer(), String.serializer()),
-            mapOf("redirectUri" to redirectURI),
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("POST", "/v1/mcp-servers/$id/oauth", OAuthStart.serializer(), body = payload, timeoutMs = 60_000)
-    }
-
+    suspend fun providers(): List<ProviderStatus> = operations.listProviders().map { it.domain() }
+    suspend fun models(provider: String): List<ModelSummary> = operations.listModels(provider).map { it.domain() }
+    suspend fun setProviderKey(provider: String, apiKey: String) { operations.putProviderKey(request(strings("apiKey" to apiKey)), provider) }
+    suspend fun deleteProviderKey(provider: String) = operations.deleteProviderKey(provider)
+    suspend fun mcpServers(): List<MCPServer> = operations.listMcpServers().map { it.domain() }
+    suspend fun createMCPServer(payload: Map<String, JsonElement>): MCPServer = operations.createMcpServer(request(payload)).domain()
+    suspend fun updateMCPServer(id: String, patch: Map<String, JsonElement>): MCPServer = requireNotNull(operations.updateMcpServer(request(patch), id)).domain()
+    suspend fun deleteMCPServer(id: String) = operations.deleteMcpServer(id)
+    suspend fun startMCPSignIn(id: String, redirectURI: String): OAuthStart = operations.startMcpOAuth(request(strings("redirectUri" to redirectURI)), id, timeoutMs = 60_000).domain()
     suspend fun finishMCPSignIn(id: String, code: String, state: String, iss: String?): MCPServer {
-        val body = LinkedHashMap<String, String>()
-        body["code"] = code
-        body["state"] = state
-        if (iss != null) body["iss"] = iss
-        val payload = CrumbleJson.encodeToString(
-            MapSerializer(String.serializer(), String.serializer()),
-            body,
-        ).toByteArray(StandardCharsets.UTF_8)
-        return call("POST", "/v1/mcp-servers/$id/oauth/callback", MCPServer.serializer(), body = payload, timeoutMs = 60_000)
+        val fields = strings("code" to code, "state" to state).toMutableMap()
+        iss?.let { fields["iss"] = JsonPrimitive(it) }
+        return operations.finishMcpOAuth(request(fields), id, timeoutMs = 60_000).domain()
     }
-
-    suspend fun signOutOfMCP(id: String): MCPServer =
-        call("DELETE", "/v1/mcp-servers/$id/oauth", MCPServer.serializer())
+    suspend fun signOutOfMCP(id: String): MCPServer = operations.signOutMcpOAuth(id).domain()
 }
 
 /**

@@ -196,7 +196,7 @@ class CrumbleTests {
     @Test
     fun agentsSendBearerAndDecode() = runTest {
         val (client, stub) = StubTransport.client(token = "test-token") {
-            200 to """[{"id":"a1","name":"Atlas","enabled":true,"lastMessage":"See you tomorrow."}]"""
+            200 to "[${agentFixture("a1", lastMessage = "See you tomorrow.")}]"
         }
         val agents = client.agents()
         assertEquals(listOf("Atlas"), agents.map { it.name })
@@ -207,7 +207,7 @@ class CrumbleTests {
 
     @Test
     fun updateAgentCanClearCapabilities() = runTest {
-        val (client, stub) = StubTransport.client { 200 to """{"id":"a1"}""" }
+        val (client, stub) = StubTransport.client { 200 to agentFixture("a1") }
         client.updateAgent(
             "a1",
             patch = mapOf(
@@ -223,7 +223,7 @@ class CrumbleTests {
     fun sharedCatalogIncludesDefaultsAndOptionalSkills() = runTest {
         val (client, _) = StubTransport.client { req ->
             assertEquals("/v1/skills", req.pathWithQuery)
-            200 to """[{"id":"common:tasks/SKILL.md","name":"tasks","instructions":"Complete tasks","source":"bundled","path":"tasks/SKILL.md"},{"id":"s1","name":"Writing","instructions":"Write plainly","source":"shared"},{"id":"legacy","name":"Legacy","instructions":"Existing skill"}]"""
+            200 to """[{"id":"common:tasks/SKILL.md","name":"tasks","instructions":"Complete tasks","source":"bundled","path":"tasks/SKILL.md"},{"id":"s1","name":"Writing","instructions":"Write plainly","source":"shared","createdAt":"2026-10-18T10:00:00Z","updatedAt":"2026-10-18T10:00:00Z"},{"id":"legacy","name":"Legacy","instructions":"Existing skill","source":"shared","createdAt":"2026-10-18T10:00:00Z","updatedAt":"2026-10-18T10:00:00Z"}]"""
         }
         val skills = client.sharedSkills()
         assertEquals(listOf(true, false, false), skills.map { it.isDefault })
@@ -235,10 +235,10 @@ class CrumbleTests {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
         val (client, stub) = StubTransport.client { req ->
             when (req.pathWithQuery) {
-                "/v1/agents" -> 200 to """[{"id":"a1","name":"Atlas"},{"id":"a2","name":"Beacon"}]"""
-                "/v1/memories" -> 200 to """[{"id":"shared","content":"For every bot"}]"""
-                "/v1/agents/a1/memories" -> 200 to """[{"id":"personal-1","content":"Only Atlas"}]"""
-                "/v1/agents/a2/memories" -> 200 to """[{"id":"personal-2","content":"Only Beacon"}]"""
+                "/v1/agents" -> 200 to "[${agentFixture("a1")},${agentFixture("a2", "Beacon")}]"
+                "/v1/memories" -> 200 to "[${memoryFixture("shared", "For every bot")}]"
+                "/v1/agents/a1/memories" -> 200 to "[${memoryFixture("personal-1", "Only Atlas")}]"
+                "/v1/agents/a2/memories" -> 200 to "[${memoryFixture("personal-2", "Only Beacon")}]"
                 else -> 404 to ""
             }
         }
@@ -261,10 +261,10 @@ class CrumbleTests {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
         val (client, stub) = StubTransport.client { req ->
             when (req.pathWithQuery) {
-                "/v1/agents" -> 200 to """[{"id":"a2","name":"Beacon"}]"""
+                "/v1/agents" -> 200 to "[${agentFixture("a2", "Beacon")}]"
                 "/v1/memories", "/v1/agents/a2/memories" -> 200 to "[]"
                 "/v1/agents/a2/memories/m2" ->
-                    if (req.method == "DELETE") 204 to "" else 200 to """{"id":"m2","content":"Updated"}"""
+                    if (req.method == "DELETE") 204 to "" else 200 to memoryFixture("m2", "Updated")
                 else -> 404 to ""
             }
         }
@@ -290,14 +290,14 @@ class CrumbleTests {
         val (client, stub) = StubTransport.client { req ->
             when {
                 req.pathWithQuery.startsWith("/v1/agents/a1/chat/history") ->
-                    200 to """{"messages":[{"entryId":"a1:8","role":"user","content":"older"}],"hasMore":false,"oldestEntryId":"a1:8"}"""
-                req.pathWithQuery == "/v1/agents/a1/messages" -> 202 to ""
+                    200 to """{"messages":[{"id":"a1:8:0","entryId":"a1:8","role":"user","content":"older"}],"hasMore":false,"oldestEntryId":"a1:8"}"""
+                req.pathWithQuery == "/v1/agents/a1/messages" -> 202 to executionFixture
                 else -> 404 to ""
             }
         }
         val history = client.chatHistory("a1", before = "a1:42", limit = 100)
         assertEquals("a1:8", history.messages?.first()?.entryId)
-        assertEquals("/v1/agents/a1/chat/history?before=a1%3A42&limit=100", stub.requests.last().pathWithQuery)
+        assertEquals("/v1/agents/a1/chat/history?limit=100&before=a1%3A42", stub.requests.last().pathWithQuery)
         client.sendChatMessage("a1", content = "hello", requestID = "req", replyTo = "a1:41")
         val body = String(stub.requests.last().body ?: ByteArray(0), StandardCharsets.UTF_8)
         assertTrue(body.contains(""""replyTo":"a1:41""""))
@@ -305,7 +305,7 @@ class CrumbleTests {
 
     @Test
     fun messagesCarryAttachments() = runTest {
-        val (client, stub) = StubTransport.client { 202 to "" }
+        val (client, stub) = StubTransport.client { 202 to executionFixture }
         client.sendChatMessage(
             "a1",
             content = "",
@@ -345,7 +345,7 @@ class CrumbleTests {
         val (client, stub) = StubTransport.client { req ->
             when (req.pathWithQuery) {
                 "/v1/mcp-servers/s1/oauth" -> 200 to """{"authorizationUrl":"https://auth.example.com/authorize?state=x"}"""
-                "/v1/mcp-servers/s1/oauth/callback" -> 200 to """{"id":"s1","name":"Linear","url":"https://mcp.linear.app/mcp","enabled":true,"auth":"oauth"}"""
+                "/v1/mcp-servers/s1/oauth/callback" -> 200 to """{"id":"s1","name":"Linear","url":"https://mcp.linear.app/mcp","enabled":true,"agentId":null,"auth":"oauth","authenticated":true}"""
                 else -> 404 to ""
             }
         }
@@ -381,7 +381,7 @@ class CrumbleTests {
     @Test
     fun taskPickersPreserveTheInstantAndSubmitOnlyTheSelectedMode() = runTest {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
-        val response = """{"id":"s1","agentId":"a1","name":"Greeting","prompt":"Say hi","enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z"}"""
+        val response = """{"id":"s1","agentId":"a1","name":"Greeting","prompt":"Say hi","enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z","cron":null,"nextRunAt":null,"createdAt":"2026-10-18T10:00:00Z","createdByAgentId":null}"""
         val (client, stub) = StubTransport.client { req ->
             200 to if (req.method == "PATCH") response else "[]"
         }
@@ -418,14 +418,15 @@ class CrumbleTests {
     fun chatEventsDeliverSnapshotsThenReportClosing() = runTest {
         val (client, _) = StubTransport.client { req ->
             assertEquals("/v1/agents/a7/events", req.pathWithQuery)
-            200 to "event: heartbeat\ndata: {}\n\nevent: snapshot\ndata: {\"agentId\":\"a7\",\ndata: \"status\":\"running\"}\n\n"
+            200 to "event: heartbeat\ndata: {}\n\nevent: snapshot\ndata: ${snapshotFixture(ChatSnapshot(agentId = "a7", status = "running"))}\n\n"
         }
-        val payloads = mutableListOf<String>()
+        val payloads = mutableListOf<ChatSnapshot>()
         try {
             client.chatEvents("a7") { payloads.add(it) }
         } catch (_: SSEClosedError) {
         }
-        assertEquals(listOf("{\"agentId\":\"a7\",\n\"status\":\"running\"}"), payloads)
+        assertEquals("a7", payloads.single().agentId)
+        assertEquals("running", payloads.single().status)
     }
 
     @Test
@@ -433,8 +434,8 @@ class CrumbleTests {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
         val (client, stub) = StubTransport.client { req ->
             when (req.pathWithQuery) {
-                "/v1/agents/a1/chat?limit=5" -> 200 to """{"agentId":"a1","status":"idle","messages":[]}"""
-                "/v1/agents/a1/messages" -> 202 to ""
+                "/v1/agents/a1/chat?limit=5" -> 200 to snapshotFixture(ChatSnapshot(agentId = "a1", status = "idle"))
+                "/v1/agents/a1/messages" -> 202 to executionFixture
                 else -> 404 to ""
             }
         }
@@ -515,7 +516,7 @@ class CrumbleTests {
         val fresh = ChatSnapshot(agentId = "a1", messages = rows(20..24), hasMore = true, oldestEntryId = "a1:20")
         val (client, stub) = StubTransport.client { req ->
             if (req.pathWithQuery == "/v1/agents/a1/events?limit=5") {
-                200 to "event: snapshot\ndata: ${CrumbleJson.encodeToString(ChatSnapshot.serializer(), fresh)}\n\n"
+                200 to "event: snapshot\ndata: ${snapshotFixture(fresh)}\n\n"
             } else 503 to ""
         }
         val seed = AppModel(client = client, credentials = credentials, scope = testScope)
@@ -546,10 +547,10 @@ class CrumbleTests {
         var attempts = 0
         val (client, stub) = StubTransport.client { req ->
             when (req.pathWithQuery) {
-                "/v1/agents/a1/chat?limit=5" -> 200 to """{"agentId":"a1","status":"idle","messages":[]}"""
+                "/v1/agents/a1/chat?limit=5" -> 200 to snapshotFixture(ChatSnapshot(agentId = "a1", status = "idle"))
                 "/v1/agents/a1/messages" -> {
                     attempts += 1
-                    if (attempts == 1) 500 to """{"error":"busy"}""" else 202 to ""
+                    if (attempts == 1) 500 to """{"error":"busy"}""" else 202 to executionFixture
                 }
                 else -> 404 to ""
             }
@@ -583,8 +584,8 @@ class CrumbleTests {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
         val (client, stub) = StubTransport.client { req ->
             when (req.pathWithQuery) {
-                "/v1/agents/a1/chat?limit=5" -> 200 to """{"agentId":"a1","status":"idle","messages":[]}"""
-                "/v1/agents/a1/messages" -> 202 to ""
+                "/v1/agents/a1/chat?limit=5" -> 200 to snapshotFixture(ChatSnapshot(agentId = "a1", status = "idle"))
+                "/v1/agents/a1/messages" -> 202 to executionFixture
                 else -> 404 to ""
             }
         }
@@ -611,9 +612,9 @@ class CrumbleTests {
             when (req.pathWithQuery) {
                 "/v1/agents/a1/chat?limit=5", "/v1/agents/a2/chat?limit=5" -> {
                     val id = if (req.pathWithQuery.contains("a2")) "a2" else "a1"
-                    200 to """{"agentId":"$id","status":"idle","messages":[]}"""
+                    200 to snapshotFixture(ChatSnapshot(agentId = id, status = "idle"))
                 }
-                "/v1/agents/a1/messages" -> 202 to ""
+                "/v1/agents/a1/messages" -> 202 to executionFixture
                 else -> 404 to ""
             }
         }
@@ -638,7 +639,7 @@ class CrumbleTests {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
         val (client, _) = StubTransport.client { req ->
             if (req.method == "POST" && req.pathWithQuery == "/v1/memories") {
-                200 to """{"id":"m1","content":"Remember this"}"""
+                200 to memoryFixture("m1", "Remember this")
             } else {
                 404 to ""
             }
@@ -723,7 +724,7 @@ class CrumbleTests {
     fun agentCreationUsesProvisionalRowWithoutStealingNavigation() = runTest {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
         val (client, _) = StubTransport.client { req ->
-            if (req.method == "POST") 201 to """{"id":"created","name":"New bot","enabled":true}""" else 404 to ""
+            if (req.method == "POST") 201 to agentFixture("created", "New bot") else 404 to ""
         }
         val model = AppModel(client = client, scope = testScope)
         model.route = Route.Memory

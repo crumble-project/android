@@ -89,7 +89,7 @@ class PushSyncTests {
             client(connection.url) { request ->
                 requests += request
                 when (request.pathWithQuery) {
-                    "/v1/push" -> 200 to """{"serverId":"server-one","transports":{"fcm":true}}"""
+                    "/v1/push" -> 200 to """{"serverId":"server-one","transports":{"apns":false,"fcm":true}}"""
                     "/v1/push/devices/install" -> 200 to """{"serverId":"server-one","remoteDelivery":true}"""
                     else -> 500 to ""
                 }
@@ -129,7 +129,7 @@ class PushSyncTests {
             client(connection.url) { request ->
                 if (connection == old) throw java.io.IOException("offline")
                 when (request.pathWithQuery) {
-                    "/v1/push" -> 200 to """{"serverId":"server-two"}"""
+                    "/v1/push" -> 200 to """{"serverId":"server-two","transports":{"apns":false,"fcm":true}}"""
                     "/v1/push/devices/install" -> 200 to """{"serverId":"server-two","remoteDelivery":true}"""
                     else -> 500 to ""
                 }
@@ -151,7 +151,7 @@ class PushSyncTests {
                     store.configure("http://two.example", "two", enabled = true)
                 }
                 when (request.pathWithQuery) {
-                    "/v1/push" -> 200 to """{"serverId":"server-one"}"""
+                    "/v1/push" -> 200 to """{"serverId":"server-one","transports":{"apns":false,"fcm":true}}"""
                     "/v1/push/devices/install" -> 200 to """{"serverId":"server-one","remoteDelivery":true}"""
                     else -> 500 to ""
                 }
@@ -173,7 +173,7 @@ class PushSyncTests {
                     store.updateToken("newer-token")
                 }
                 when (request.pathWithQuery) {
-                    "/v1/push" -> 200 to """{"serverId":"server-one"}"""
+                    "/v1/push" -> 200 to """{"serverId":"server-one","transports":{"apns":false,"fcm":true}}"""
                     "/v1/push/devices/install" -> 200 to """{"serverId":"server-one","remoteDelivery":true}"""
                     else -> 500 to ""
                 }
@@ -205,7 +205,7 @@ class PushSyncTests {
         val result = PushSync(store, "install", true, { "token" }, client = { connection ->
             client(connection.url) { request ->
                 when (request.pathWithQuery) {
-                    "/v1/push" -> 200 to """{"serverId":"server-one"}"""
+                    "/v1/push" -> 200 to """{"serverId":"server-one","transports":{"apns":false,"fcm":true}}"""
                     else -> 401 to ""
                 }
             }
