@@ -474,6 +474,17 @@ class CrumbleTests {
         model.cancelStream()
     }
 
+    fun emptyChatSnapshotAppliesWithoutMessages() = runTest {
+        val credentials = dev.crumble.android.storage.InMemoryCredentialStore()
+        val testScope = TestScope(StandardTestDispatcher(testScheduler))
+        val (client, _) = StubTransport.client(token = "owner-one") { 503 to "" }
+        val model = AppModel(client = client, credentials = credentials, scope = testScope)
+        model.selectAgent("a1")
+        model.applySnapshot(ChatSnapshot(agentId = "a1", messages = emptyList(), status = "idle", hasMore = false, oldestEntryId = null))
+        assertTrue(model.messages.isEmpty())
+        model.cancelStream()
+    }
+
     @Test
     fun recentChatIsVisibleBeforeNetworkAndScopedToConnectionAndBot() = runTest {
         val credentials = dev.crumble.android.storage.InMemoryCredentialStore()

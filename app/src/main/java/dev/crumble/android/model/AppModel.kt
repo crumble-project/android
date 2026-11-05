@@ -192,7 +192,7 @@ class AppModel(
         val confirmed = messages.filter { it.deliveryState == MessageDeliveryState.confirmed }
         val tail = confirmed.takeLast(5)
         // Keep an entry intact so the history cursor cannot skip another row from that entry.
-        val boundary = tail.first().entryId
+        val boundary = tail.firstOrNull()?.entryId
         val retained = if (boundary == null) tail else confirmed.dropWhile { it.entryId != boundary }
         val cached = ChatSnapshot(
             agentId = selectedAgentID,
