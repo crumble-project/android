@@ -37,6 +37,23 @@
         },
         "executionId": {
           "type": "string"
+        },
+        "jobName": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "groupName": {
+          "type": "string"
+        },
+        "waitingFor": {
+          "type": "string",
+          "enum": [
+            "approval",
+            "credential",
+            "login"
+          ]
         }
       },
       "required": [

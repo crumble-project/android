@@ -183,7 +183,7 @@ class CrumbleTests {
     fun activityFeedDecodesOperationalRecordsAndDetails() = runTest {
         val (client, stub) = StubTransport.client { req ->
             assertEquals("/v1/activity/feed", req.pathWithQuery)
-            200 to """{"activities":[{"id":"evt-1","agentId":"a1","agentName":"Atlas","entryId":"run-1","timestamp":1720000000000,"kind":"tool-call","details":{"toolName":"search","query":"calendar"}}],"hasMore":true}"""
+            200 to """{"activities":[{"id":"evt-1","agentId":"a1","agentName":"Atlas","entryId":"run-1","timestamp":1720000000000,"kind":"tool-call","details":{"toolName":"search","query":"calendar"}}],"nextCursor":null,"hasMore":true}"""
         }
         val feed = client.activityFeed()
         assertTrue(feed.hasMore)
@@ -345,7 +345,7 @@ class CrumbleTests {
         val (client, stub) = StubTransport.client { req ->
             when (req.pathWithQuery) {
                 "/v1/mcp-servers/s1/oauth" -> 200 to """{"authorizationUrl":"https://auth.example.com/authorize?state=x"}"""
-                "/v1/mcp-servers/s1/oauth/callback" -> 200 to """{"id":"s1","name":"Linear","url":"https://mcp.linear.app/mcp","enabled":true,"agentId":null,"auth":"oauth","authenticated":true}"""
+                "/v1/mcp-servers/s1/oauth/callback" -> 200 to """{"id":"s1","name":"Linear","url":"https://mcp.linear.app/mcp","enabled":true,"agentId":null,"oauthClientId":null,"oauthClientSecret":{"configured":false,"passwordManager":null,"reference":null},"token":{"configured":false,"passwordManager":null,"reference":null},"error":null,"auth":"oauth","authenticated":true}"""
                 else -> 404 to ""
             }
         }
@@ -381,7 +381,7 @@ class CrumbleTests {
     @Test
     fun taskPickersPreserveTheInstantAndSubmitOnlyTheSelectedMode() = runTest {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
-        val response = """{"id":"s1","agentId":"a1","name":"Greeting","prompt":"Say hi","enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z","cron":null,"nextRunAt":null,"createdAt":"2026-10-18T10:00:00Z","createdByAgentId":null}"""
+        val response = """{"id":"s1","agentId":"a1","name":"Greeting","kind":"prompt","prompt":"Say hi","command":null,"timeoutSeconds":600,"notify":true,"eventSourceId":null,"enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z","cron":null,"nextRunAt":null,"createdAt":"2026-10-18T10:00:00Z","createdByAgentId":null}"""
         val (client, stub) = StubTransport.client { req ->
             200 to if (req.method == "PATCH") response else "[]"
         }

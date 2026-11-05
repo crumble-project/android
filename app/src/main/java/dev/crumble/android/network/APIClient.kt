@@ -354,7 +354,7 @@ class APIClient(
 
     suspend fun providers(): List<ProviderStatus> = operations.listProviders().map { it.domain() }
     suspend fun models(provider: String): List<ModelSummary> = operations.listModels(provider).map { it.domain() }
-    suspend fun setProviderKey(provider: String, apiKey: String) { operations.putProviderKey(request(strings("apiKey" to apiKey)), provider) }
+    suspend fun setProviderKey(provider: String, apiKey: String) { operations.putProviderKey(request(strings("value" to apiKey)), provider) }
     suspend fun deleteProviderKey(provider: String) = operations.deleteProviderKey(provider)
     suspend fun mcpServers(): List<MCPServer> = operations.listMcpServers().map { it.domain() }
     suspend fun createMCPServer(payload: Map<String, JsonElement>): MCPServer = operations.createMcpServer(request(payload)).domain()

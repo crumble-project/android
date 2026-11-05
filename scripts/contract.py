@@ -15,7 +15,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 ASSETS = ("openapi.json", "chat-snapshot.schema.json", "activity-event.schema.json", "heartbeat.schema.json", "CHANGELOG.md", "source-commit.txt")
 GENERATED = ROOT / "app/src/main/java/dev/crumble/android/generated"
 GENERATOR = ("scripts/generate-contract.py", "scripts/templates/ContractBoundary.kt")
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 
 def digest(path):

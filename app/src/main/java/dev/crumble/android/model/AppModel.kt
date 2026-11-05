@@ -32,6 +32,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -1043,7 +1044,6 @@ class AppModel(
                         "instructions" to JsonPrimitive(draft.instructions),
                         "provider" to JsonPrimitive(draft.provider),
                         "model" to JsonPrimitive(draft.model),
-                        "avatar" to JsonPrimitive(draft.avatar),
                         "enabled" to JsonPrimitive(draft.enabled),
                         "tools" to JsonArray(tools.map { JsonPrimitive(it) }),
                         "skills" to CrumbleJson.encodeToJsonElement(ListSerializer(Skill.serializer()), draft.skills),
@@ -1533,7 +1533,7 @@ class AppModel(
             put("name", JsonPrimitive(name))
             put("url", JsonPrimitive(rawURL))
             put("enabled", JsonPrimitive(form.enabled))
-            if (form.token.isNotEmpty()) put("token", JsonPrimitive(form.token))
+            if (form.token.isNotEmpty()) put("token", JsonObject(mapOf("value" to JsonPrimitive(form.token))))
         }
         val isNew = form.serverID.isEmpty()
         val provisionalID = if (isNew) "pending-mcp-${newRequestID()}" else form.serverID

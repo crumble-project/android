@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pin the bot's `6.0.0` contract as a local export and bump the generator to `1.1.0`, adding closed objects with declared properties, nullable named schemas and `allOf` parts, and `*/*` binary responses.
+- Send provider keys as `value` and MCP tokens as `{ value }`, and show learned changes in the activity feed.
 - Replace the local glossary with a link to the canonical glossary in the spec repository.
 - Preserve admitted task execution fields for navigation and reject non-admitted or incomplete starts instead of reporting success.
 

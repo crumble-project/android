@@ -22,7 +22,7 @@ Open the navigation drawer › **Settings**, enter the server URL (`http://10.0.
 
 ## Shared API contract
 
-`contract/pin.json` and `contract/assets/` pin the verified `bot` contract release (`contract-vX.Y.Z`). `scripts/generate-contract.py` generates Kotlin wire models and operations without external build-time dependencies.
+`contract/pin.json` and `contract/assets/` pin a verified `bot` contract: a local export of a `bot` commit, or a release (`contract-vX.Y.Z`). `bot` no longer publishes contract releases, so current updates use `--local`. `scripts/generate-contract.py` generates Kotlin wire models and operations without external build-time dependencies.
 
 ```bash
 python3 scripts/contract.py generate                        # Regenerate from current pin

@@ -11,7 +11,7 @@ private fun <T> T?.optional(): OptionalField<T> =
     if (this == null) OptionalField.Absent else OptionalField.Present(this)
 
 internal fun dev.crumble.android.model.Agent.wire() = CreateAgentRequest(
-    name = name, avatar = avatar.optional(), description = description.optional(),
+    name = name, description = description.optional(),
     instructions = instructions.optional(), provider = provider.optional(), model = model.optional(),
     enabled = OptionalField.Present(enabled), tools = tools.optional(),
     skills = skills?.map { CreateAgentRequestSkillsItem(it.name, it.instructions) }.optional(),
@@ -28,7 +28,7 @@ internal fun dev.crumble.android.push.PushRegistration.wire() = PutPushDeviceReq
 
 internal fun AgentPreview.domain() = dev.crumble.android.model.Agent(
     id = id, name = name, description = description, instructions = instructions,
-    avatar = avatar, enabled = enabled, provider = provider, model = model,
+    enabled = enabled, provider = provider, model = model,
     tools = tools, delegates = delegates,
     skills = skills.map { dev.crumble.android.model.Skill(name = it.name, instructions = it.instructions) },
     sharedSkills = sharedSkills, sharedMemory = sharedMemory, mcpServers = mcpServers,
@@ -38,7 +38,7 @@ internal fun AgentPreview.domain() = dev.crumble.android.model.Agent(
 
 internal fun dev.crumble.android.generated.Agent.domain() = dev.crumble.android.model.Agent(
     id = id, name = name, description = description, instructions = instructions,
-    avatar = avatar, enabled = enabled, provider = provider, model = model,
+    enabled = enabled, provider = provider, model = model,
     tools = tools, delegates = delegates,
     skills = skills.map { dev.crumble.android.model.Skill(name = it.name, instructions = it.instructions) },
     sharedSkills = sharedSkills, sharedMemory = sharedMemory, mcpServers = mcpServers,
@@ -87,7 +87,12 @@ internal fun dev.crumble.android.generated.Execution.domain() = dev.crumble.andr
     id, agentId, conversationId, status, prompt, error, createdAt, updatedAt,
 )
 internal fun ActivityFeed.domain() = ActivityFeedResponse(activities.map {
-    ActivityRecord(it.id, it.agentId, it.agentName, it.entryId, it.timestamp?.toLong(), it.kind, JsonObject(it.details))
+    when (it) {
+        is ActivityFeedActivitiesItem.Variant1 -> it.value.run { ActivityRecord(id, agentId, agentName, entryId, timestamp?.toLong(), kind, JsonObject(details)) }
+        is ActivityFeedActivitiesItem.Variant2 -> it.value.run {
+            ActivityRecord(id, agentId.orEmpty(), agentName.orEmpty(), null, timestamp.toLong(), kind, CrumbleJson.encodeToJsonElement(LearnedChange.serializer(), change))
+        }
+    }
 }, hasMore)
 internal fun Provider.domain() = ProviderStatus(provider, name, configured)
 internal fun Model.domain() = ModelSummary(provider, id, name, contextWindow.toInt(), reasoning)
