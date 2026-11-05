@@ -308,12 +308,14 @@ fun MessageView(
 
     when (message.role) {
         "event" -> {
-            if (message.kind == "bot-message") {
-                BotMessageView(message = message)
-            } else {
-                EventView(model = model, message = message)
+            when {
+                message.heldAction != null -> HeldActionCard(model, message.heldAction, message.text)
+                message.jobQuestion != null -> JobQuestionCard(model, message.jobQuestion, message.text)
+                message.kind == "bot-message" -> BotMessageView(message = message)
+                else -> EventView(model = model, message = message)
             }
         }
+        "toolResult" -> message.botRequest?.let { BotRequestCard(model, it) }
         "user" -> {
             Row(
                 modifier = Modifier.fillMaxWidth(),

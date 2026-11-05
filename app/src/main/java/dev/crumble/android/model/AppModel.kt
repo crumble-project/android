@@ -5,6 +5,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.crumble.android.BuildConfig
+import dev.crumble.android.generated.BotRequest
+import dev.crumble.android.generated.CodingJob
+import dev.crumble.android.generated.HeldAction
 import dev.crumble.android.network.APIClient
 import dev.crumble.android.network.APIError
 import dev.crumble.android.network.friendlyError
@@ -142,6 +145,8 @@ private fun defaultAppScope(): CoroutineScope {
     return CoroutineScope(SupervisorJob() + dispatcher)
 }
 
+private const val DECISION_POLL_MS = 5_000L
+
 /**
  * The app's state and the actions that change it. Network work runs in coroutines on the model's
  * scope; results from a replaced connection or a previous agent are dropped.
@@ -158,6 +163,15 @@ class AppModel(
     var serverURL by mutableStateOf("http://127.0.0.1:7337")
     var token by mutableStateOf("")
     var email by mutableStateOf("")
+    var heldActions by mutableStateOf<List<HeldAction>>(emptyList())
+    var codingJobs by mutableStateOf<List<CodingJob>>(emptyList())
+    var botRequests by mutableStateOf<List<BotRequest>>(emptyList())
+    var decisionsLoaded by mutableStateOf(false)
+    var decisionsFailed by mutableStateOf(false)
+    var decidingIDs by mutableStateOf<Set<String>>(emptySet())
+    var decisionErrors by mutableStateOf<Map<String, String>>(emptyMap())
+    private var decisionsJob: Job? = null
+    private var decisionsKey = ""
     var password by mutableStateOf("")
     var client: APIClient? by mutableStateOf(client)
         private set
@@ -440,6 +454,12 @@ class AppModel(
         val version = selectionVersion
         selectedAgentID = id
         route = Route.AgentChat(id)
+        heldActions = emptyList()
+        codingJobs = emptyList()
+        botRequests = emptyList()
+        decisionsLoaded = false
+        decisionsFailed = false
+        decisionErrors = emptyMap()
         val cached = cachedChat(id)
         snapshot = cached?.copy(messages = null)
         messages = cached?.messages.orEmpty() + pendingMessages[id].orEmpty()
@@ -500,12 +520,94 @@ class AppModel(
         messages = confirmed + local
         snapshot = incoming.copy(messages = null)
         cacheRecentChat()
+        followDecisions()
     }
 
     fun cancelStream() {
         streamJob?.cancel()
         streamJob = null
         streamStatus = ""
+        decisionsJob?.cancel()
+        decisionsKey = ""
+    }
+
+    private fun hasPendingDecision(): Boolean =
+        messages.any { message ->
+            message.heldAction?.let { ref -> heldActions.any { it.id == ref.id && it.status == "pending" } } == true ||
+                message.jobQuestion?.let { ref -> codingJobs.any { it.question?.id == ref.id } } == true ||
+                message.botRequest?.let { ref -> botRequests.any { it.id == ref.id && it.status == "pending" } } == true
+        }
+
+    private suspend fun loadDecisions(api: APIClient, agentID: String) {
+        try {
+            val held = if (messages.any { it.heldAction != null }) api.heldActions(agentID) else emptyList()
+            val jobs = if (messages.any { it.jobQuestion != null }) api.codingJobs(agentID) else emptyList()
+            val requests = if (messages.any { it.botRequest != null }) api.botRequests(agentID) else emptyList()
+            if (selectedAgentID != agentID) return
+            heldActions = held
+            codingJobs = jobs
+            botRequests = requests
+            decisionsLoaded = true
+            decisionsFailed = false
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            if (selectedAgentID == agentID) decisionsFailed = true
+        }
+    }
+
+    // Another client, a stopped job, or a restart can settle a decision, so keep reading while one waits.
+    private fun followDecisions() {
+        val refs = messages.flatMap { listOfNotNull(it.heldAction?.id, it.jobQuestion?.id, it.botRequest?.id) }
+        val key = selectedAgentID + "\n" + refs.joinToString("\n")
+        val api = client
+        if (refs.isEmpty() || key == decisionsKey || api == null) return
+        val agentID = selectedAgentID
+        decisionsKey = key
+        decisionsJob?.cancel()
+        decisionsJob = scope.launch {
+            do {
+                loadDecisions(api, agentID)
+                if (decisionsFailed || hasPendingDecision()) delay(DECISION_POLL_MS)
+            } while (isActive && (decisionsFailed || hasPendingDecision()))
+        }
+    }
+
+    private fun decide(id: String, work: suspend (APIClient, String) -> Unit) {
+        val api = client ?: return
+        if (id in decidingIDs) return
+        val agentID = selectedAgentID
+        decidingIDs = decidingIDs + id
+        decisionErrors = decisionErrors - id
+        scope.launch {
+            try {
+                work(api, agentID)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                decisionErrors = decisionErrors + (id to friendlyError(e))
+            } finally {
+                decidingIDs = decidingIDs - id
+            }
+            loadDecisions(api, agentID)
+        }
+    }
+
+    fun decideHeldAction(id: String, approve: Boolean, reason: String = "") = decide(id) { api, agentID ->
+        if (approve) api.approveHeldAction(agentID, id) else api.declineHeldAction(agentID, id, reason.trim())
+    }
+
+    fun answerJobQuestion(job: String, questionID: String, text: String) = decide(questionID) { api, agentID ->
+        api.answerCodingJob(agentID, job, questionID, text)
+    }
+
+    fun decideBotRequest(id: String, approve: Boolean) = decide(id) { api, agentID ->
+        if (approve) {
+            val created = api.approveBotRequest(agentID, id)
+            if (agents.none { it.id == created.id }) agents = agents + created
+        } else {
+            api.declineBotRequest(agentID, id)
+        }
     }
 
     private suspend fun streamChat(api: APIClient, id: String, version: Int) {

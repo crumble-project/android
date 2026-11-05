@@ -91,6 +91,18 @@ data class BotCommunication(
     val status: String = "",
 )
 
+/** A desktop job action in the transcript; its live state comes from the bot's held actions. */
+@Serializable
+data class HeldActionRef(val id: String = "", val job: String = "")
+
+/** A coding job's question in the transcript; whether it still waits comes from the job listing. */
+@Serializable
+data class JobQuestionRef(val id: String = "", val job: String = "")
+
+/** A `request_bot` result in the transcript; its live state comes from the bot's requests. */
+@Serializable
+data class BotRequestRef(val id: String = "", val name: String = "")
+
 /** Client-side delivery state for an optimistic owner message. */
 @Serializable
 enum class MessageDeliveryState {
@@ -117,6 +129,9 @@ data class Message(
     /** The idempotency key echoed by the server for owner messages. */
     val requestId: String? = null,
     val deliveryState: MessageDeliveryState = MessageDeliveryState.confirmed,
+    val heldAction: HeldActionRef? = null,
+    val jobQuestion: JobQuestionRef? = null,
+    val botRequest: BotRequestRef? = null,
 ) {
     val text: String
         get() = contentText(content)
@@ -356,6 +371,7 @@ sealed class ChatRow {
             return when (message.role) {
                 "user" -> message.text.isNotEmpty() || !message.attachments.isNullOrEmpty()
                 "event" -> message.text.isNotEmpty()
+                "toolResult" -> message.botRequest != null
                 "assistant" -> {
                     val blocks = message.blocks
                     if (blocks is JsonArray) {

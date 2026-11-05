@@ -4,6 +4,8 @@ import dev.crumble.android.model.ActivityEvent
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AgentDraft
 import dev.crumble.android.model.AppModel
+import dev.crumble.android.model.BotRequestRef
+import dev.crumble.android.model.HeldActionRef
 import dev.crumble.android.model.AttachmentError
 import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.ChatSnapshot
@@ -474,6 +476,53 @@ class CrumbleTests {
         model.cancelStream()
     }
 
+    @Test
+    fun heldActionKeepsItsCardWhenADecisionFailsThenSettles() = runTest {
+        val testScope = TestScope(StandardTestDispatcher(testScheduler))
+        var status = "pending"
+        var refuse = true
+        fun held() = """{"id":"h1","job":"browse","action":"Pay the invoice","page":null,"ownerMessages":[],"reason":"Not asked for","status":"$status","declineReason":null,"heldAt":"2026-11-05T10:00:00Z","decidedAt":null}"""
+        val (client, _) = StubTransport.client { req ->
+            when (req.pathWithQuery) {
+                "/v1/agents/a1/held-actions" -> 200 to "[${held()}]"
+                "/v1/agents/a1/held-actions/h1/approve" ->
+                    if (refuse) 503 to """{"error":"busy"}""" else { status = "approved"; 200 to held() }
+                else -> 503 to ""
+            }
+        }
+        val model = AppModel(client = client, credentials = dev.crumble.android.storage.InMemoryCredentialStore(), scope = testScope)
+        model.selectAgent("a1")
+        val event = Message(id = "e1", entryId = "e1", role = "event", content = JsonPrimitive("Pay the invoice"), heldAction = HeldActionRef("h1", "browse"))
+        model.applySnapshot(ChatSnapshot(agentId = "a1", messages = listOf(event), hasMore = false, oldestEntryId = null))
+        testScheduler.runCurrent()
+        assertEquals("pending", model.heldActions.single().status)
+
+        model.decideHeldAction("h1", approve = true)
+        assertTrue("h1" in model.decidingIDs)
+        testScheduler.runCurrent()
+        assertTrue(model.decisionErrors["h1"].orEmpty().contains("busy"))
+        assertEquals("pending", model.heldActions.single().status)
+        assertTrue(model.decidingIDs.isEmpty())
+
+        refuse = false
+        model.decideHeldAction("h1", approve = true)
+        testScheduler.runCurrent()
+        assertTrue(model.decisionErrors.isEmpty())
+        assertEquals("approved", model.heldActions.single().status)
+        model.cancelStream()
+    }
+
+    @Test
+    fun requestBotResultBecomesAChatRow() = runTest {
+        val (client, _) = StubTransport.client {
+            200 to """{"messages":[{"id":"t1","entryId":"t","role":"toolResult","content":"","toolName":"request_bot","toolDetails":{"id":"r1","proposal":{"name":"Scout"}}},{"id":"t2","entryId":"t","role":"toolResult","content":"","toolName":"request_bot","isError":true}],"hasMore":false,"oldestEntryId":null}"""
+        }
+        val messages = client.chatHistory("a1", before = "t", limit = 10).messages.orEmpty()
+        assertEquals(BotRequestRef("r1", "Scout"), messages[0].botRequest)
+        assertEquals(listOf(true, false), messages.map { ChatRow.shownInChat(it) })
+    }
+
+    @Test
     fun emptyChatSnapshotAppliesWithoutMessages() = runTest {
         val credentials = dev.crumble.android.storage.InMemoryCredentialStore()
         val testScope = TestScope(StandardTestDispatcher(testScheduler))

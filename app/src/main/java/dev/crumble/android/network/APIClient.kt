@@ -231,6 +231,19 @@ class APIClient(
         return (response?.get("token") as? JsonPrimitive)?.contentOrNull ?: throw SignInError("Sign-in returned no session.")
     }
 
+    suspend fun heldActions(agentID: String) = operations.listAgentHeldActions(agentID)
+    suspend fun approveHeldAction(agentID: String, id: String) { operations.approveAgentHeldAction(agentID, id) }
+    suspend fun declineHeldAction(agentID: String, id: String, reason: String) {
+        operations.declineAgentHeldAction(request(if (reason.isEmpty()) emptyMap() else strings("reason" to reason)), agentID, id)
+    }
+    suspend fun codingJobs(agentID: String) = operations.listCodingJobs(agentID).jobs
+    suspend fun answerCodingJob(agentID: String, job: String, questionID: String, text: String) {
+        operations.answerCodingJob(request(strings("questionId" to questionID, "text" to text)), agentID, job)
+    }
+    suspend fun botRequests(agentID: String) = operations.listBotRequests(agentID)
+    suspend fun approveBotRequest(agentID: String, id: String): Agent = operations.approveBotRequest(request(emptyMap()), agentID, id).agent.domain()
+    suspend fun declineBotRequest(agentID: String, id: String) { operations.declineBotRequest(agentID, id) }
+
     suspend fun agents(): List<Agent> = operations.listAgents().map { it.domain() }
 
     suspend fun createAgent(agent: Agent): Agent = operations.createAgent(agent.wire()).domain()

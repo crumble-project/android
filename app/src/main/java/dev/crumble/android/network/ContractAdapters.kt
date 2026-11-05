@@ -4,8 +4,10 @@ import dev.crumble.android.generated.*
 import dev.crumble.android.model.*
 import dev.crumble.android.push.PushInfo
 import dev.crumble.android.push.PushRegistrationResult
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 private fun <T> T?.optional(): OptionalField<T> =
     if (this == null) OptionalField.Absent else OptionalField.Present(this)
@@ -45,6 +47,14 @@ internal fun dev.crumble.android.generated.Agent.domain() = dev.crumble.android.
     inference = inference?.let { dev.crumble.android.model.Inference(it.thinkingLevel ?: "off", it.temperature, it.maxOutputTokens?.toInt()) },
 )
 
+private fun botRequestRef(toolName: String?, isError: Boolean?, details: JsonElement?): BotRequestRef? {
+    if (toolName != "request_bot" || isError == true) return null
+    val request = details as? JsonObject ?: return null
+    val id = (request["id"] as? JsonPrimitive)?.contentOrNull ?: return null
+    val name = ((request["proposal"] as? JsonObject)?.get("name") as? JsonPrimitive)?.contentOrNull ?: return null
+    return BotRequestRef(id, name)
+}
+
 internal fun TranscriptMessage.domain() = Message(
     id = id, entryId = entryId, role = role, content = JsonPrimitive(content), blocks = blocks,
     kind = kind, replyTo = replyTo, replyPreview = replyPreview,
@@ -52,6 +62,9 @@ internal fun TranscriptMessage.domain() = Message(
     communication = communication?.let { dev.crumble.android.model.BotCommunication(it.executionId, it.fromAgentId, it.fromName, it.toAgentId, it.toName, it.status) },
     timestamp = timestamp?.toLong(), attachments = attachments?.map { dev.crumble.android.model.AttachmentInfo(it.name, it.mimeType, it.size.toInt(), it.kind) },
     requestId = requestId,
+    heldAction = heldAction?.let { HeldActionRef(it.id, it.job) },
+    jobQuestion = jobQuestion?.let { JobQuestionRef(it.id, it.job) },
+    botRequest = botRequestRef(toolName, isError, toolDetails),
 )
 
 internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
@@ -61,6 +74,9 @@ internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
     communication = communication?.let { dev.crumble.android.model.BotCommunication(it.executionId, it.fromAgentId, it.fromName, it.toAgentId, it.toName, it.status) },
     timestamp = timestamp?.toLong(), attachments = attachments?.map { dev.crumble.android.model.AttachmentInfo(it.name, it.mimeType, it.size.toInt(), it.kind) },
     requestId = requestId,
+    heldAction = heldAction?.let { HeldActionRef(it.id, it.job) },
+    jobQuestion = jobQuestion?.let { JobQuestionRef(it.id, it.job) },
+    botRequest = botRequestRef(toolName, isError, toolDetails),
 )
 
 internal fun dev.crumble.android.generated.ChatSnapshot.domain() = dev.crumble.android.model.ChatSnapshot(

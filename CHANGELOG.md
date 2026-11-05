@@ -5,6 +5,7 @@
 - Pin the bot's `6.0.0` contract as a local export and bump the generator to `1.1.0`, adding closed objects with declared properties, nullable named schemas and `allOf` parts, and `*/*` binary responses.
 - Sign in with account email and password. The server token is gone; the app stores the returned session.
 - Send provider keys as `value` and MCP tokens as `{ value }`, and show learned changes in the activity feed.
+- Approve or decline held actions, answer coding job questions, and approve or decline bot requests from the chat. Pending cards refresh every five seconds.
 - Fix the "List is empty." error when opening a chat with no messages.
 - Replace the local glossary with a link to the canonical glossary in the spec repository.
 - Preserve admitted task execution fields for navigation and reject non-admitted or incomplete starts instead of reporting success.
