@@ -72,10 +72,17 @@ fun SettingsDialog(model: AppModel) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
-                        value = model.token,
-                        onValueChange = { model.token = it },
-                        label = { Text("Server token") },
-                        placeholder = { Text("Required") },
+                        value = model.email,
+                        onValueChange = { model.email = it },
+                        label = { Text("Email") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = model.password,
+                        onValueChange = { model.password = it },
+                        label = { Text("Password") },
+                        placeholder = { Text(if (model.token.isEmpty()) "Required" else "Signed in") },
                         visualTransformation = PasswordVisualTransformation(),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
@@ -100,7 +107,7 @@ fun SettingsDialog(model: AppModel) {
                         }
                     }
                     Text(
-                        text = "The token stays encrypted in the Android Keystore. On the Android emulator, use http://10.0.2.2:7337 to reach a server running on your computer.",
+                        text = "Your session stays encrypted in the Android Keystore; the password is not stored. On the Android emulator, use http://10.0.2.2:7337 to reach a server running on your computer.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

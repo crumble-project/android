@@ -157,6 +157,8 @@ class AppModel(
 ) {
     var serverURL by mutableStateOf("http://127.0.0.1:7337")
     var token by mutableStateOf("")
+    var email by mutableStateOf("")
+    var password by mutableStateOf("")
     var client: APIClient? by mutableStateOf(client)
         private set
     private var generation = 0
@@ -287,6 +289,7 @@ class AppModel(
             if (!savedUrl.isNullOrEmpty()) serverURL = savedUrl
             val savedToken = credentials.read("server-token")
             if (savedToken != null) token = savedToken
+            credentials.read("account-email")?.let { email = it }
         }
         val envUrl = environment["CRUMBLE_URL"]?.trim()
         if (!envUrl.isNullOrEmpty()) {
@@ -1946,14 +1949,24 @@ class AppModel(
             errorText = "Enter a valid server URL."
             return
         }
-        val candidate = APIClient(baseURL = rawURL, token = trimmedToken)
+        val trimmedEmail = email.trim()
+        val enteredPassword = password
+        if (enteredPassword.isEmpty() && trimmedToken.isEmpty()) {
+            errorText = "Enter your email and password."
+            return
+        }
         savingConnection = true
         errorText = ""
         scope.launch {
             try {
+                val session = if (enteredPassword.isEmpty()) trimmedToken else APIClient(baseURL = rawURL, token = "").signIn(trimmedEmail, enteredPassword)
+                val candidate = APIClient(baseURL = rawURL, token = session)
                 candidate.agents()
-                credentials.write("server-token", trimmedToken)
+                credentials.write("server-token", session)
+                credentials.write("account-email", trimmedEmail)
                 credentials.write("server-url", rawURL)
+                token = session
+                password = ""
                 cancelStream()
                 generation += 1
                 pendingMutations = emptySet()

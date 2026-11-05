@@ -219,6 +219,18 @@ class APIClient(
     private fun strings(vararg pairs: Pair<String, String>): Map<String, JsonElement> =
         pairs.associate { (key, value) -> key to JsonPrimitive(value) }
 
+    // Better Auth's route, so it sits outside the /v1 contract.
+    suspend fun signIn(email: String, password: String): String {
+        val fields = strings("email" to email, "password" to password)
+        val bytes = try {
+            send("POST", "/api/auth/sign-in/email", CrumbleJson.encodeToString(JsonObject(fields)).toByteArray(StandardCharsets.UTF_8))
+        } catch (e: APIError) {
+            throw if (e.statusCode == 401) SignInError("Invalid email or password.") else e
+        }
+        val response = CrumbleJson.parseToJsonElement(bytes.toString(StandardCharsets.UTF_8)) as? JsonObject
+        return (response?.get("token") as? JsonPrimitive)?.contentOrNull ?: throw SignInError("Sign-in returned no session.")
+    }
+
     suspend fun agents(): List<Agent> = operations.listAgents().map { it.domain() }
 
     suspend fun createAgent(agent: Agent): Agent = operations.createAgent(agent.wire()).domain()
@@ -419,7 +431,7 @@ class SSEParser(
 fun friendlyError(error: Throwable): String {
     if (error is APIError) {
         if (error.statusCode == 401) {
-            return "Authentication failed. Check the server token in Settings."
+            return "Authentication failed. Sign in again in Settings."
         }
         try {
             val obj = CrumbleJson.parseToJsonElement(error.body) as? JsonObject

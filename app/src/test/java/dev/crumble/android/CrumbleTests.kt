@@ -368,7 +368,7 @@ class CrumbleTests {
         } catch (e: APIError) {
             assertEquals(401, e.statusCode)
             assertEquals("bad token", e.body)
-            assertEquals("Authentication failed. Check the server token in Settings.", friendlyError(e))
+            assertEquals("Authentication failed. Sign in again in Settings.", friendlyError(e))
         }
     }
 

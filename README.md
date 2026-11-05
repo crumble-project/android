@@ -18,7 +18,7 @@ python3 scripts/contract.py check
 
 ## Connect to a server
 
-Open the navigation drawer › **Settings**, enter the server URL (`http://10.0.2.2:7337` on the Android Emulator for a host server on `127.0.0.1:7337`, or a LAN/HTTPS address on a physical device) and `server-token`, and tap **Save Connection**. Credentials are stored encrypted in the Android Keystore. Debug builds install as **Crumble Dev** (`ng.crumbli.android.dev`) beside the release app (`ng.crumbli.android`), so each keeps its own connection; the sign-in callback scheme is the application ID, for example `ng.crumbli.android:/oauth/callback`.
+Open the navigation drawer › **Settings**, enter the server URL (`http://10.0.2.2:7337` on the Android Emulator for a host server on `127.0.0.1:7337`, or a LAN/HTTPS address on a physical device), your account email and password, and tap **Save Connection**. The app stores the account session encrypted in the Android Keystore; it does not store the password. Debug builds install as **Crumble Dev** (`ng.crumbli.android.dev`) beside the release app (`ng.crumbli.android`), so each keeps its own connection; the sign-in callback scheme is the application ID, for example `ng.crumbli.android:/oauth/callback`.
 
 ## Shared API contract
 
