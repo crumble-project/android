@@ -7,6 +7,7 @@
 - Send provider keys as `value` and MCP tokens as `{ value }`, and show learned changes in the activity feed.
 - Approve or decline held actions, answer coding job questions, and approve or decline bot requests from the chat. Pending cards refresh every five seconds.
 - Fix the "List is empty." error when opening a chat with no messages.
+- Draw bots with Open Bot Avatar, using the avatar stored on the server, and edit avatars in the bot editor: colors, gallery, JSON import, and a generation prompt.
 - Replace the local glossary with a link to the canonical glossary in the spec repository.
 - Preserve admitted task execution fields for navigation and reject non-admitted or incomplete starts instead of reporting success.
 

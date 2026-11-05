@@ -8,12 +8,17 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 
 private fun <T> T?.optional(): OptionalField<T> =
     if (this == null) OptionalField.Absent else OptionalField.Present(this)
 
+internal fun BotAvatarDefinition?.wire(): CreateAgentRequestAvatar? =
+    this?.let { CrumblePatchJson.decodeFromJsonElement(CrumblePatchJson.encodeToJsonElement(it)) }
+
 internal fun dev.crumble.android.model.Agent.wire() = CreateAgentRequest(
-    name = name, description = description.optional(),
+    name = name, avatar = avatar.wire().optional(), description = description.optional(),
     instructions = instructions.optional(), provider = provider.optional(), model = model.optional(),
     enabled = OptionalField.Present(enabled), tools = tools.optional(),
     skills = skills?.map { CreateAgentRequestSkillsItem(it.name, it.instructions) }.optional(),
@@ -30,7 +35,7 @@ internal fun dev.crumble.android.push.PushRegistration.wire() = PutPushDeviceReq
 
 internal fun AgentPreview.domain() = dev.crumble.android.model.Agent(
     id = id, name = name, description = description, instructions = instructions,
-    enabled = enabled, provider = provider, model = model,
+    avatar = avatar, enabled = enabled, provider = provider, model = model,
     tools = tools, delegates = delegates,
     skills = skills.map { dev.crumble.android.model.Skill(name = it.name, instructions = it.instructions) },
     sharedSkills = sharedSkills, sharedMemory = sharedMemory, mcpServers = mcpServers,
@@ -40,7 +45,7 @@ internal fun AgentPreview.domain() = dev.crumble.android.model.Agent(
 
 internal fun dev.crumble.android.generated.Agent.domain() = dev.crumble.android.model.Agent(
     id = id, name = name, description = description, instructions = instructions,
-    enabled = enabled, provider = provider, model = model,
+    avatar = avatar, enabled = enabled, provider = provider, model = model,
     tools = tools, delegates = delegates,
     skills = skills.map { dev.crumble.android.model.Skill(name = it.name, instructions = it.instructions) },
     sharedSkills = sharedSkills, sharedMemory = sharedMemory, mcpServers = mcpServers,

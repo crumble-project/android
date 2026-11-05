@@ -31,3 +31,4 @@ plugins {
 
 rootProject.name = "Crumble"
 include(":app")
+includeBuild("third_party/open-bot-avatar-kt")

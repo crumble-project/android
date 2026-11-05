@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.crumble.android.BuildConfig
+import dev.crumble.android.generated.BotAvatarDefinition
 import dev.crumble.android.generated.BotRequest
 import dev.crumble.android.generated.CodingJob
 import dev.crumble.android.generated.HeldAction
@@ -15,7 +16,7 @@ import dev.crumble.android.network.oauthResult
 import dev.crumble.android.storage.CredentialStore
 import dev.crumble.android.storage.InMemoryCredentialStore
 import dev.crumble.android.ui.BotState
-import dev.crumble.android.ui.agentAvatarSeed
+import dev.crumble.android.ui.placeholderAvatar
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneId
@@ -38,6 +39,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.encodeToJsonElement
 
 sealed class Route {
     data class AgentChat(val id: String) : Route()
@@ -68,8 +70,7 @@ data class AgentDraft(
     var provider: String = "melious",
     var model: String = "",
     var instructions: String = "You are a thoughtful, capable personal assistant.",
-    var avatar: String = "bot:${newRequestID()}",
-    var avatarChoices: List<String> = emptyList(),
+    var avatar: BotAvatarDefinition? = null,
     var thinking: String = "off",
     var temperature: String = "",
     var maxOutput: String = "",
@@ -83,14 +84,6 @@ data class AgentDraft(
     var skills: List<Skill> = emptyList(),
     var sharedSkills: Set<String> = emptySet(),
 ) {
-    /** Offers new bots to pick from, keeping the current one first. */
-    fun withShuffledAvatars(): AgentDraft {
-        val choices = mutableListOf(agentAvatarSeed(Agent(id = agentID, avatar = avatar)))
-        while (choices.size < 7) {
-            choices.add(newRequestID())
-        }
-        return copy(avatarChoices = choices)
-    }
 }
 
 data class MemoryDraft(
@@ -949,7 +942,7 @@ class AppModel(
     // MARK: Agent profile
 
     fun createAgent() {
-        val draft = AgentDraft(isNew = true, agentID = "").withShuffledAvatars()
+        val draft = AgentDraft(isNew = true, agentID = "", avatar = placeholderAvatar(newRequestID()))
         agentDraft = draft
         loadEditorData(draft.provider)
     }
@@ -967,7 +960,7 @@ class AppModel(
             model = agent.model ?: "",
             provider = agent.provider ?: "",
             enabled = agent.enabled,
-            avatar = "bot:${agentAvatarSeed(agent)}",
+            avatar = agent.avatar,
             thinking = agent.inference?.thinkingLevel ?: "off",
             temperature = agent.inference?.temperature?.toString() ?: "",
             maxOutput = agent.inference?.maxOutputTokens?.toString() ?: "",
@@ -980,7 +973,7 @@ class AppModel(
             sharedMemory = agent.sharedMemory ?: false,
             delegates = (agent.delegates ?: emptyList()).toSet(),
             mcpServers = (agent.mcpServers ?: emptyList()).toSet(),
-        ).withShuffledAvatars()
+        )
         agentDraft = draft
         loadEditorData(draft.provider)
     }
@@ -1149,6 +1142,7 @@ class AppModel(
                         "instructions" to JsonPrimitive(draft.instructions),
                         "provider" to JsonPrimitive(draft.provider),
                         "model" to JsonPrimitive(draft.model),
+                        "avatar" to CrumblePatchJson.encodeToJsonElement(draft.avatar ?: placeholderAvatar(id)),
                         "enabled" to JsonPrimitive(draft.enabled),
                         "tools" to JsonArray(tools.map { JsonPrimitive(it) }),
                         "skills" to CrumbleJson.encodeToJsonElement(ListSerializer(Skill.serializer()), draft.skills),

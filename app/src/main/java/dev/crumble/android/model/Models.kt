@@ -35,7 +35,7 @@ data class Agent(
     val name: String = "",
     val description: String? = null,
     val instructions: String? = null,
-    val avatar: String? = null,
+    val avatar: dev.crumble.android.generated.BotAvatarDefinition? = null,
     val enabled: Boolean = false,
     val provider: String? = null,
     val model: String? = null,

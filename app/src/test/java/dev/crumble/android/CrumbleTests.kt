@@ -4,6 +4,13 @@ import dev.crumble.android.model.ActivityEvent
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AgentDraft
 import dev.crumble.android.model.AppModel
+import dev.crumble.android.network.wire
+import dev.crumble.android.ui.avatarColor
+import dev.crumble.android.ui.geometry
+import dev.crumble.android.ui.importAvatar
+import dev.crumble.android.ui.isAvatarColor
+import dev.crumble.android.ui.placeholderAvatar
+import dev.crumble.android.ui.withColors
 import dev.crumble.android.model.BotRequestRef
 import dev.crumble.android.model.HeldActionRef
 import dev.crumble.android.model.AttachmentError
@@ -40,9 +47,7 @@ import dev.crumble.android.network.SSEParser
 import dev.crumble.android.network.SignInError
 import dev.crumble.android.network.friendlyError
 import dev.crumble.android.network.oauthResult
-import dev.crumble.android.ui.BotLook
 import dev.crumble.android.ui.MarkdownBlock
-import dev.crumble.android.ui.agentAvatarSeed
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.time.ZoneId
@@ -523,6 +528,30 @@ class CrumbleTests {
     }
 
     @Test
+    fun avatarColorsExpandShortHex() {
+        assertEquals(avatarColor("#aabbcc"), avatarColor("#abc"))
+        assertTrue(isAvatarColor("#ABC") && isAvatarColor("#38bdf8"))
+        assertFalse(isAvatarColor("38bdf8") || isAvatarColor("#38bd"))
+    }
+
+    @Test
+    fun avatarImportKeepsColorsAndRejectsInvalidGeometry() {
+        val current = placeholderAvatar("a1").copy(color = "#123456", eyeColor = "#654321")
+        val json = """{"version":1,"id":"box","name":"Box","body":{"path":"M20 20H80V80H20Z"},"eyes":{"x":50,"y":46,"spacing":15,"scale":1}}"""
+        val imported = importAvatar(json, current).getOrThrow()
+        assertEquals("box", imported.definition.id)
+        assertEquals("#123456", imported.color)
+        assertTrue(importAvatar("""{"version":1}""", current).isFailure)
+    }
+
+    @Test
+    fun avatarRoundTripsThroughTheCreateRequest() {
+        val avatar = placeholderAvatar("a1")
+        assertEquals(avatar.definition.body.path, avatar.wire()?.definition?.body?.path)
+        assertEquals(avatar, avatar.geometry().withColors(avatar.color, avatar.eyeColor))
+    }
+
+    @Test
     fun emptyChatSnapshotAppliesWithoutMessages() = runTest {
         val credentials = dev.crumble.android.storage.InMemoryCredentialStore()
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
@@ -883,21 +912,6 @@ class CrumbleTests {
     fun requestIDsAreVersion4UUIDs() {
         val regex = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
         assertTrue(regex.matches(newRequestID()))
-    }
-
-    @Test
-    fun avatarSeedsAcceptLegacyValues() {
-        val cases = mapOf(
-            "bot:violet" to "violet",
-            "critters:violet" to "violet",
-            "sparkles" to "a1",
-            "😀" to "a1",
-            "" to "a1",
-        )
-        for ((avatar, seed) in cases) {
-            assertEquals(seed, agentAvatarSeed(Agent(id = "a1", avatar = avatar)))
-        }
-        assertEquals(BotLook("agent-seed"), BotLook("agent-seed"))
     }
 
     @Test

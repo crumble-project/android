@@ -1,7 +1,6 @@
 package dev.crumble.android.ui
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -21,7 +20,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -49,7 +47,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -113,45 +110,21 @@ fun AgentEditorDialog(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        BotAvatarView(
-                            seed = agentAvatarSeed(Agent(id = draft.agentID, avatar = draft.avatar)),
-                            size = 96.dp,
-                            live = true,
-                        )
+                        val avatar = draft.avatar ?: placeholderAvatar(draft.id.toString())
+                        BotAvatarView(avatar = avatar, size = 96.dp, live = true)
                         Text(
                             text = draft.name.trim().nilIfEmpty ?: "New Agent",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        ) {
-                            for (seed in draft.avatarChoices) {
-                                val selected = draft.avatar == "bot:$seed"
-                                Box(
-                                    modifier = Modifier
-                                        .border(
-                                            width = if (selected) 2.dp else 0.dp,
-                                            color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                            shape = RoundedCornerShape(10.dp),
-                                        )
-                                        .clickable {
-                                            model.agentDraft = draft.copy(avatar = "bot:$seed")
-                                        }
-                                        .padding(4.dp),
-                                ) {
-                                    BotAvatarView(seed = seed, size = 36.dp)
-                                }
-                            }
-                            IconButton(
-                                onClick = {
-                                    model.agentDraft = draft.withShuffledAvatars()
-                                },
-                            ) {
-                                Icon(Icons.Default.Shuffle, contentDescription = "More Avatars")
-                            }
-                        }
+                    }
+                }
+
+                item {
+                    SectionCard(title = "Avatar") {
+                        AvatarEditor(
+                            value = draft.avatar ?: placeholderAvatar(draft.id.toString()),
+                            onChange = { model.agentDraft = draft.copy(avatar = it) },
+                        )
                     }
                 }
 

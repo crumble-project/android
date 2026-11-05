@@ -1,13 +1,14 @@
 # Third-party notices
 
-## Bot avatars
+## Open Bot Avatar for Kotlin
 
-Bot avatars (`app/src/main/java/dev/crumble/android/ui/BotAvatar.kt`) are adapted from Hermex's drawn bot faces: their shapes, palette, eye geometry, blink schedule, and working pose. Hermex is available under the MIT License, Copyright (c) 2026 Uzair Ansar. The eye expressions follow Bloub's measured catalogue (jeremy-prt/bloub), also under the MIT License.
+Bot avatars are drawn by [open-bot-avatar-kt](https://github.com/cheetahbyte/open-bot-avatar-kt), a port of Open Bot Avatar. `app/src/main/res/raw/generate_avatar_prompt.txt` comes from the `bot` web app.
 
 ```text
 MIT License
 
-Copyright (c) 2026 Uzair Ansar
+Copyright (c) 2026 Dominik Scholz
+Copyright (c) 2026 Leonhard Breuer
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

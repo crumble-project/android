@@ -9,6 +9,8 @@ Native Kotlin and Jetpack Compose client for a Crumble server.
 
 ## Build and test
 
+Bot avatars come from the `third_party/open-bot-avatar-kt` submodule. Clone with `--recurse-submodules`, or run `git submodule update --init` in an existing checkout. Set `ANDROID_HOME` or add a `local.properties` file to the submodule, because Gradle builds it separately.
+
 ```bash
 ./gradlew assembleDebug
 python3 -m unittest discover -s scripts -p 'test_*.py'
