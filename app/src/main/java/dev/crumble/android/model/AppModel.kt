@@ -115,6 +115,8 @@ sealed class Route {
     data object Settings : Route()
     data object General : Route()
     data object Account : Route()
+    data object NewChat : Route()
+    data object NewGroup : Route()
 
     /** Where Back leads. Null is Home. */
     val parent: Route?
@@ -122,6 +124,7 @@ sealed class Route {
             this in SETTINGS_PAGES -> Settings
             this in WORKSPACE_PAGES || this == Settings -> Account
             this is MessageGateway -> MessageGateways
+            this == NewGroup -> NewChat
             else -> null
         }
 
@@ -150,6 +153,8 @@ sealed class Route {
             Settings -> "Settings"
             General -> "General"
             Account -> "Account"
+            NewChat -> "New chat"
+            NewGroup -> "New group chat"
         }
 }
 
@@ -2055,9 +2060,9 @@ class AppModel(
         }
     }
 
-    fun openNewGroup() {
+    fun openNewGroup(memberIDs: List<String>) {
         errorText = ""
-        groupDraft = GroupDraft()
+        groupDraft = GroupDraft(memberIDs = memberIDs)
     }
 
     /** Opens the form at once, then moves it to the server's version unless the owner already edited it. */
@@ -2602,7 +2607,7 @@ class AppModel(
                 loadPasswordManagers()
             }
             Route.Avatars -> loadAgentsForPanel()
-            Route.Settings, Route.General, Route.Account -> Unit
+            Route.Settings, Route.General, Route.Account, Route.NewChat, Route.NewGroup -> Unit
             Route.Integrations -> {
                 loadPasswordManagers()
                 loadIntegrations()
@@ -4127,7 +4132,7 @@ class AppModel(
             is PaletteAction.OpenBot -> navigate(Route.AgentChat(action.id))
             is PaletteAction.OpenGroup -> navigate(Route.GroupChat(action.id))
             PaletteAction.NewBot -> createAgent()
-            PaletteAction.NewGroup -> openNewGroup()
+            PaletteAction.NewGroup -> navigate(Route.NewGroup)
             is PaletteAction.OpenPage -> navigate(action.route)
             is PaletteAction.SetTheme -> chooseTheme(action.theme)
         }

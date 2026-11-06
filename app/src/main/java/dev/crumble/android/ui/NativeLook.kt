@@ -1,5 +1,9 @@
 package dev.crumble.android.ui
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.foundation.background
@@ -238,6 +242,7 @@ fun ConversationRow(
     onClick: () -> Unit,
     preview: String? = null,
     enabled: Boolean = true,
+    trailing: @Composable () -> Unit = {},
     leading: @Composable () -> Unit,
 ) {
     Surface(onClick = onClick, enabled = enabled, color = Color.Transparent, modifier = Modifier.fillMaxWidth()) {
@@ -259,7 +264,20 @@ fun ConversationRow(
                     )
                 }
             }
+            trailing()
         }
+    }
+}
+
+/** A flat conversation list on a rounded sheet, with room below it for a floating button. */
+@Composable
+fun ConversationSheet(content: LazyListScope.() -> Unit) {
+    Surface(
+        color = sheetColor,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp), content = content)
     }
 }
 

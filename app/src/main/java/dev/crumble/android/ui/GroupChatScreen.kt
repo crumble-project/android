@@ -455,34 +455,34 @@ fun GroupFormDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                GroupLabel("Members")
-                Text(
-                    text = "Choose two to six bots. A bot added later gets a summary of the conversation so far.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                GroupedRows {
-                    for (bot in model.agents.filterNot { it.id.startsWith("pending:") }) {
-                        val on = bot.id in draft.memberIDs
-                        row { shape ->
-                            GroupedItem(
-                                shape = shape,
-                                leading = { BotAvatarView(agent = bot, size = 44.dp) },
-                                trailing = {
-                                    Switch(
-                                        checked = on,
-                                        enabled = on || draft.memberIDs.size < MAX_GROUP_MEMBERS,
-                                        onCheckedChange = { model.toggleGroupMember(bot.id, it) },
-                                    )
-                                },
-                            ) {
-                                RowTitle(bot.name, maxLines = 1)
-                                if (!bot.enabled) RowSubtitle("Disabled")
+                if (!isNew) {
+                    GroupLabel("Members")
+                    Text(
+                        text = "Choose two to six bots. A bot added later gets a summary of the conversation so far.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    GroupedRows {
+                        for (bot in model.agents.filterNot { it.id.startsWith("pending:") }) {
+                            val on = bot.id in draft.memberIDs
+                            row { shape ->
+                                GroupedItem(
+                                    shape = shape,
+                                    leading = { BotAvatarView(agent = bot, size = 44.dp) },
+                                    trailing = {
+                                        Switch(
+                                            checked = on,
+                                            enabled = on || draft.memberIDs.size < MAX_GROUP_MEMBERS,
+                                            onCheckedChange = { model.toggleGroupMember(bot.id, it) },
+                                        )
+                                    },
+                                ) {
+                                    RowTitle(bot.name, maxLines = 1)
+                                    if (!bot.enabled) RowSubtitle("Disabled")
+                                }
                             }
                         }
                     }
-                }
-                if (!isNew) {
                     TextButton(enabled = !pending, onClick = { confirmingDelete = true }) {
                         Text("Delete", color = MaterialTheme.colorScheme.error)
                     }

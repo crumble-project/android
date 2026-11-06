@@ -1,5 +1,6 @@
 package dev.crumble.android.ui
 
+import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.union
@@ -330,7 +331,7 @@ private fun CrumbleTopBar(model: AppModel) {
                         item("Group settings") { model.openGroupEditor(currentRoute.id) }
                     }
                 }
-                Route.Settings, Route.General -> Unit
+                Route.Settings, Route.General, Route.NewChat, Route.NewGroup -> Unit
                 Route.Memory -> {
                     IconButton(onClick = { model.openMemoryForm("", agentID = model.memoryScope?.takeIf { it != SKILLS_SHARED }) }) {
                         Icon(Icons.Default.Add, contentDescription = "New Shared Memory")
@@ -431,6 +432,8 @@ fun routeIcon(route: Route): ImageVector = when (route) {
     Route.Settings -> Icons.Default.Settings
     Route.General -> Icons.Default.Tune
     Route.Account -> Icons.Default.Person
+    Route.NewChat -> Icons.Default.Add
+    Route.NewGroup -> Icons.Default.GroupAdd
     is Route.AgentChat, is Route.GroupChat -> Icons.AutoMirrored.Filled.Message
 }
 

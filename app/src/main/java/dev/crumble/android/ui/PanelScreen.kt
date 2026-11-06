@@ -112,6 +112,8 @@ fun PanelView(
             Route.Settings -> SettingsPanel(model)
             Route.General -> GeneralPanel(model)
             Route.Account -> AccountPanel(model)
+            Route.NewChat -> NewChatPanel(model)
+            Route.NewGroup -> NewGroupPanel(model)
             is Route.AgentChat, is Route.GroupChat -> Unit
         }
     }

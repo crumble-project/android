@@ -442,7 +442,7 @@ class CommandPaletteActionTests {
         model.runPalette(PaletteAction.NewBot)
         assertTrue(model.agentDraft?.isNew == true)
         model.runPalette(PaletteAction.NewGroup)
-        assertTrue(model.groupDraft != null)
+        assertEquals(Route.NewGroup, model.route)
     }
 
     @Test
