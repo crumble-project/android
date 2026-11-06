@@ -37,12 +37,14 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
@@ -67,17 +69,21 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -85,18 +91,39 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
+import dev.crumble.android.model.Route
 import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.MentionCompletion
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.MessageDeliveryState
 import dev.crumble.android.model.PendingAttachment
+import dev.crumble.android.model.isNotice
+import dev.crumble.android.model.isWebLink
+import dev.crumble.android.model.ATTACHMENT_PICKER_TYPES
+import dev.crumble.android.model.botReactions
+import dev.crumble.android.model.displayOf
+import dev.crumble.android.model.isDesktopScreenshot
 import dev.crumble.android.model.loadAttachment
+import dev.crumble.android.model.mentionableBots
 import dev.crumble.android.model.messageLabel
 import dev.crumble.android.model.nilIfEmpty
+import dev.crumble.android.model.noticeTitle
 import dev.crumble.android.model.preview
+import androidx.compose.ui.platform.LocalUriHandler
+import dev.crumble.android.model.Sources
+import dev.crumble.android.model.SplitReply
+import dev.crumble.android.model.jobOf
+import dev.crumble.android.model.siteOf
+import dev.crumble.android.model.sourcesOf
+import dev.crumble.android.model.splitSources
 import androidx.compose.runtime.snapshotFlow
+import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun ChatView(
@@ -107,6 +134,8 @@ fun ChatView(
     val rows = remember(model.messages, model.snapshot, model.hasMore) {
         ChatRow.rows(messages = model.messages, snapshot = model.snapshot, hasMore = model.hasMore)
     }
+    val sources = remember(model.messages) { sourcesOf(model.messages) }
+    val reactions = remember(model.messages) { botReactions(model.messages) }
     // Keep each agent's scroll position isolated. Reverse layout means the
     // newest row is index 0 and is naturally anchored at the bottom.
     val listState = remember(agent.id) { LazyListState() }
@@ -153,7 +182,7 @@ fun ChatView(
                     verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom),
                 ) {
                     items(rows.asReversed(), key = { it.id }) { row ->
-                        ChatRowView(model = model, agent = agent, row = row)
+                        ChatRowView(model = model, agent = agent, row = row, sources = sources, reactions = reactions)
                     }
                 }
             }
@@ -208,35 +237,19 @@ fun ChatRowView(
     model: AppModel,
     agent: Agent,
     row: ChatRow,
+    sources: Map<String, Sources> = emptyMap(),
+    reactions: Map<String, List<String>> = emptyMap(),
 ) {
     when (row) {
-        is ChatRow.Older -> {
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                if (model.loadingOlder) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else {
-                    TextButton(onClick = { model.loadOlder() }) {
-                        Text("Load Earlier Messages")
-                    }
-                }
-            }
-        }
-        is ChatRow.Time -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = row.label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+        is ChatRow.Older -> OlderRow(loading = model.loadingOlder, onLoad = { model.loadOlder() })
+        is ChatRow.Time -> TimeRow(row.label)
         is ChatRow.MessageRow -> {
-            MessageView(model = model, message = row.message)
+            MessageView(
+                model = model,
+                message = row.message,
+                sources = sources[row.message.id],
+                reactions = reactions[row.message.entryId].orEmpty(),
+            )
         }
         is ChatRow.Partial -> {
             Row(modifier = Modifier.fillMaxWidth()) {
@@ -286,7 +299,7 @@ fun ChatRowView(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    OutlinedButton(onClick = { model.showingSettings = true }) {
+                    OutlinedButton(onClick = { model.navigate(Route.Providers) }) {
                         Text("Provider Settings…")
                     }
                 }
@@ -295,17 +308,51 @@ fun ChatRowView(
     }
 }
 
+@Composable
+internal fun OlderRow(loading: Boolean, onLoad: () -> Unit) {
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        if (loading) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+            TextButton(onClick = onLoad) {
+                Text("Load Earlier Messages")
+            }
+        }
+    }
+}
+
+@Composable
+internal fun TimeRow(label: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageView(
     model: AppModel,
     message: Message,
+    sources: Sources? = null,
+    reactions: List<String> = emptyList(),
 ) {
     val replyable = !message.entryId.isNullOrEmpty() && (message.role == "user" || message.role == "assistant")
-    val owner = message.origin == null || message.origin.kind == "owner"
     var menuExpanded by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
 
+    if (isNotice(message)) {
+        NoticeRow(model, message)
+        return
+    }
     when (message.role) {
         "event" -> {
             when {
@@ -315,7 +362,18 @@ fun MessageView(
                 else -> EventView(model = model, message = message)
             }
         }
-        "toolResult" -> message.botRequest?.let { BotRequestCard(model, it) }
+        "toolResult" -> {
+            val job = jobOf(message)
+            val display = remember(message.toolDetails) { displayOf(message) }
+            when {
+                display != null -> DisplayCardView(display)
+                isDesktopScreenshot(message) -> DesktopScreenshotCard(model, message)
+                message.botRequest != null -> BotRequestCard(model, message.botRequest)
+                message.credentialRequest != null -> CredentialRequestCard(model, message.credentialRequest)
+                message.loginRequest != null -> LoginRequestCard(model, message.loginRequest)
+                job != null -> JobCard(model, job)
+            }
+        }
         "user" -> {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -327,29 +385,12 @@ fun MessageView(
                     horizontalAlignment = Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    if (!owner) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(horizontal = 6.dp),
-                        ) {
-                            if (message.origin?.kind == "bot") {
-                                Icon(
-                                    imageVector = Icons.Default.Group,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Text(
-                                text = messageLabel(message),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    ReplyQuote(model = model, message = message)
-                    SentAttachments(model = model, message = message)
+                    ReplyQuote(message = message, transcript = model.messages)
+                    SentAttachments(
+                        message = message,
+                        imageBytes = { model.attachmentImageBytes(message, it) },
+                        loadImage = { entryID, index -> model.loadAttachmentImage(entryID = entryID, index = index) },
+                    )
                     if (message.text.isEmpty() && message.attachments.orEmpty().isNotEmpty() && replyable) {
                         ReplyButton(onClick = { model.replyTo = message })
                     }
@@ -363,7 +404,7 @@ fun MessageView(
                             }
                             Box {
                                 ChatBubble(
-                                    owner = owner,
+                                    owner = true,
                                     modifier = Modifier
                                         .widthIn(max = 310.dp)
                                         .combinedClickable(
@@ -393,33 +434,8 @@ fun MessageView(
                             }
                         }
                     }
-                    if (message.deliveryState != MessageDeliveryState.confirmed) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            if (message.deliveryState == MessageDeliveryState.sending) {
-                                CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
-                                Text(
-                                    text = "Sending…",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            } else {
-                                Text(
-                                    text = "Not sent",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                                Text(
-                                    text = "Retry",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.clickable { model.retryMessage(message) },
-                                )
-                            }
-                        }
-                    }
+                    Reactions(reactions)
+                    DeliveryStatus(message = message, onRetry = { model.retryMessage(message) })
                 }
             }
         }
@@ -439,7 +455,7 @@ fun MessageView(
                                 onLongClick = { menuExpanded = true },
                             ),
                     ) {
-                        MarkdownText(text = message.text)
+                        ReplyContent(message.text, sources)
                     }
                     MessageContextMenu(
                         expanded = menuExpanded,
@@ -463,7 +479,63 @@ fun MessageView(
 }
 
 @Composable
-private fun ReplyButton(onClick: () -> Unit) {
+internal fun DeliveryStatus(message: Message, onRetry: () -> Unit) {
+    if (message.deliveryState == MessageDeliveryState.confirmed) return
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (message.deliveryState == MessageDeliveryState.sending) {
+            CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
+            Text(
+                text = "Sending…",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                text = "Not sent",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Text(
+                text = "Retry",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable(onClick = onRetry),
+            )
+        }
+    }
+}
+
+/** A bot's Markdown; citations of pages its turn read show as chips after it. */
+@Composable
+internal fun ReplyContent(text: String, sources: Sources?) {
+    val reply = remember(text, sources) {
+        if (sources != null) splitSources(text, sources) else SplitReply(text, emptyList())
+    }
+    val uriHandler = LocalUriHandler.current
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        MarkdownText(text = reply.text)
+        if (reply.chips.isNotEmpty()) {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (chip in reply.chips) {
+                    AssistChip(
+                        onClick = { if (isWebLink(chip.href)) runCatching { uriHandler.openUri(chip.href) } },
+                        label = { Text(siteOf(chip.href), maxLines = 1) },
+                        modifier = Modifier.semantics { contentDescription = chip.title.ifEmpty { chip.href } },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ReplyButton(onClick: () -> Unit) {
     IconButton(
         onClick = onClick,
         modifier = Modifier.size(32.dp),
@@ -478,7 +550,7 @@ private fun ReplyButton(onClick: () -> Unit) {
 }
 
 @Composable
-private fun MessageContextMenu(
+internal fun MessageContextMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
     replyable: Boolean,
@@ -574,6 +646,55 @@ fun BotMessageView(message: Message) {
     }
 }
 
+/** A message from an automation, a credential, or another bot, collapsed like the website's. */
+@Composable
+fun NoticeRow(model: AppModel, message: Message) {
+    val open = message.id in model.expanded
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { model.expanded = if (open) model.expanded - message.id else model.expanded + message.id }
+                .semantics { stateDescription = if (open) "Expanded" else "Collapsed" }
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+        ) {
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp).rotate(if (open) 90f else 0f),
+                tint = tint,
+            )
+            noticeIcon(message)?.let { icon ->
+                Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = tint)
+            }
+            Text(
+                text = noticeTitle(message).orEmpty(),
+                style = MaterialTheme.typography.labelSmall,
+                color = tint,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+        AnimatedVisibility(visible = open) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                MarkdownText(text = message.text, modifier = Modifier.padding(12.dp))
+            }
+        }
+    }
+}
+
+private fun noticeIcon(message: Message): ImageVector? = when (message.origin?.kind) {
+    "credential" -> Icons.Default.Key
+    "bot" -> Icons.Default.Group
+    else -> null
+}
+
 @Composable
 fun EventView(
     model: AppModel,
@@ -617,13 +738,13 @@ fun EventView(
 
 @Composable
 fun ReplyQuote(
-    model: AppModel,
     message: Message,
+    transcript: List<Message>,
 ) {
     val reply = message.replyTo
     if (!reply.isNullOrEmpty()) {
         val quoted = message.replyPreview?.nilIfEmpty
-            ?: model.messages.firstOrNull { it.entryId == reply }?.text
+            ?: transcript.firstOrNull { it.entryId == reply }?.text
             ?: ""
         if (quoted.isNotEmpty()) {
             Surface(
@@ -660,35 +781,81 @@ fun Composer(
     model: AppModel,
     agent: Agent,
 ) {
+    val permittedBots = remember(model.agents, agent) { mentionableBots(agent, model.agents) }
+    val reply = model.replyTo
+    ComposerBar(
+        draft = model.draft,
+        onDraftChange = { model.draft = it },
+        attachments = model.attachments,
+        // Files load in the background; a late one must not land in another bot's draft.
+        onAddAttachment = { if (model.selectedAgentID == agent.id) model.addAttachment(it) },
+        onRemoveAttachment = model::removeAttachment,
+        onAttachmentError = { model.errorText = it },
+        replyTitle = reply?.let { "Replying to ${messageLabel(it)}" },
+        replyPreview = reply?.text.orEmpty(),
+        onCancelReply = { model.replyTo = null },
+        mentionable = permittedBots,
+        enabled = agent.enabled,
+        placeholder = if (agent.enabled) "Message ${agent.name}" else "${agent.name} is paused. Enable it in its profile.",
+        running = model.snapshot?.isRunning == true,
+        onStop = { model.abortChat() },
+        onSend = { model.sendMessage() },
+        footer = {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                BotReasoning(model = model, agent = agent)
+            }
+        },
+    )
+}
+
+/** The message field with its reply preview, mention suggestions, attachments, and send and stop buttons. */
+@Composable
+fun ComposerBar(
+    draft: String,
+    onDraftChange: (String) -> Unit,
+    attachments: List<PendingAttachment>,
+    onAddAttachment: (PendingAttachment) -> Unit,
+    onRemoveAttachment: (UUID) -> Unit,
+    onAttachmentError: (String) -> Unit,
+    replyTitle: String?,
+    replyPreview: String,
+    onCancelReply: () -> Unit,
+    mentionable: List<Agent>,
+    enabled: Boolean,
+    placeholder: String,
+    running: Boolean,
+    onStop: () -> Unit,
+    onSend: () -> Unit,
+    stopEnabled: Boolean = true,
+    footer: @Composable () -> Unit = {},
+) {
     val context = LocalContext.current
-    val running = model.snapshot?.isRunning == true
+    val attachmentScope = rememberCoroutineScope()
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
-        for (uri in uris) {
-            try {
-                val attachment = loadAttachment(context.contentResolver, uri)
-                model.addAttachment(attachment)
-            } catch (e: Exception) {
-                model.errorText = e.message ?: "Failed to attach file."
+        val resolver = context.contentResolver
+        val attach = onAddAttachment
+        val fail = onAttachmentError
+        attachmentScope.launch {
+            for (uri in uris) {
+                try {
+                    attach(withContext(Dispatchers.IO) { loadAttachment(resolver, uri) })
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    fail(e.message ?: "Failed to attach file.")
+                }
             }
         }
     }
 
-    val permittedBots = remember(model.agents, agent) {
-        model.agents.filter {
-            it.enabled &&
-                it.id != agent.id &&
-                (agent.delegates ?: emptyList()).contains(it.id) &&
-                (agent.tools ?: emptyList()).contains("delegate")
-        }
-    }
-    val completion = remember(model.draft, permittedBots) {
+    val completion = remember(draft, mentionable) {
         MentionCompletion.find(
-            text = model.draft,
-            selectionStart = model.draft.length,
-            selectionEnd = model.draft.length,
-            bots = permittedBots,
+            text = draft,
+            selectionStart = draft.length,
+            selectionEnd = draft.length,
+            bots = mentionable,
         )
     }
 
@@ -702,8 +869,7 @@ fun Composer(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            val reply = model.replyTo
-            if (reply != null) {
+            if (replyTitle != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(12.dp),
@@ -722,12 +888,12 @@ fun Composer(
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Replying to ${messageLabel(reply)}",
+                                text = replyTitle,
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary,
                             )
                             Text(
-                                text = preview(reply.text),
+                                text = preview(replyPreview),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -735,7 +901,7 @@ fun Composer(
                             )
                         }
                         IconButton(
-                            onClick = { model.replyTo = null },
+                            onClick = onCancelReply,
                             modifier = Modifier.size(28.dp),
                         ) {
                             Icon(
@@ -758,7 +924,7 @@ fun Composer(
                     for (bot in completion.bots) {
                         AssistChip(
                             onClick = {
-                                model.draft = model.draft.replaceRange(completion.range, "@${bot.name} ")
+                                onDraftChange(draft.replaceRange(completion.range, "@${bot.name} "))
                             },
                             label = { Text("@${bot.name}") },
                             leadingIcon = {
@@ -769,17 +935,17 @@ fun Composer(
                 }
             }
 
-            if (model.attachments.isNotEmpty()) {
+            if (attachments.isNotEmpty()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    for (file in model.attachments) {
+                    for (file in attachments) {
                         PendingAttachmentChip(
                             file = file,
-                            onRemove = { model.removeAttachment(file.id) },
+                            onRemove = { onRemoveAttachment(file.id) },
                         )
                     }
                 }
@@ -792,9 +958,9 @@ fun Composer(
             ) {
                 IconButton(
                     onClick = {
-                        filePicker.launch(arrayOf("image/*", "text/*", "application/json", "application/xml"))
+                        filePicker.launch(ATTACHMENT_PICKER_TYPES)
                     },
-                    enabled = agent.enabled,
+                    enabled = enabled,
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
@@ -803,16 +969,11 @@ fun Composer(
                 }
 
                 TextField(
-                    value = model.draft,
-                    onValueChange = { model.draft = it },
+                    value = draft,
+                    onValueChange = onDraftChange,
                     modifier = Modifier.weight(1f),
-                    enabled = agent.enabled,
-                    placeholder = {
-                        Text(
-                            if (agent.enabled) "Message ${agent.name}"
-                            else "${agent.name} is paused. Enable it in its profile.",
-                        )
-                    },
+                    enabled = enabled,
+                    placeholder = { Text(placeholder) },
                     maxLines = 6,
                     shape = RoundedCornerShape(22.dp),
                     colors = TextFieldDefaults.colors(
@@ -826,7 +987,7 @@ fun Composer(
                 )
 
                 if (running) {
-                    FilledTonalIconButton(onClick = { model.abortChat() }) {
+                    FilledTonalIconButton(onClick = onStop, enabled = stopEnabled) {
                         Icon(
                             imageVector = Icons.Default.Stop,
                             contentDescription = "Stop",
@@ -835,9 +996,9 @@ fun Composer(
                     }
                 }
 
-                val canSend = agent.enabled && (model.draft.isNotBlank() || model.attachments.isNotEmpty())
+                val canSend = enabled && (draft.isNotBlank() || attachments.isNotEmpty())
                 FilledIconButton(
-                    onClick = { model.sendMessage() },
+                    onClick = onSend,
                     enabled = canSend,
                 ) {
                     Icon(
@@ -846,6 +1007,8 @@ fun Composer(
                     )
                 }
             }
+
+            footer()
         }
     }
 }
@@ -889,8 +1052,9 @@ fun PendingAttachmentChip(
 
 @Composable
 fun SentAttachments(
-    model: AppModel,
     message: Message,
+    imageBytes: (Int) -> ByteArray?,
+    loadImage: suspend (String, Int) -> Unit,
 ) {
     val files = message.attachments ?: emptyList()
     if (files.isNotEmpty()) {
@@ -900,14 +1064,14 @@ fun SentAttachments(
         ) {
             files.forEachIndexed { index, file ->
                 if (file.isImage) {
-                    val bytes = model.attachmentImageBytes(message, index)
+                    val bytes = imageBytes(index)
                     val bitmap = remember(bytes) {
                         bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
                     }
                     LaunchedEffect(message.entryId, index) {
                         val entryID = message.entryId
                         if (!entryID.isNullOrEmpty()) {
-                            model.loadAttachmentImage(entryID = entryID, index = index)
+                            loadImage(entryID, index)
                         }
                     }
                     if (bitmap != null) {

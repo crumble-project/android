@@ -1,5 +1,49 @@
 package dev.crumble.android.network
 
+import dev.crumble.android.generated.AssignSkillBotRequest
+import dev.crumble.android.generated.BrowseSkillRepositoryRequest
+import dev.crumble.android.generated.Capabilities
+import dev.crumble.android.generated.CompleteGithubAppRequest
+import dev.crumble.android.generated.CompleteGithubAppSignInRequest
+import dev.crumble.android.generated.CreateEventSourceRequest
+import dev.crumble.android.generated.CreateEventSourceResponse
+import dev.crumble.android.generated.CreateGithubAppManifestRequest
+import dev.crumble.android.generated.CreateSkillRequest
+import dev.crumble.android.generated.CreateSkillRequestDocumentsItem
+import dev.crumble.android.generated.AdminUser
+import dev.crumble.android.generated.CreatedInvite
+import dev.crumble.android.generated.DesktopControl
+import dev.crumble.android.generated.DesktopViewer
+import dev.crumble.android.generated.GitHubAccount
+import dev.crumble.android.generated.Invite
+import dev.crumble.android.generated.ListOutdatedWorkspacesResponseWorkspacesItem
+import dev.crumble.android.generated.SetUserRoleRequest
+import dev.crumble.android.generated.GitHubApp
+import dev.crumble.android.generated.GroupChat
+import dev.crumble.android.generated.InstallSkillsRequest
+import dev.crumble.android.generated.JudgeModel
+import dev.crumble.android.generated.LearnedChange
+import dev.crumble.android.generated.OptionalField
+import dev.crumble.android.generated.PendingSkillUpdate
+import dev.crumble.android.generated.PluginSetting
+import dev.crumble.android.generated.PluginSettings
+import dev.crumble.android.generated.PutDesktopControlRequest
+import dev.crumble.android.generated.ScriptRun
+import dev.crumble.android.generated.ServerSettings
+import dev.crumble.android.generated.SetGithubAccountBotsRequest
+import dev.crumble.android.generated.SetGithubAppBotsRequest
+import dev.crumble.android.generated.SignInGithubAppRequest
+import dev.crumble.android.generated.SkillCheck
+import dev.crumble.android.generated.SkillListing
+import dev.crumble.android.generated.SkillPackage
+import dev.crumble.android.generated.UpdateEventRelayRequest
+import dev.crumble.android.generated.UpdateJudgeModelRequest
+import dev.crumble.android.generated.UpdateJudgeModelRequestJudgeModel
+import dev.crumble.android.generated.UpdateServerSettingsRequest
+import dev.crumble.android.generated.UpdateVisionModelRequest
+import dev.crumble.android.generated.UpdateVisionModelRequestVisionModel
+import dev.crumble.android.generated.UpdateWebSearchRequest
+import dev.crumble.android.generated.VisionModel
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.ActivityFeedResponse
 import dev.crumble.android.model.ChatHistoryResponse
@@ -7,12 +51,25 @@ import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
 import dev.crumble.android.model.CrumblePatchJson
 import dev.crumble.android.model.Execution
+import dev.crumble.android.model.GatewayConfig
+import dev.crumble.android.model.GroupSnapshot
+import dev.crumble.android.model.JobKind
+import dev.crumble.android.model.JobRef
+import dev.crumble.android.model.JobSummary
 import dev.crumble.android.model.MCPServer
 import dev.crumble.android.model.Memory
+import dev.crumble.android.model.MessageGateway
 import dev.crumble.android.model.ModelSummary
 import dev.crumble.android.model.OAuthStart
 import dev.crumble.android.model.OutgoingAttachment
-import dev.crumble.android.model.ProviderStatus
+import dev.crumble.android.model.RelayStatus
+import dev.crumble.android.model.SECRET_USES_PAGE
+import dev.crumble.android.model.SecretInput
+import dev.crumble.android.model.WebSearchSettings
+import dev.crumble.android.model.domain
+import dev.crumble.android.model.wire
+import dev.crumble.android.model.json
+import dev.crumble.android.model.EventSource
 import dev.crumble.android.model.Schedule
 import dev.crumble.android.model.SharedSkill
 import dev.crumble.android.model.nilIfEmpty
@@ -30,6 +87,7 @@ import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -42,6 +100,11 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 
+const val CHANGES_PAGE = 50
+private const val SCRIPT_RUNS_PAGE = 20L
+// The server reads GitHub while these run.
+private const val GITHUB_TIMEOUT_MS = 60_000
+
 data class APIError(
     val method: String,
     val path: String,
@@ -52,6 +115,11 @@ data class APIError(
 class SSEClosedError : Exception("server-sent event stream closed")
 
 class SignInError(message: String) : Exception(message)
+
+/** Who a session belongs to, from Better Auth rather than the /v1 contract. */
+data class AccountSession(val id: String, val admin: Boolean, val theme: String? = null)
+
+const val INVITE_HEADER = "x-crumble-invite"
 
 data class HttpRequestData(
     val method: String,
@@ -155,6 +223,7 @@ class APIClient(
         path: String,
         body: ByteArray? = null,
         timeoutMs: Int = 20_000,
+        extraHeaders: Map<String, String> = emptyMap(),
     ): HttpRequestData {
         val fullUrl = this.baseURL + path
         // Validate URL format
@@ -166,7 +235,7 @@ class APIClient(
         if (parsed.scheme.isNullOrEmpty() || parsed.host.isNullOrEmpty()) {
             throw IllegalArgumentException("Bad URL: $fullUrl")
         }
-        val headers = LinkedHashMap<String, String>()
+        val headers = LinkedHashMap(extraHeaders)
         if (token.isNotEmpty()) {
             headers["Authorization"] = "Bearer $token"
         }
@@ -188,8 +257,9 @@ class APIClient(
         path: String,
         body: ByteArray? = null,
         timeoutMs: Int = 20_000,
+        extraHeaders: Map<String, String> = emptyMap(),
     ): ByteArray {
-        val request = makeRequest(method, path, body, timeoutMs)
+        val request = makeRequest(method, path, body, timeoutMs, extraHeaders)
         val response = transport.execute(request)
         if (response.statusCode !in 200..299) {
             val prefixLen = minOf(response.body.size, 8 shl 10)
@@ -219,7 +289,7 @@ class APIClient(
     private fun strings(vararg pairs: Pair<String, String>): Map<String, JsonElement> =
         pairs.associate { (key, value) -> key to JsonPrimitive(value) }
 
-    // Better Auth's route, so it sits outside the /v1 contract.
+    // Better Auth's routes, so they sit outside the /v1 contract.
     suspend fun signIn(email: String, password: String): String {
         val fields = strings("email" to email, "password" to password)
         val bytes = try {
@@ -227,8 +297,60 @@ class APIClient(
         } catch (e: APIError) {
             throw if (e.statusCode == 401) SignInError("Invalid email or password.") else e
         }
+        return sessionToken(bytes) ?: throw SignInError("Sign-in returned no session.")
+    }
+
+    /** Creates the account; an invite lets it through while sign-up is closed. */
+    suspend fun signUp(name: String, email: String, password: String, invite: String): String {
+        val fields = strings("email" to email, "password" to password, "name" to name)
+        val bytes = try {
+            send(
+                "POST",
+                "/api/auth/sign-up/email",
+                CrumbleJson.encodeToString(JsonObject(fields)).toByteArray(StandardCharsets.UTF_8),
+                extraHeaders = if (invite.isEmpty()) emptyMap() else mapOf(INVITE_HEADER to invite),
+            )
+        } catch (e: APIError) {
+            throw SignInError(authMessage(e) ?: friendlyError(e))
+        }
+        return sessionToken(bytes) ?: throw SignInError("Sign-up returned no session.")
+    }
+
+    /** Revokes this client's session on the server. */
+    suspend fun signOut() {
+        send("POST", "/api/auth/sign-out", "{}".toByteArray(StandardCharsets.UTF_8))
+    }
+
+    suspend fun accountSession(): AccountSession {
+        val path = "/api/auth/get-session"
+        val bytes = send("GET", path)
+        val session = CrumbleJson.parseToJsonElement(bytes.toString(StandardCharsets.UTF_8)) as? JsonObject
+        val user = session?.get("user") as? JsonObject
+        val id = (user?.get("id") as? JsonPrimitive)?.contentOrNull
+            ?: throw APIError(method = "GET", path = path, statusCode = 401, body = "")
+        return AccountSession(
+            id,
+            admin = (user["role"] as? JsonPrimitive)?.contentOrNull == "admin",
+            theme = (user["theme"] as? JsonPrimitive)?.contentOrNull,
+        )
+    }
+
+    suspend fun updateTheme(theme: String) {
+        val body = CrumbleJson.encodeToString(JsonObject(strings("theme" to theme)))
+        send("POST", "/api/auth/update-user", body.toByteArray(StandardCharsets.UTF_8))
+    }
+
+    private fun sessionToken(bytes: ByteArray): String? {
         val response = CrumbleJson.parseToJsonElement(bytes.toString(StandardCharsets.UTF_8)) as? JsonObject
-        return (response?.get("token") as? JsonPrimitive)?.contentOrNull ?: throw SignInError("Sign-in returned no session.")
+        return (response?.get("token") as? JsonPrimitive)?.contentOrNull
+    }
+
+    // Better Auth answers with `message`, where the /v1 routes use `error`.
+    private fun authMessage(error: APIError): String? = try {
+        val body = CrumbleJson.parseToJsonElement(error.body) as? JsonObject
+        (body?.get("message") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotEmpty() }
+    } catch (_: Exception) {
+        null
     }
 
     suspend fun heldActions(agentID: String) = operations.listAgentHeldActions(agentID)
@@ -241,7 +363,16 @@ class APIClient(
         operations.answerCodingJob(request(strings("questionId" to questionID, "text" to text)), agentID, job)
     }
     suspend fun botRequests(agentID: String) = operations.listBotRequests(agentID)
-    suspend fun approveBotRequest(agentID: String, id: String): Agent = operations.approveBotRequest(request(emptyMap()), agentID, id).agent.domain()
+    suspend fun jobs(agentID: String, kind: JobKind): List<JobSummary> = when (kind) {
+        JobKind.coding -> operations.listCodingJobs(agentID).jobs.map { it.domain() }
+        JobKind.desktop -> operations.listDesktopJobs(agentID).jobs.map { it.domain() }
+    }
+    suspend fun jobHistory(agentID: String, job: JobRef, before: String?, limit: Int): ChatHistoryResponse = when (job.kind) {
+        JobKind.coding -> operations.getCodingJobHistory(agentID, job.name, limit.toLong(), before)
+        JobKind.desktop -> operations.getDesktopJobHistory(agentID, job.name, limit.toLong(), before)
+    }.domain()
+    suspend fun approveBotRequest(agentID: String, id: String, proposal: Map<String, JsonElement>? = null): Agent =
+        operations.approveBotRequest(request(proposal?.let { mapOf("proposal" to JsonObject(it)) }.orEmpty()), agentID, id).agent.domain()
     suspend fun declineBotRequest(agentID: String, id: String) { operations.declineBotRequest(agentID, id) }
 
     suspend fun agents(): List<Agent> = operations.listAgents().map { it.domain() }
@@ -257,20 +388,59 @@ class APIClient(
     suspend fun chatHistory(agentID: String, before: String, limit: Int): ChatHistoryResponse =
         operations.getChatHistory(agentID, before = before.nilIfEmpty, limit = limit.takeIf { it > 0 }?.toLong()).domain()
 
-    suspend fun sendChatMessage(agentID: String, content: String, requestID: String, replyTo: String, attachments: List<OutgoingAttachment> = emptyList()) {
+    private fun messageFields(content: String, requestID: String, replyTo: String, attachments: List<OutgoingAttachment>): Map<String, JsonElement> {
         val fields = strings("content" to content, "requestId" to requestID).toMutableMap()
         replyTo.nilIfEmpty?.let { fields["replyTo"] = JsonPrimitive(it) }
         if (attachments.isNotEmpty()) fields["attachments"] = CrumbleJson.encodeToJsonElement(ListSerializer(OutgoingAttachment.serializer()), attachments)
+        return fields
+    }
+
+    suspend fun sendChatMessage(agentID: String, content: String, requestID: String, replyTo: String, attachments: List<OutgoingAttachment> = emptyList()) {
+        val fields = messageFields(content, requestID, replyTo, attachments) + ("timezone" to JsonPrimitive(ZoneId.systemDefault().id))
         operations.sendMessage(request(fields), agentID, timeoutMs = if (attachments.isEmpty()) 20_000 else 120_000)
     }
 
     suspend fun attachment(agentID: String, entryID: String, index: Int): ByteArray = operations.getAttachment(agentID, entryID, index.toLong())
     suspend fun abortChat(agentID: String) = operations.abortChat(agentID)
-    suspend fun compactChat(agentID: String) { operations.compactChat(agentID) }
 
     suspend fun chatEvents(agentID: String, limit: Int? = null, onEvent: suspend (ChatSnapshot) -> Unit): Nothing =
         events(operations.streamChatEvents(agentID, limit?.toLong(), timeoutMs = 24 * 60 * 60 * 1000), SSEParser()) {
             onEvent(CrumblePatchJson.decodeFromString<dev.crumble.android.generated.SnapshotEventPayload>(it).domain())
+        }
+
+    suspend fun groupChats(): List<GroupChat> = operations.listGroupChats()
+    suspend fun groupChat(id: String): GroupChat = operations.getGroupChat(id)
+    suspend fun createGroupChat(name: String, memberIDs: List<String>): GroupChat =
+        operations.createGroupChat(dev.crumble.android.generated.CreateGroupChatRequest(name, memberIDs))
+    suspend fun updateGroupChat(id: String, name: String, memberIDs: List<String>): GroupChat =
+        operations.updateGroupChat(dev.crumble.android.generated.UpdateGroupChatRequest(OptionalField.Present(name), OptionalField.Present(memberIDs)), id)
+    suspend fun deleteGroupChat(id: String) = operations.deleteGroupChat(id)
+    suspend fun groupSnapshot(id: String): GroupSnapshot = operations.getGroupChatSnapshot(id).domain()
+    suspend fun groupHistory(id: String, before: String, limit: Int): ChatHistoryResponse =
+        operations.getGroupChatHistory(id, limit.toLong(), before).domain()
+    suspend fun sendGroupMessage(id: String, content: String, requestID: String, replyTo: String, attachments: List<OutgoingAttachment> = emptyList()) {
+        operations.sendGroupMessage(request(messageFields(content, requestID, replyTo, attachments)), id, timeoutMs = if (attachments.isEmpty()) 20_000 else 120_000)
+    }
+    suspend fun groupAttachment(id: String, entryID: String, index: Int): ByteArray = operations.getGroupAttachment(id, entryID, index.toLong())
+    suspend fun stopGroupChat(id: String) = operations.stopGroupChat(id)
+
+    suspend fun groupChatEvents(id: String, onEvent: suspend (GroupSnapshot) -> Unit): Nothing =
+        events(operations.streamGroupChatEvents(id, timeoutMs = 24 * 60 * 60 * 1000), SSEParser(accepting = setOf("snapshot"), requiresAgent = false)) {
+            onEvent(CrumblePatchJson.decodeFromString<dev.crumble.android.generated.GroupChatSnapshot>(it).domain())
+        }
+
+    suspend fun desktopRunning(agentID: String): Boolean = operations.getDesktopStatus(agentID).running
+    suspend fun createDesktopViewer(agentID: String, passive: Boolean = false): DesktopViewer =
+        operations.createDesktopViewer(agentID, if (passive) "true" else null)
+    suspend fun setDesktopHolder(agentID: String, holder: String): DesktopControl =
+        operations.putDesktopControl(PutDesktopControlRequest(holder), agentID)
+
+    /** The viewer page, which needs no sign-in: its one-use link is the credential. */
+    fun desktopViewerURL(viewer: DesktopViewer): String = URI(baseURL).resolve(viewer.path).toString()
+
+    suspend fun desktopEvents(agentID: String, onEvent: suspend (DesktopControl) -> Unit): Nothing =
+        events(operations.streamDesktopEvents(agentID, timeoutMs = 24 * 60 * 60 * 1000), SSEParser(accepting = setOf("control"), requiresAgent = false)) {
+            onEvent(CrumbleJson.decodeFromString<DesktopControl>(it))
         }
 
     suspend fun activityEvents(onEvent: suspend (dev.crumble.android.model.ActivityEvent) -> Unit): Nothing =
@@ -348,6 +518,37 @@ class APIClient(
     suspend fun createSharedSkill(name: String, instructions: String): SharedSkill = operations.createSkill(request(strings("name" to name, "instructions" to instructions))).domain()
     suspend fun updateSharedSkill(id: String, name: String, instructions: String): SharedSkill = requireNotNull(operations.updateSkill(request(strings("name" to name, "instructions" to instructions)), id)).domain()
     suspend fun deleteSharedSkill(id: String) = operations.deleteSkill(id)
+    suspend fun skillPackage(id: String): SkillPackage = operations.getSkill(id)
+    suspend fun copySharedSkill(full: SkillPackage): SharedSkill = operations.createSkill(
+        CreateSkillRequest(
+            name = "${full.name} copy".take(100),
+            description = OptionalField.Present(full.description),
+            instructions = full.instructions,
+            documents = OptionalField.Present(full.documents.map { CreateSkillRequestDocumentsItem(it.path, it.content) }),
+        ),
+    ).domain().copy(description = full.description, source = "shared")
+    suspend fun botSkills(agentID: String): List<SkillPackage> = operations.listAgentSkills(agentID)
+    suspend fun createBotSkill(agentID: String, name: String, instructions: String): SkillPackage =
+        operations.createAgentSkill(request(strings("name" to name, "instructions" to instructions)), agentID)
+    suspend fun updateBotSkill(agentID: String, skillID: String, name: String, instructions: String): SkillPackage =
+        requireNotNull(operations.updateAgentSkill(request(strings("name" to name, "instructions" to instructions)), agentID, skillID))
+    suspend fun pinBotSkill(agentID: String, skillID: String, pinned: Boolean): SkillPackage =
+        requireNotNull(operations.updateAgentSkill(request(mapOf("pinned" to JsonPrimitive(pinned))), agentID, skillID))
+    suspend fun deleteBotSkill(agentID: String, skillID: String) = operations.deleteAgentSkill(agentID, skillID)
+    /** Returns whether the bot already had the requested state. */
+    suspend fun assignSkill(skillID: String, botID: String, assigned: Boolean): Boolean =
+        operations.assignSkillBot(AssignSkillBotRequest(botID, assigned), skillID).skipped
+    suspend fun browseSkills(location: String): SkillListing =
+        operations.browseSkillRepository(BrowseSkillRepositoryRequest(location), timeoutMs = GITHUB_TIMEOUT_MS)
+    suspend fun installSkills(listing: SkillListing, paths: Set<String>, botIDs: Set<String>): List<SkillPackage> = operations.installSkills(
+        InstallSkillsRequest(listing.repository, listing.branch, listing.commit, paths.toList(), OptionalField.Present(botIDs.toList())),
+        timeoutMs = GITHUB_TIMEOUT_MS,
+    )
+    suspend fun checkSkillUpdates(): SkillCheck = operations.checkSkillUpdates(timeoutMs = GITHUB_TIMEOUT_MS)
+    suspend fun pendingSkillUpdate(id: String): PendingSkillUpdate = operations.getPendingSkillUpdate(id, timeoutMs = GITHUB_TIMEOUT_MS)
+    suspend fun applySkillUpdate(id: String): SkillPackage = operations.applySkillUpdate(id, timeoutMs = GITHUB_TIMEOUT_MS)
+    suspend fun changes(before: String? = null, limit: Int = CHANGES_PAGE): List<LearnedChange> = operations.listChanges(limit.toLong(), before)
+    suspend fun revertChange(id: String): LearnedChange = operations.revertChange(id)
     suspend fun schedules(): List<Schedule> = operations.listSchedules().map { it.domain() }
     suspend fun createSchedule(payload: Map<String, JsonElement>): Schedule = operations.createSchedule(request(payload)).domain()
     suspend fun updateSchedule(id: String, patch: Map<String, JsonElement>): Schedule = requireNotNull(operations.updateSchedule(request(patch), id)).domain()
@@ -363,7 +564,17 @@ class APIClient(
         )
     }
     suspend fun executions(): List<Execution> = operations.listExecutions().map { it.domain() }
-    suspend fun activityFeed(): ActivityFeedResponse = operations.getActivityFeed().domain()
+    suspend fun scriptRuns(scheduleID: String): List<ScriptRun> = operations.listScriptRuns(scheduleID, SCRIPT_RUNS_PAGE)
+    suspend fun eventSources(): List<EventSource> = operations.listEventSources().sources
+    suspend fun createEventSource(name: String): CreateEventSourceResponse = operations.createEventSource(CreateEventSourceRequest(name))
+    suspend fun deleteEventSource(id: String) = operations.deleteEventSource(id)
+    suspend fun capabilities(): Capabilities = operations.getCapabilities()
+    suspend fun activityFeed(
+        kind: String? = null,
+        agentID: String? = null,
+        cursor: String? = null,
+        limit: Long? = null,
+    ): ActivityFeedResponse = operations.getActivityFeed(agentID, limit, kind, cursor).domain()
     suspend fun pushInfo(): PushInfo = operations.getPushStatus().domain()
 
     suspend fun registerPushDevice(installationId: String, registration: PushRegistration): PushRegistrationResult =
@@ -377,10 +588,32 @@ class APIClient(
         return installationId
     }
 
-    suspend fun providers(): List<ProviderStatus> = operations.listProviders().map { it.domain() }
     suspend fun models(provider: String): List<ModelSummary> = operations.listModels(provider).map { it.domain() }
-    suspend fun setProviderKey(provider: String, apiKey: String) { operations.putProviderKey(request(strings("value" to apiKey)), provider) }
     suspend fun deleteProviderKey(provider: String) = operations.deleteProviderKey(provider)
+    suspend fun providerAccounts() = operations.listProviders()
+    suspend fun setProviderKey(provider: String, secret: SecretInput) { operations.putProviderKey(request(secret.json()), provider) }
+    suspend fun startProviderLogin(provider: String) = operations.startProviderLogin(request(strings("method" to "oauth")), provider)
+    suspend fun providerLogin(id: String) = operations.getProviderLogin(id)
+    suspend fun cancelProviderLogin(id: String) = operations.cancelProviderLogin(id)
+    suspend fun answerProviderLogin(id: String, promptID: String, value: String) =
+        operations.answerProviderLogin(request(strings("promptId" to promptID, "value" to value)), id)
+    suspend fun passwordManagers() = operations.listPasswordManagers().passwordManagers
+    suspend fun connectPasswordManager(id: String, token: String) = operations.connectPasswordManager(request(strings("token" to token)), id)
+    suspend fun disconnectPasswordManager(id: String) = operations.disconnectPasswordManager(id)
+    suspend fun credentials(agentID: String) = operations.listAgentCredentials(agentID)
+    suspend fun saveCredential(agentID: String, name: String, fields: Map<String, JsonElement>) =
+        operations.saveAgentCredential(request(fields), agentID, name)
+    suspend fun deleteCredential(agentID: String, name: String) = operations.deleteAgentCredential(agentID, name)
+    suspend fun declineCredential(agentID: String, name: String) = operations.declineAgentCredential(agentID, name)
+    suspend fun credentialUses(agentID: String, name: String, before: String?) =
+        operations.listAgentCredentialUses(agentID, name, SECRET_USES_PAGE.toLong(), before)
+    suspend fun logins(agentID: String) = operations.listAgentLogins(agentID)
+    suspend fun saveLogin(agentID: String, name: String, fields: Map<String, JsonElement>) =
+        operations.saveAgentLogin(request(fields), agentID, name)
+    suspend fun deleteLogin(agentID: String, name: String) = operations.deleteAgentLogin(agentID, name)
+    suspend fun declineLogin(agentID: String, name: String) = operations.declineAgentLogin(agentID, name)
+    suspend fun loginUses(agentID: String, name: String, before: String?) =
+        operations.listAgentLoginUses(agentID, name, SECRET_USES_PAGE.toLong(), before)
     suspend fun mcpServers(): List<MCPServer> = operations.listMcpServers().map { it.domain() }
     suspend fun createMCPServer(payload: Map<String, JsonElement>): MCPServer = operations.createMcpServer(request(payload)).domain()
     suspend fun updateMCPServer(id: String, patch: Map<String, JsonElement>): MCPServer = requireNotNull(operations.updateMcpServer(request(patch), id)).domain()
@@ -392,14 +625,65 @@ class APIClient(
         return operations.finishMcpOAuth(request(fields), id, timeoutMs = 60_000).domain()
     }
     suspend fun signOutOfMCP(id: String): MCPServer = operations.signOutMcpOAuth(id).domain()
+
+    suspend fun githubApps(): List<GitHubApp> = operations.listGithubApps().apps
+    suspend fun createGithubAppManifest(name: String, origin: String, organization: String?) = operations.createGithubAppManifest(
+        CreateGithubAppManifestRequest(name, origin, organization?.let { OptionalField.Present(it) } ?: OptionalField.Absent),
+    )
+    suspend fun completeGithubApp(code: String, state: String): GitHubApp =
+        operations.completeGithubApp(CompleteGithubAppRequest(code, state), timeoutMs = GITHUB_TIMEOUT_MS)
+    suspend fun connectGithubApp(id: String): GitHubApp = operations.connectGithubApp(id, timeoutMs = GITHUB_TIMEOUT_MS)
+    suspend fun setGithubAppBots(id: String, botIDs: List<String>): GitHubApp = operations.setGithubAppBots(SetGithubAppBotsRequest(botIDs), id)
+    suspend fun deleteGithubApp(id: String) = operations.deleteGithubApp(id)
+    suspend fun signInGithubApp(id: String, origin: String): String = operations.signInGithubApp(SignInGithubAppRequest(origin), id).url
+    suspend fun completeGithubAppSignIn(code: String, state: String): GitHubApp =
+        operations.completeGithubAppSignIn(CompleteGithubAppSignInRequest(code, state), timeoutMs = GITHUB_TIMEOUT_MS)
+    suspend fun signOutGithubApp(id: String): GitHubApp = operations.signOutGithubApp(id, timeoutMs = GITHUB_TIMEOUT_MS)
+    suspend fun setGithubAppClientSecret(id: String, secret: SecretInput): GitHubApp = operations.setGithubAppClientSecret(request(secret.json()), id)
+    suspend fun githubAccounts(): List<GitHubAccount> = operations.listGithubAccounts().accounts
+    suspend fun addGithubAccount(token: SecretInput): GitHubAccount = operations.addGithubAccount(request(token.json()), timeoutMs = GITHUB_TIMEOUT_MS)
+    suspend fun setGithubAccountToken(id: String, token: SecretInput): GitHubAccount =
+        operations.setGithubAccountToken(request(token.json()), id, timeoutMs = GITHUB_TIMEOUT_MS)
+    suspend fun setGithubAccountBots(id: String, botIDs: List<String>): GitHubAccount = operations.setGithubAccountBots(SetGithubAccountBotsRequest(botIDs), id)
+    suspend fun deleteGithubAccount(id: String) = operations.deleteGithubAccount(id)
+
+    suspend fun adminUsers(): List<AdminUser> = operations.listUsers().users
+    suspend fun setUserRole(id: String, role: String): AdminUser = operations.setUserRole(SetUserRoleRequest(role), id)
+    suspend fun removeUser(id: String) = operations.removeUser(id)
+    suspend fun invites(): List<Invite> = operations.listInvites().invites
+    suspend fun createInvite(): CreatedInvite = operations.createInvite()
+    suspend fun revokeInvite(id: String) = operations.revokeInvite(id)
+    suspend fun outdatedWorkspaces(): List<ListOutdatedWorkspacesResponseWorkspacesItem> = operations.listOutdatedWorkspaces().workspaces
+    suspend fun serverSettings(): ServerSettings = operations.getServerSettings()
+    suspend fun updateServerSettings(patch: UpdateServerSettingsRequest): ServerSettings = operations.updateServerSettings(patch)
+
+    suspend fun messageGateways(): List<MessageGateway> = operations.messageGateways().gateways.map { it.domain() }
+    suspend fun updateMessageGateway(id: String, config: GatewayConfig): MessageGateway = operations.updateMessageGateway(config.wire(), id).domain()
+    suspend fun eventRelay(): RelayStatus = operations.getEventRelay().domain()
+    suspend fun updateEventRelay(url: String?): RelayStatus = operations.updateEventRelay(UpdateEventRelayRequest(url)).domain()
+    suspend fun pluginSettings(): PluginSettings = operations.listPluginSettings()
+    suspend fun setPluginSetting(pluginID: String, key: String, secret: SecretInput): PluginSetting =
+        operations.setPluginSetting(request(secret.json()), pluginID, key)
+    suspend fun deletePluginSetting(pluginID: String, key: String): PluginSetting = operations.deletePluginSetting(pluginID, key)
+    suspend fun webSearch(): WebSearchSettings = operations.getWebSearch().domain()
+    suspend fun updateWebSearch(defaultProvider: String): WebSearchSettings = operations.updateWebSearch(UpdateWebSearchRequest(defaultProvider)).domain()
+    suspend fun judgeModel(): JudgeModel = operations.getJudgeModel()
+    suspend fun updateJudgeModel(provider: String?, model: String?): JudgeModel = operations.updateJudgeModel(
+        UpdateJudgeModelRequest(if (provider != null && model != null) UpdateJudgeModelRequestJudgeModel(provider, model) else null),
+    )
+    suspend fun visionModel(): VisionModel = operations.getVisionModel()
+    suspend fun updateVisionModel(provider: String?, model: String?): VisionModel = operations.updateVisionModel(
+        UpdateVisionModelRequest(if (provider != null && model != null) UpdateVisionModelRequestVisionModel(provider, model) else null),
+    )
 }
 
 /**
  * Splits a server-sent event stream into snapshot payloads, line by line. Heartbeats and other
- * event types are skipped; a snapshot without an agentId is a protocol error.
+ * event types are skipped; a bot snapshot without an agentId is a protocol error.
  */
 class SSEParser(
     private val accepting: Set<String> = setOf("snapshot", "message"),
+    private val requiresAgent: Boolean = true,
 ) {
     private val data = mutableListOf<String>()
     private var eventType = "message"
@@ -433,6 +717,7 @@ class SSEParser(
         } catch (_: Exception) {
             null
         } ?: throw InvalidPayload("invalid SSE payload")
+        if (!requiresAgent) return payload
         val agentID = (element["agentId"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
         if (agentID.isNullOrEmpty()) {
             throw InvalidPayload("snapshot event missing agentId")

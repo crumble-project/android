@@ -10,8 +10,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material3.Button
@@ -39,11 +42,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.generated.BotRequest
 import dev.crumble.android.generated.CodingJobQuestion
+import dev.crumble.android.generated.CredentialRequest
 import dev.crumble.android.generated.HeldAction
+import dev.crumble.android.generated.LoginRequest
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.BotRequestRef
 import dev.crumble.android.model.HeldActionRef
 import dev.crumble.android.model.JobQuestionRef
+import dev.crumble.android.model.SecretRequestRef
+import dev.crumble.android.model.SecretRequestState
+import dev.crumble.android.model.credentialReadKey
+import dev.crumble.android.model.loginReadKey
+import dev.crumble.android.model.secretKey
+import dev.crumble.android.model.secretRequestState
 
 private val HELD_OUTCOMES = mapOf("approved" to "Approved", "declined" to "Declined", "expired" to "Expired")
 
@@ -178,7 +189,7 @@ fun JobQuestionCard(model: AppModel, ref: JobQuestionRef, title: String) {
 }
 
 @Composable
-private fun JobQuestionAnswer(model: AppModel, job: String, question: CodingJobQuestion) {
+fun JobQuestionAnswer(model: AppModel, job: String, question: CodingJobQuestion) {
     var text by remember(question.id) { mutableStateOf("") }
     var picked by remember(question.id) { mutableStateOf<Set<String>>(emptySet()) }
     val multiple = question.multiple == true
@@ -252,7 +263,14 @@ private fun BotRequestPending(model: AppModel, request: BotRequest) {
     val proposal = request.proposal
     var open by remember(request.id) { mutableStateOf(false) }
     DecisionSurface {
-        DecisionHeader(Icons.Default.Group, "Wants to create a bot", proposal.name, proposal.description)
+        Row(verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.weight(1f)) {
+                DecisionHeader(Icons.Default.Group, "Wants to create a bot", proposal.name, proposal.description)
+            }
+            IconButton(enabled = !busy, onClick = { model.openBotRequestEditor(request.id) }) {
+                Icon(Icons.Default.Edit, contentDescription = "Edit")
+            }
+        }
         Text(request.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
             text = if (open) "Hide details" else "Show details",
@@ -275,6 +293,135 @@ private fun BotRequestPending(model: AppModel, request: BotRequest) {
             DecisionPending(model, request.id)
             TextButton(enabled = !busy, onClick = { model.decideBotRequest(request.id, approve = false) }) { Text("Decline") }
             Button(enabled = !busy, onClick = { model.decideBotRequest(request.id, approve = true) }) { Text("Approve") }
+        }
+    }
+}
+
+@Composable
+private fun RequestHosts(hosts: List<String>) {
+    var expanded by remember(hosts) { mutableStateOf(false) }
+    val more = hosts.size - 1
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = (if (expanded) hosts else hosts.take(1)).joinToString(" "),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (more > 0) {
+            Text(
+                text = if (expanded) "Show less" else "$more more",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { expanded = !expanded },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SecretRequestSettled(icon: ImageVector, title: String, state: SecretRequestState<*>) {
+    val outcome = when (state) {
+        SecretRequestState.Unavailable -> "Unavailable"
+        SecretRequestState.Saved -> "Saved"
+        SecretRequestState.Declined -> "Declined"
+        else -> "Loading…"
+    }
+    SettledCard(icon, title, outcome)
+}
+
+@Composable
+fun CredentialRequestCard(model: AppModel, ref: SecretRequestRef) {
+    val botID = model.selectedAgentID
+    val list = model.botCredentials[botID]
+    val request = list?.requests?.firstOrNull { ref.answers(it.name, it.requestedAt) }
+    val state = secretRequestState(
+        request = request,
+        listed = list != null,
+        saved = list?.credentials?.any { it.name == ref.name } == true,
+        fresh = credentialReadKey(ref) in model.freshSecretRequests,
+        failed = model.decisionsFailed,
+    )
+    if (state is SecretRequestState.Waiting) {
+        CredentialRequestPending(model, botID, state.request)
+    } else {
+        SecretRequestSettled(Icons.Default.Key, ref.name, state)
+    }
+}
+
+@Composable
+private fun CredentialRequestPending(model: AppModel, botID: String, request: CredentialRequest) {
+    SecretRequestPending(
+        model = model,
+        key = secretKey("credential", botID, request.name),
+        icon = Icons.Default.Key,
+        caption = "Credential",
+        name = request.name,
+        hosts = request.hosts,
+        addLabel = "Add credential",
+        onDecline = { model.declineCredentialRequest(botID, request.name) },
+        onAdd = { model.openCredentialForm(botID, request = request) },
+    )
+}
+
+@Composable
+fun LoginRequestCard(model: AppModel, ref: SecretRequestRef) {
+    val botID = model.selectedAgentID
+    val list = model.botLogins[botID]
+    val request = list?.requests?.firstOrNull { ref.answers(it.name, it.requestedAt) }
+    val state = secretRequestState(
+        request = request,
+        listed = list != null,
+        saved = list?.logins?.any { it.name == ref.name } == true,
+        fresh = loginReadKey(ref) in model.freshSecretRequests,
+        failed = model.decisionsFailed,
+    )
+    if (state is SecretRequestState.Waiting) {
+        LoginRequestPending(model, botID, state.request)
+    } else {
+        SecretRequestSettled(Icons.AutoMirrored.Filled.Login, ref.name, state)
+    }
+}
+
+@Composable
+private fun LoginRequestPending(model: AppModel, botID: String, request: LoginRequest) {
+    SecretRequestPending(
+        model = model,
+        key = secretKey("login", botID, request.name),
+        icon = Icons.AutoMirrored.Filled.Login,
+        caption = "Login",
+        name = request.name,
+        hosts = request.hosts,
+        addLabel = "Add login",
+        onDecline = { model.declineLoginRequest(botID, request.name) },
+        onAdd = { model.openLoginForm(botID, request = request) },
+    )
+}
+
+@Composable
+private fun SecretRequestPending(
+    model: AppModel,
+    key: String,
+    icon: ImageVector,
+    caption: String,
+    name: String,
+    hosts: List<String>,
+    addLabel: String,
+    onDecline: () -> Unit,
+    onAdd: () -> Unit,
+) {
+    val busy = key in model.pendingMutations
+    DecisionSurface {
+        DecisionHeader(icon, caption, name)
+        RequestHosts(hosts)
+        DecisionError(model, key)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        ) {
+            if (busy) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            TextButton(enabled = !busy, onClick = onDecline) { Text("Decline") }
+            Button(enabled = !busy, onClick = onAdd) { Text(addLabel) }
         }
     }
 }

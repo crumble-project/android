@@ -17,7 +17,7 @@ import dev.crumble.android.model.AttachmentError
 import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
-import dev.crumble.android.model.displayLabel
+import dev.crumble.android.model.headline
 import dev.crumble.android.model.Memory
 import dev.crumble.android.model.MentionCompletion
 import dev.crumble.android.model.Message
@@ -128,12 +128,11 @@ class CrumbleTests {
 
     @Test
     fun personalSkillFailureRestoresDraftAndSkillsWithoutClobberingNewerAgentFields() = runTest {
-        val oldSkill = Skill(id = "old", name = "Old", instructions = "Keep this")
         val transport = GatedTransport(500, "{\"error\":\"busy\"}")
         val client = APIClient(baseURL = "http://crumble.test/", token = "token", transport = transport)
         val model = AppModel(client = client, scope = TestScope(StandardTestDispatcher(testScheduler)))
         model.route = Route.Skills
-        model.agents = listOf(Agent(id = "a1", name = "Before", skills = listOf(oldSkill)))
+        model.agents = listOf(Agent(id = "a1", name = "Before"))
         model.skillDraft = dev.crumble.android.model.SkillDraft(
             skillID = "",
             agentID = "a1",
@@ -143,13 +142,14 @@ class CrumbleTests {
 
         model.saveSkill()
         testScheduler.runCurrent()
+        assertEquals("New skill", model.agentSkills["a1"]?.last()?.name)
         assertEquals("New skill", model.agents.single().skills?.last()?.name)
         model.agents = model.agents.map { it.copy(name = "Newer name") }
         transport.gate.complete(Unit)
         advanceUntilIdle()
 
         assertEquals("Newer name", model.agents.single().name)
-        assertEquals(listOf(oldSkill), model.agents.single().skills)
+        assertEquals(emptyList<Skill>(), model.agents.single().skills)
         assertEquals("New skill", model.skillDraft?.name)
         assertTrue(model.errorText.contains("busy"))
     }
@@ -196,7 +196,7 @@ class CrumbleTests {
         assertTrue(feed.hasMore)
         assertEquals("evt-1", feed.activities.single().id)
         assertEquals("tool-call", feed.activities.single().kind)
-        assertEquals("search", feed.activities.single().displayLabel())
+        assertEquals("search", feed.activities.single().headline().target)
         assertEquals("/v1/activity/feed", stub.requests.single().pathWithQuery)
     }
 
@@ -797,7 +797,7 @@ class CrumbleTests {
         val model = AppModel(client = client, scope = testScope)
         model.agents = listOf(Agent(id = "a1", name = "Before", lastMessage = "Latest reply"))
         model.route = Route.Memory
-        model.agentDraft = AgentDraft(isNew = false, agentID = "a1", name = "After")
+        model.agentDraft = AgentDraft(isNew = false, agentID = "a1", name = "After", provider = "openai", model = "gpt")
         model.saveAgentEditor()
         assertEquals("After", model.agents.first().name)
         assertEquals("Latest reply", model.agents.first().lastMessage)
@@ -817,7 +817,7 @@ class CrumbleTests {
         }
         val model = AppModel(client = client, scope = testScope)
         model.route = Route.Memory
-        model.agentDraft = AgentDraft(isNew = true, agentID = "", name = "New bot")
+        model.agentDraft = AgentDraft(isNew = true, agentID = "", name = "New bot", provider = "openai", model = "gpt")
         model.saveAgentEditor()
         assertTrue(model.agents.first().id.startsWith("pending:"))
         assertNull(model.agentDraft)

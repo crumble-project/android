@@ -50,7 +50,7 @@ internal fun avatarGenerationPrompt(template: String, description: String) =
     "$template\n\n## User description\n\n${description.trim()}\n"
 
 @Composable
-fun AvatarEditor(value: BotAvatarDefinition, onChange: (BotAvatarDefinition) -> Unit) {
+fun AvatarEditor(value: BotAvatarDefinition, onChange: (BotAvatarDefinition) -> Unit, enabled: Boolean = true) {
     var tab by remember { mutableIntStateOf(0) }
     var colorDraft by remember { mutableStateOf(value.color) }
     var eyeDraft by remember { mutableStateOf(value.eyeColor) }
@@ -75,6 +75,7 @@ fun AvatarEditor(value: BotAvatarDefinition, onChange: (BotAvatarDefinition) -> 
             OutlinedTextField(
                 value = colorDraft,
                 onValueChange = { colorDraft = it.take(7); colors(colorDraft, eyeDraft) },
+                enabled = enabled,
                 label = { Text("Body color") },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
@@ -82,6 +83,7 @@ fun AvatarEditor(value: BotAvatarDefinition, onChange: (BotAvatarDefinition) -> 
             OutlinedTextField(
                 value = eyeDraft,
                 onValueChange = { eyeDraft = it.take(7); colors(colorDraft, eyeDraft) },
+                enabled = enabled,
                 label = { Text("Eye color") },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
@@ -99,7 +101,7 @@ fun AvatarEditor(value: BotAvatarDefinition, onChange: (BotAvatarDefinition) -> 
                         for (shape in row) {
                             val picked = shape.id == value.definition.id
                             Surface(
-                                modifier = Modifier.weight(1f).clickable {
+                                modifier = Modifier.weight(1f).clickable(enabled = enabled) {
                                     onChange(shape.withColors(value.color, value.eyeColor))
                                     error = ""
                                     status = ""
@@ -134,11 +136,12 @@ fun AvatarEditor(value: BotAvatarDefinition, onChange: (BotAvatarDefinition) -> 
                 OutlinedTextField(
                     value = json,
                     onValueChange = { json = it.take(16_000) },
+                    enabled = enabled,
                     label = { Text("Definition JSON") },
                     minLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedButton(onClick = {
+                OutlinedButton(enabled = enabled, onClick = {
                     importAvatar(json, value).fold(
                         onSuccess = {
                             onChange(it)
@@ -156,6 +159,7 @@ fun AvatarEditor(value: BotAvatarDefinition, onChange: (BotAvatarDefinition) -> 
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it.take(4_000) },
+                    enabled = enabled,
                     label = { Text("Describe your avatar") },
                     placeholder = { Text("A gardening companion shaped like a watering can") },
                     modifier = Modifier.fillMaxWidth(),
@@ -166,7 +170,7 @@ fun AvatarEditor(value: BotAvatarDefinition, onChange: (BotAvatarDefinition) -> 
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedButton(
-                    enabled = description.isNotBlank(),
+                    enabled = enabled && description.isNotBlank(),
                     onClick = {
                         val template = resources.openRawResource(R.raw.generate_avatar_prompt).bufferedReader().use { it.readText() }
                         clipboard.setText(AnnotatedString(avatarGenerationPrompt(template, description)))

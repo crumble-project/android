@@ -48,6 +48,8 @@ data class PushReply(
     val origin: String? = null,
     val preview: String = "",
     val createdAt: String? = null,
+    val groupId: String? = null,
+    val groupName: String? = null,
 ) {
     fun toActivityEvent(): ActivityEvent = ActivityEvent(
         type = type,
@@ -59,6 +61,8 @@ data class PushReply(
         eventId = eventId,
         serverId = serverId,
         createdAt = createdAt,
+        groupId = groupId?.takeIf { it.isNotEmpty() },
+        groupName = groupName,
     )
 }
 

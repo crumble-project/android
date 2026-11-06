@@ -14,6 +14,8 @@ import javax.crypto.spec.GCMParameterSpec
 interface CredentialStore {
     fun read(account: String): String?
     fun write(account: String, value: String)
+    fun delete(account: String)
+    fun deletePrefixed(prefix: String)
 }
 
 class InMemoryCredentialStore(
@@ -25,6 +27,14 @@ class InMemoryCredentialStore(
 
     override fun write(account: String, value: String) {
         map[account] = value
+    }
+
+    override fun delete(account: String) {
+        map.remove(account)
+    }
+
+    override fun deletePrefixed(prefix: String) {
+        map.keys.removeAll { it.startsWith(prefix) }
     }
 }
 
@@ -51,6 +61,16 @@ class AndroidKeyStoreCredentials(
         val edit = prefs.edit().putString(account, encrypted)
         if (synchronousWrites) check(edit.commit()) { "Could not persist notification state" }
         else edit.apply()
+    }
+
+    override fun delete(account: String) {
+        prefs.edit().remove(account).apply()
+    }
+
+    override fun deletePrefixed(prefix: String) {
+        val edit = prefs.edit()
+        prefs.all.keys.filter { it.startsWith(prefix) }.forEach(edit::remove)
+        edit.apply()
     }
 
     private fun getOrCreateSecretKey(): SecretKey {

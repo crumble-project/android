@@ -31,4 +31,9 @@ plugins {
 
 rootProject.name = "Crumble"
 include(":app")
-includeBuild("third_party/open-bot-avatar-kt")
+sourceControl {
+    gitRepository(uri("https://github.com/cheetahbyte/open-bot-avatar-kt.git")) {
+        producesModule("re.leob.openbotavatar.kt:open-bot-avatar-core")
+        producesModule("re.leob.openbotavatar.kt:open-bot-avatar-compose")
+    }
+}
