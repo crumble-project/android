@@ -605,23 +605,6 @@ class DraftsAndReadsTests {
         assertFalse(model.mcpDraft!!.saving)
     }
 
-    @Test
-    fun aReasoningChangeThatCannotStartSaysSo() = scenario {
-        val transport = Scripted().apply {
-            responses["PATCH /v1/agents/a1"] = 200 to agentFixture("a1", "Ada")
-            hold("PATCH /v1/agents/a1")
-        }
-        val model = model(transport)
-        val bot = Agent(id = "a1", name = "Ada")
-        model.agents = listOf(bot)
-        model.setReasoning(bot, "high")
-        runCurrent()
-        model.setReasoning(model.agents.single(), "low")
-
-        assertEquals("high", model.agents.single().inference?.thinkingLevel)
-        assertTrue(model.errorText.isNotEmpty())
-    }
-
     // Bot defaults and mentions
 
     @Test

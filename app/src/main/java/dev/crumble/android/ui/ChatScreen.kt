@@ -1,8 +1,7 @@
 package dev.crumble.android.ui
 
-import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.outlined.AddCircleOutline
 import android.graphics.BitmapFactory
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -19,11 +18,13 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -48,6 +49,8 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.AddCircleOutline
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -62,9 +65,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -73,18 +76,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -93,37 +104,34 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
-import dev.crumble.android.model.Route
 import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.MentionCompletion
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.MessageDeliveryState
 import dev.crumble.android.model.PendingAttachment
-import dev.crumble.android.model.isNotice
-import dev.crumble.android.model.isWebLink
-import dev.crumble.android.model.ATTACHMENT_PICKER_TYPES
+import dev.crumble.android.model.Route
+import dev.crumble.android.model.Sources
+import dev.crumble.android.model.SplitReply
 import dev.crumble.android.model.botReactions
 import dev.crumble.android.model.displayOf
 import dev.crumble.android.model.isDesktopScreenshot
+import dev.crumble.android.model.isNotice
+import dev.crumble.android.model.isWebLink
+import dev.crumble.android.model.jobOf
 import dev.crumble.android.model.loadAttachment
 import dev.crumble.android.model.mentionableBots
 import dev.crumble.android.model.messageLabel
 import dev.crumble.android.model.nilIfEmpty
 import dev.crumble.android.model.noticeTitle
 import dev.crumble.android.model.preview
-import androidx.compose.ui.platform.LocalUriHandler
-import dev.crumble.android.model.Sources
-import dev.crumble.android.model.SplitReply
-import dev.crumble.android.model.jobOf
 import dev.crumble.android.model.siteOf
 import dev.crumble.android.model.sourcesOf
 import dev.crumble.android.model.splitSources
-import androidx.compose.runtime.snapshotFlow
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -802,11 +810,6 @@ fun Composer(
         running = model.snapshot?.isRunning == true,
         onStop = { model.abortChat() },
         onSend = { model.sendMessage() },
-        footer = {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                BotReasoning(model = model, agent = agent)
-            }
-        },
     )
 }
 
@@ -832,10 +835,12 @@ fun ComposerBar(
     onStop: () -> Unit,
     onSend: () -> Unit,
     stopEnabled: Boolean = true,
-    footer: @Composable () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val attachmentScope = rememberCoroutineScope()
+    var attachPanelOpen by remember { mutableStateOf(false) }
+    BackHandler(enabled = attachPanelOpen) { attachPanelOpen = false }
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
@@ -864,7 +869,7 @@ fun ComposerBar(
         )
     }
 
-    Box(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -968,19 +973,24 @@ fun ComposerBar(
                         verticalAlignment = Alignment.Bottom,
                     ) {
                         IconButton(
-                            onClick = { filePicker.launch(ATTACHMENT_PICKER_TYPES) },
+                            onClick = {
+                                focusManager.clearFocus()
+                                attachPanelOpen = !attachPanelOpen
+                            },
                             enabled = enabled,
                             modifier = Modifier.padding(vertical = 4.dp),
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.AddCircleOutline,
-                                contentDescription = "Attach Files",
+                                imageVector = if (attachPanelOpen) Icons.Default.Cancel else Icons.Outlined.AddCircleOutline,
+                                contentDescription = if (attachPanelOpen) "Close Attachments" else "Attach",
                             )
                         }
                         TextField(
                             value = draft,
                             onValueChange = onDraftChange,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .onFocusChanged { if (it.isFocused) attachPanelOpen = false },
                             enabled = enabled,
                             placeholder = { Text(placeholder) },
                             maxLines = 6,
@@ -993,17 +1003,6 @@ fun ComposerBar(
                                 disabledIndicatorColor = Color.Transparent,
                             ),
                         )
-                        Box(modifier = Modifier.padding(vertical = 4.dp)) { footer() }
-                        IconButton(
-                            onClick = { filePicker.launch(IMAGE_PICKER_TYPES) },
-                            enabled = enabled,
-                            modifier = Modifier.padding(vertical = 4.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Image,
-                                contentDescription = "Attach Images",
-                            )
-                        }
                     }
                 }
 
@@ -1035,6 +1034,64 @@ fun ComposerBar(
                 }
             }
         }
+        if (attachPanelOpen) {
+            AttachPanel(
+                onGallery = {
+                    attachPanelOpen = false
+                    filePicker.launch(IMAGE_PICKER_TYPES)
+                },
+            )
+        }
+    }
+}
+
+/** Stands in for the keyboard under the composer. */
+@Composable
+private fun AttachPanel(onGallery: () -> Unit) {
+    val color = pageColor
+    val gestureBar = WindowInsets.navigationBars.getBottom(LocalDensity.current).toFloat()
+    Surface(
+        color = color,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            // The chat pads its content above the gesture bar; the panel still runs to the screen's edge.
+            .drawBehind {
+                drawRect(color, topLeft = Offset(0f, size.height), size = Size(size.width, gestureBar))
+            },
+    ) {
+        Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 24.dp)) {
+            AttachTile(
+                label = "Gallery",
+                icon = Icons.Outlined.Image,
+                onClick = onGallery,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.weight(3f))
+        }
+    }
+}
+
+@Composable
+private fun AttachTile(label: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = sheetColor,
+            modifier = Modifier.size(width = 72.dp, height = 56.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(imageVector = icon, contentDescription = null)
+            }
+        }
+        Text(text = label, style = MaterialTheme.typography.labelLarge)
     }
 }
 

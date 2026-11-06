@@ -323,7 +323,6 @@ class AppModel(
     /** Bots the last status check found running; the selected bot's stream is fresher while it is open. */
     var workingBots by mutableStateOf<Set<String>>(emptySet())
     var jobPanel by mutableStateOf<JobPanel?>(null)
-    var reasoningModels by mutableStateOf<Map<String, List<ModelSummary>>>(emptyMap())
     private var jobsFollow: Job? = null
     private var chatJobsLoad: Job? = null
     private var chatJobsKey = ""
@@ -1315,46 +1314,6 @@ class AppModel(
             }
             jobPanel = jobPanel?.takeIf { jobPanelVersion == version }?.copy(downloading = false, downloadFailed = failed) ?: jobPanel
         }
-    }
-
-    // MARK: Reasoning
-
-    /** Loads the catalog the composer's level picker reads; without it the picker offers every level. */
-    fun loadReasoningModels(provider: String) {
-        val api = client ?: return
-        if (provider.isEmpty() || provider in reasoningModels) return
-        val gen = generation
-        scope.launch {
-            try {
-                val loaded = api.models(provider)
-                if (generation == gen) reasoningModels = reasoningModels + (provider to loaded)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    fun reasoningLevels(agent: Agent): List<String> =
-        levelsOf(reasoningModels[agent.provider]?.firstOrNull { it.id == agent.model })
-
-    /** Saves the level to the bot, so the next turn uses it. */
-    fun setReasoning(agent: Agent, level: String) {
-        val previous = agent.inference
-        val next = (previous ?: Inference()).copy(thinkingLevel = level)
-        fun write(value: Inference?) {
-            agents = agents.map { if (it.id == agent.id) it.copy(inference = value) else it }
-        }
-        optimisticMutation(
-            key = "agent:${agent.id}",
-            update = { write(next) },
-            rollback = { write(previous) },
-            work = { api ->
-                val patch = mapOf("inference" to CrumbleJson.encodeToJsonElement(Inference.serializer(), next))
-                val saved = api.updateAgent(agent.id, patch = patch)
-                return@optimisticMutation { write(saved.inference) }
-            },
-        )
     }
 
     fun openBotDesktop(agentID: String = selectedAgentID) {
@@ -4330,7 +4289,6 @@ class AppModel(
         models = emptyList()
         signingIn = null
         browserSignIn = null
-        reasoningModels = emptyMap()
         agentDraft = null
         memoryDraft = null
         taskDraft = null
@@ -5606,7 +5564,6 @@ class AppModel(
     // MARK: Provider accounts
 
     private fun refreshProviders() {
-        reasoningModels = emptyMap()
         loadProviders()
     }
 

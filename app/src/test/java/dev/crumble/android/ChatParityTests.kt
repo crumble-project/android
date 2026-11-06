@@ -322,61 +322,6 @@ class ChatParityTests {
     }
 
     @Test
-    fun reasoningAppliesAtOnceAndRollsBackOnlyTheLevel() = runTest {
-        val scope = TestScope(StandardTestDispatcher(testScheduler))
-        val path = "/v1/agents/a1"
-        val transport = ScriptedTransport { 503 to """{"error":"busy"}""" }
-        val gate = CompletableDeferred<Unit>().also { transport.held[path] = it }
-        val bot = Agent(id = "a1", name = "Atlas", inference = Inference("low", temperature = 0.2))
-        val model = modelWith(transport, scope, listOf(bot))
-
-        model.setReasoning(bot, "high")
-        assertEquals("high", model.agents.single().inference?.thinkingLevel)
-        testScheduler.runCurrent()
-        assertTrue("agent:a1" in model.pendingMutations)
-        model.agents = model.agents.map { it.copy(lastMessage = "newer") }
-
-        gate.complete(Unit)
-        testScheduler.runCurrent()
-        assertEquals("low", model.agents.single().inference?.thinkingLevel)
-        assertEquals("newer", model.agents.single().lastMessage)
-        assertTrue(model.errorText.contains("busy"))
-        assertEquals(json("""{"inference":{"thinkingLevel":"high","temperature":0.2}}"""), bodyOf(transport.requests.single()))
-    }
-
-    @Test
-    fun reasoningKeepsTheServersConfirmedInference() = runTest {
-        val scope = TestScope(StandardTestDispatcher(testScheduler))
-        val saved = agentFixture("a1").replaceFirst("\"id\":\"a1\"", "\"id\":\"a1\",\"inference\":{\"thinkingLevel\":\"high\",\"maxOutputTokens\":10}")
-        val transport = ScriptedTransport { 200 to saved }
-        val bot = Agent(id = "a1", name = "Local name")
-        val model = modelWith(transport, scope, listOf(bot))
-        model.setReasoning(bot, "high")
-        testScheduler.runCurrent()
-        assertEquals(10, model.agents.single().inference?.maxOutputTokens)
-        assertEquals("Local name", model.agents.single().name)
-    }
-
-    @Test
-    fun reasoningCatalogNarrowsLevelsAndAFailureLeavesEveryLevel() = runTest {
-        val scope = TestScope(StandardTestDispatcher(testScheduler))
-        var fail = true
-        val transport = ScriptedTransport {
-            if (fail) 503 to "" else 200 to """[{"provider":"openai","id":"gpt","name":"GPT","contextWindow":1000,"reasoning":true,"thinkingLevels":["off","high"]}]"""
-        }
-        val bot = Agent(id = "a1", provider = "openai", model = "gpt")
-        val model = modelWith(transport, scope, listOf(bot))
-        model.loadReasoningModels("openai")
-        testScheduler.runCurrent()
-        assertEquals(7, model.reasoningLevels(bot).size)
-        fail = false
-        model.loadReasoningModels("openai")
-        testScheduler.runCurrent()
-        assertEquals(listOf("off", "high"), model.reasoningLevels(bot))
-        assertEquals(7, model.reasoningLevels(bot.copy(model = "unknown")).size)
-    }
-
-    @Test
     fun chatJobsReloadWhenAJobMessageArrives() = runTest {
         val scope = TestScope(StandardTestDispatcher(testScheduler))
         val transport = ScriptedTransport { req ->

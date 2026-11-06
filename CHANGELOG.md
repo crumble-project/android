@@ -23,7 +23,7 @@
 - Draw `show` cards in bot chats: stats, tables, and charts with tap-to-read values. Show desktop screenshots and emoji reactions there too.
 - Tapping the bot's name in the chat opens its details: profile, desktop preview, and automations with on/off switches. Edit bot moved there.
 - Show "Working…" and the working avatar for every bot in the list, not only the open one. The list checks each bot's status every five seconds while it is open.
-- Offer the website's file types in the attachment picker, and accept `.rb` files.
+- Attach images from a panel that opens under the composer, as in Google Messages. Other file types can't be picked for now.
 - Start new bots with memory, web search, and messaging, like the website, and remove the Schedule tasks and Code mode toggles, which every bot has anyway.
 - Build bot avatars from the `open-bot-avatar-kt` `0.1.0` tag with a Gradle source dependency instead of a submodule.
 - Follow Google Messages and Android Settings: Home is a conversation list with search and an account button at the top right, the Account page leads to Memory, Automations, Activity, and Settings, and chats have Back, a details menu, and a pill composer. Settings lists every section in grouped rows, General replaces the settings dialog, and pages use the system's card colors, tracking, and rounded fields.
@@ -32,7 +32,6 @@
 - Preserve admitted task execution fields for navigation and reject non-admitted or incomplete starts instead of reporting success.
 - Edit a bot proposal before approving it. The sheet stays open with your edits until the server confirms, and fields the editor doesn't show are kept.
 - Show coding and desktop jobs in the chat, with a job list and a job panel: live status, model and cost, step history with results, earlier activity, job questions, and a transcript download.
-- Pick the reasoning level in the composer. It saves to the bot immediately and rolls back on failure; the picker hides for models that don't reason.
 - Show the pages a reply cites as source chips after it.
 - Fix the Activity row that read "Change Change"; changes now say who did what, such as "Kev's review changed a skill · Triage".
 - Add group chats: list, create, edit, and delete them from the sidebar, and chat with up to six bots at once. Includes live member status, stop, earlier messages, attachments, replies, `@` mentions, reactions, and sources. Sends and record changes apply at once and recover on failure.

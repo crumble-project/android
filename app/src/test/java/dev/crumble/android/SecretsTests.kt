@@ -921,7 +921,6 @@ class SecretsTests {
         testScheduler.runCurrent()
         model.openProviderKey(model.providerAccounts.single())
         model.providerKeyForm = model.providerKeyForm!!.copy(key = SecretDraft(manager = "1password", text = "op://v/i/f"))
-        model.reasoningModels = mapOf("openai" to emptyList())
 
         model.saveProviderAccountKey()
         testScheduler.runCurrent()
@@ -935,7 +934,6 @@ class SecretsTests {
         testScheduler.runCurrent()
         assertNull(model.providerKeyForm)
         assertEquals("api_key", model.providerAccounts.single().credentialType)
-        assertTrue(model.reasoningModels.isEmpty())
     }
 
     @Test
