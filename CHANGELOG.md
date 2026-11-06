@@ -28,6 +28,7 @@
 - Build bot avatars from the `open-bot-avatar-kt` `0.1.0` tag with a Gradle source dependency instead of a submodule.
 - Follow Google Messages and Android Settings: Home is a conversation list with search and an account button at the top right, the Account page leads to Memory, Automations, Activity, and Settings, and chats have Back, a details menu, and a pill composer. Settings lists every section in grouped rows, General replaces the settings dialog, and pages use the system's card colors, tracking, and rounded fields.
 - Replace New bot on Home with New chat, which starts a chat with a bot, creates a bot, or picks bots for a group chat. Home lists group chats after the bots, with no section of their own.
+- Use the Crumble icon for the app, with a themed icon, instead of the default Android one.
 - Carry the grouped look to every page: Memory, Skills, Automations, Activity, Integrations, Credentials, Logins, the connection pages, Avatars, jobs, change history, the bot editor, bot details, the group form, and the command palette.
 - Replace the local glossary with a link to the canonical glossary in the spec repository.
 - Preserve admitted task execution fields for navigation and reject non-admitted or incomplete starts instead of reporting success.
