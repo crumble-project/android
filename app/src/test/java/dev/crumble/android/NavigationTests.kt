@@ -22,7 +22,12 @@ class NavigationTests {
     }
 
     @Test
-    fun otherPagesReturnHome() {
-        (WORKSPACE_PAGES + Route.Settings).forEach { assertNull(it.parent) }
+    fun workspacePagesAndSettingsReturnToTheAccountMenu() {
+        (WORKSPACE_PAGES + Route.Settings).forEach { assertEquals(Route.Account, it.parent) }
+    }
+
+    @Test
+    fun chatsAndTheAccountMenuReturnHome() {
+        listOf(Route.Account, Route.AgentChat("a1"), Route.GroupChat("g1")).forEach { assertNull(it.parent) }
     }
 }

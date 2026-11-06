@@ -1,5 +1,6 @@
 package dev.crumble.android.ui
 
+import androidx.compose.foundation.shape.CircleShape
 import android.text.format.DateUtils
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -14,12 +15,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -31,7 +30,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,13 +40,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.generated.PasswordManager
 import dev.crumble.android.model.Agent
@@ -181,17 +179,6 @@ private fun OverflowMenu(content: @Composable (close: () -> Unit) -> Unit) {
 internal fun SecretOverflowMenu(content: @Composable (close: () -> Unit) -> Unit) = OverflowMenu(content)
 
 @Composable
-private fun SecretFrame(title: String, leading: @Composable () -> Unit, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            leading()
-            Text(title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
-        }
-        content()
-    }
-}
-
-@Composable
 internal fun SecretNote(text: String) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
@@ -215,6 +202,7 @@ private fun SecretPageView(model: AppModel, page: SecretPage) {
                     value = search,
                     onValueChange = { search = it },
                     label = { Text(page.searchLabel) },
+                    shape = CircleShape,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -234,8 +222,8 @@ private fun SecretPageView(model: AppModel, page: SecretPage) {
         }
         if (waiting.isNotEmpty()) {
             item {
-                SecretFrame("Waiting for you", { Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(16.dp)) }) {
-                    for ((bot, ask) in waiting) AskRow(model, page, bot, ask)
+                RowsSection(title = "Waiting for you") {
+                    for ((bot, ask) in waiting) row { shape -> AskRow(model, page, bot, ask, shape) }
                 }
             }
         }
@@ -257,22 +245,20 @@ private fun SecretPageView(model: AppModel, page: SecretPage) {
 }
 
 @Composable
-private fun AskRow(model: AppModel, page: SecretPage, bot: Agent, ask: SecretAsk) {
+private fun AskRow(model: AppModel, page: SecretPage, bot: Agent, ask: SecretAsk, shape: Shape) {
     val busy = secretKey(page.kind.name, bot.id, ask.name) in model.pendingMutations
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        BotAvatarView(agent = bot, size = 24.dp)
-        Column(modifier = Modifier.weight(1f)) {
-            Text("${bot.name} asks for ${ask.name}", style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(
-                "${ask.reason} · ${ask.hosts.joinToString(", ")}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        TextButton(enabled = !busy, onClick = { page.onDecline(bot.id, ask.name) }) { Text("Decline") }
-        Button(enabled = !busy, onClick = { page.onAdd(bot.id, ask) }) { Text("Add") }
+    GroupedItem(
+        shape = shape,
+        leading = { BotAvatarView(agent = bot, size = 44.dp) },
+        below = {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                TextButton(enabled = !busy, onClick = { page.onDecline(bot.id, ask.name) }) { Text("Decline") }
+                Button(enabled = !busy, onClick = { page.onAdd(bot.id, ask) }) { Text("Add") }
+            }
+        },
+    ) {
+        RowTitle("${bot.name} asks for ${ask.name}")
+        RowSubtitle("${ask.reason} · ${ask.hosts.joinToString(", ")}", maxLines = 2)
     }
 }
 
@@ -281,12 +267,12 @@ private fun BotSecrets(model: AppModel, page: SecretPage, bot: Agent, needle: St
     val all = page.rowsOf(bot.id)
     val rows = all.orEmpty().filter { matchesSecret(it.name, it.hosts, needle) }
     val error = page.failures[bot.id]
-    SecretFrame(bot.name, { BotAvatarView(agent = bot, size = 22.dp) }) {
+    RowsSection(title = bot.name) {
         when {
-            error != null -> SecretNote(error)
-            all != null && rows.isEmpty() -> SecretNote(if (all.isNotEmpty()) page.noMatch else page.empty)
+            error != null -> note(error)
+            all != null && rows.isEmpty() -> note(if (all.isNotEmpty()) page.noMatch else page.empty)
         }
-        for (row in rows) SecretRowView(model, page, bot, row) { onDelete(row.name) }
+        for (row in rows) row { shape -> SecretRowView(model, page, bot, row, shape) { onDelete(row.name) } }
     }
 }
 
@@ -296,58 +282,46 @@ private fun agoLabel(iso: String): String {
 }
 
 @Composable
-private fun SecretRowView(model: AppModel, page: SecretPage, bot: Agent, row: SecretRow, onDelete: () -> Unit) {
+private fun SecretRowView(model: AppModel, page: SecretPage, bot: Agent, row: SecretRow, shape: Shape, onDelete: () -> Unit) {
     val busy = secretKey(page.kind.name, bot.id, row.name) in model.pendingMutations
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .clickable(enabled = !busy && !row.managed) { page.onEdit(bot.id, row.name) }
-                .padding(vertical = 4.dp),
-        ) {
-            Text(
-                row.name,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                fontFamily = if (page.mono) FontFamily.Monospace else null,
-            )
-            Text(
-                row.hosts.joinToString(", "),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                row.lastError ?: row.lastUsedAt?.let { "${page.usedVerb} ${agoLabel(it)}" } ?: page.neverUsed,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (row.lastError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (busy) {
-            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-        } else {
-            OverflowMenu { close ->
-                DropdownMenuItem(text = { Text(page.usesLabel) }, onClick = {
-                    close()
-                    model.openSecretUses(page.kind, bot.id, row.name)
-                })
-                if (!row.managed) {
-                    DropdownMenuItem(text = { Text("Edit") }, onClick = {
+    GroupedItem(
+        shape = shape,
+        onClick = { page.onEdit(bot.id, row.name) },
+        enabled = !busy && !row.managed,
+        leading = { IconTile(routeIcon(if (page.kind == SecretKind.credential) Route.Credentials else Route.Logins), Tone.Lavender) },
+        trailing = {
+            if (busy) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+            } else {
+                OverflowMenu { close ->
+                    DropdownMenuItem(text = { Text(page.usesLabel) }, onClick = {
                         close()
-                        page.onEdit(bot.id, row.name)
+                        model.openSecretUses(page.kind, bot.id, row.name)
                     })
-                    DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                        onClick = {
+                    if (!row.managed) {
+                        DropdownMenuItem(text = { Text("Edit") }, onClick = {
                             close()
-                            onDelete()
-                        },
-                    )
+                            page.onEdit(bot.id, row.name)
+                        })
+                        DropdownMenuItem(
+                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                close()
+                                onDelete()
+                            },
+                        )
+                    }
                 }
             }
-        }
+        },
+    ) {
+        RowTitle(row.name, fontFamily = if (page.mono) FontFamily.Monospace else null)
+        RowSubtitle(row.hosts.joinToString(", "), maxLines = 1)
+        RowSubtitle(
+            row.lastError ?: row.lastUsedAt?.let { "${page.usedVerb} ${agoLabel(it)}" } ?: page.neverUsed,
+            color = if (row.lastError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
     }
 }
 
@@ -661,16 +635,13 @@ fun LoginFormDialog(model: AppModel, form: LoginForm) {
 }
 
 @Composable
-private fun ManagerRow(model: AppModel, manager: PasswordManager) {
+private fun ManagerRow(model: AppModel, manager: PasswordManager, shape: Shape) {
     val inUse = manager.usedBy.isNotEmpty()
     val busy = "password-manager:${manager.id}" in model.pendingMutations
-    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                manager.name + if (inUse) " (used by ${manager.usedBy.size})" else "",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
+    GroupedItem(
+        shape = shape,
+        leading = { LetterTile(manager.name) },
+        trailing = {
             when {
                 busy -> CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                 manager.connected -> OverflowMenu { close ->
@@ -689,7 +660,9 @@ private fun ManagerRow(model: AppModel, manager: PasswordManager) {
                 }
                 else -> OutlinedButton(onClick = { model.openManagerToken(manager) }) { Text("Connect") }
             }
-        }
+        },
+    ) {
+        RowTitle(manager.name + if (inUse) " (used by ${manager.usedBy.size})" else "")
     }
 }
 
@@ -699,13 +672,17 @@ fun PasswordManagersPanel(model: AppModel) {
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         SecretNote("Credentials, provider API keys, and MCP server tokens can be read from a connected password manager instead of being stored in Crumble.")
         SheetErrorBanner(model.passwordManagersError)
         if (!model.passwordManagersLoaded && model.passwordManagersError.isEmpty()) SecretNote("Loading…")
-        for (manager in model.passwordManagers) ManagerRow(model, manager)
+        Column(verticalArrangement = Arrangement.spacedBy(ROW_GAP)) {
+            model.passwordManagers.forEachIndexed { index, manager ->
+                ManagerRow(model, manager, groupedShape(index, model.passwordManagers.size))
+            }
+        }
     }
 }
 

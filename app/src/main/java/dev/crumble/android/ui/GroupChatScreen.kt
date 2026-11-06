@@ -256,7 +256,7 @@ private fun GroupFailure(name: String, error: String) {
 }
 
 @Composable
-private fun AvatarStack(
+internal fun AvatarStack(
     bots: List<Agent>,
     size: Dp,
     modifier: Modifier = Modifier,
@@ -427,87 +427,6 @@ private fun GroupMessageView(
 }
 
 @Composable
-fun GroupsHeader(model: AppModel, onCreateGroup: () -> Unit) {
-    val canGroup = model.agents.size >= 2
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = "Group chats",
-            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(vertical = 8.dp),
-        )
-        if (canGroup) {
-            IconButton(onClick = onCreateGroup) {
-                Icon(Icons.Default.Add, contentDescription = "New group chat")
-            }
-        }
-    }
-    val note = when {
-        model.groupsFailed -> "Couldn't load group chats"
-        model.groupChats.isNotEmpty() -> null
-        canGroup -> "No group chats yet"
-        else -> "Create two bots to start a group chat"
-    }
-    if (note != null) {
-        Text(
-            text = note,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(enabled = model.groupsFailed) { model.loadGroupChats() }
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-        )
-    }
-}
-
-@Composable
-fun SidebarGroupRow(
-    model: AppModel,
-    group: GroupChat,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val isPending = group.id.startsWith("pending:")
-    val members = membersOf(group, model.agents)
-    Surface(
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp)
-            .clickable(enabled = !isPending, onClick = onClick),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            AvatarStack(members.take(2), size = 28.dp) { BotState.idle }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = group.name,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = members.joinToString(", ") { it.name },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 fun GroupFormDialog(
     model: AppModel,
     draft: GroupDraft,
@@ -536,42 +455,31 @@ fun GroupFormDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(
-                    text = "Members",
-                    style = MaterialTheme.typography.labelLarge,
-                )
+                GroupLabel("Members")
                 Text(
                     text = "Choose two to six bots. A bot added later gets a summary of the conversation so far.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                for (bot in model.agents.filterNot { it.id.startsWith("pending:") }) {
-                    val on = bot.id in draft.memberIDs
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        BotAvatarView(agent = bot, size = 26.dp)
-                        Text(
-                            text = bot.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (!bot.enabled) {
-                            Text(
-                                text = "Disabled",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                GroupedRows {
+                    for (bot in model.agents.filterNot { it.id.startsWith("pending:") }) {
+                        val on = bot.id in draft.memberIDs
+                        row { shape ->
+                            GroupedItem(
+                                shape = shape,
+                                leading = { BotAvatarView(agent = bot, size = 44.dp) },
+                                trailing = {
+                                    Switch(
+                                        checked = on,
+                                        enabled = on || draft.memberIDs.size < MAX_GROUP_MEMBERS,
+                                        onCheckedChange = { model.toggleGroupMember(bot.id, it) },
+                                    )
+                                },
+                            ) {
+                                RowTitle(bot.name, maxLines = 1)
+                                if (!bot.enabled) RowSubtitle("Disabled")
+                            }
                         }
-                        Switch(
-                            checked = on,
-                            enabled = on || draft.memberIDs.size < MAX_GROUP_MEMBERS,
-                            onCheckedChange = { model.toggleGroupMember(bot.id, it) },
-                        )
                     }
                 }
                 if (!isNew) {

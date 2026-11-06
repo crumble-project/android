@@ -12,10 +12,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -31,8 +32,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.generated.LearnedChange
 import dev.crumble.android.model.AppModel
@@ -57,7 +58,7 @@ fun DiffView(lines: List<DiffLine>) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(sheetColor)
             .padding(vertical = 8.dp),
     ) {
         for (line in lines) {
@@ -104,17 +105,24 @@ fun RevertChangeButton(model: AppModel, change: LearnedChange) {
 }
 
 @Composable
-private fun ChangeRow(model: AppModel, change: LearnedChange) {
+private fun ChangeRow(model: AppModel, change: LearnedChange, shape: Shape) {
     var expanded by remember(change.id) { mutableStateOf(false) }
     val bot = model.agents.firstOrNull { it.id == change.agentId }
-    Card(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(changeText(change, bot?.name), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (expanded) {
+    GroupedItem(
+        shape = shape,
+        onClick = { expanded = !expanded },
+        clickBelow = true,
+        leading = { if (bot != null) BotAvatarView(bot, size = 44.dp) else IconTile(Icons.Default.History, Tone.Lavender) },
+        below = if (expanded) {
+            {
                 ChangeDiff(change)
                 RevertChangeButton(model, change)
             }
-        }
+        } else {
+            null
+        },
+    ) {
+        RowTitle(changeText(change, bot?.name))
     }
 }
 
@@ -129,15 +137,17 @@ fun ChangeHistoryDialog(model: AppModel) {
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(ROW_GAP),
         ) {
             item {
-                SheetErrorBanner(model.errorText)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                    FilterChip(scope == SKILLS_ALL, { scope = SKILLS_ALL }, { Text("All") })
-                    FilterChip(scope == SKILLS_SHARED, { scope = SKILLS_SHARED }, { Text("Shared") })
-                    for (bot in model.agents) {
-                        FilterChip(scope == bot.id, { scope = bot.id }, { Text(bot.name) })
+                Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                    SheetErrorBanner(model.errorText)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                        FilterChip(scope == SKILLS_ALL, { scope = SKILLS_ALL }, { Text("All") })
+                        FilterChip(scope == SKILLS_SHARED, { scope = SKILLS_SHARED }, { Text("Shared") })
+                        for (bot in model.agents) {
+                            FilterChip(scope == bot.id, { scope = bot.id }, { Text(bot.name) })
+                        }
                     }
                 }
             }
@@ -147,7 +157,9 @@ fun ChangeHistoryDialog(model: AppModel) {
             if (!model.changesLoading && model.changesError.isEmpty() && shown.isEmpty()) {
                 item { Text("Skill and memory changes will appear here.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
-            items(shown, key = { it.id }) { change -> ChangeRow(model, change) }
+            itemsIndexed(shown, key = { _, change -> change.id }) { index, change ->
+                ChangeRow(model, change, groupedShape(index, shown.size))
+            }
             if (model.changesLoading) {
                 item {
                     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -155,7 +167,11 @@ fun ChangeHistoryDialog(model: AppModel) {
                     }
                 }
             } else if (model.changesHasMore) {
-                item { OutlinedButton(onClick = { model.loadMoreChanges() }) { Text("Show older changes") } }
+                item {
+                    Box(modifier = Modifier.padding(top = 8.dp)) {
+                        OutlinedButton(onClick = { model.loadMoreChanges() }) { Text("Show older changes") }
+                    }
+                }
             }
         }
     }

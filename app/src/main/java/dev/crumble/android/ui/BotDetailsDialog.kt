@@ -2,7 +2,6 @@ package dev.crumble.android.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -20,14 +19,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
+import dev.crumble.android.model.Route
 import dev.crumble.android.model.Schedule
 import dev.crumble.android.model.automationTiming
 import dev.crumble.android.model.automationsOf
@@ -82,19 +82,13 @@ private fun AutomationsSection(model: AppModel, bot: Agent) {
     val automations = automationsOf(bot.id, model.schedules)
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(ROW_GAP),
     ) {
-        Text("Automations", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        GroupLabel("Automations")
         when {
-            model.schedulesLoaded -> {
-                automations.forEach { AutomationRow(model, it) }
-                if (automations.isEmpty()) {
-                    Text(
-                        "No automations yet",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            model.schedulesLoaded -> GroupedRows {
+                for (schedule in automations) row { shape -> AutomationRow(model, schedule, shape) }
+                if (automations.isEmpty()) note("No automations yet")
             }
             model.schedulesError.isNotEmpty() -> SheetErrorBanner(model.schedulesError)
             else -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -103,26 +97,20 @@ private fun AutomationsSection(model: AppModel, bot: Agent) {
 }
 
 @Composable
-private fun AutomationRow(model: AppModel, schedule: Schedule) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                schedule.name,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+private fun AutomationRow(model: AppModel, schedule: Schedule, shape: Shape) {
+    GroupedItem(
+        shape = shape,
+        leading = { IconTile(routeIcon(Route.Tasks), Tone.Lavender) },
+        trailing = {
+            Switch(
+                checked = schedule.enabled,
+                enabled = !model.schedulePending(schedule.id),
+                onCheckedChange = { model.toggleSchedule(schedule.id) },
+                modifier = Modifier.semantics { contentDescription = "Run ${schedule.name}" },
             )
-            Text(
-                automationTiming(schedule, model.eventSources),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(
-            checked = schedule.enabled,
-            enabled = !model.schedulePending(schedule.id),
-            onCheckedChange = { model.toggleSchedule(schedule.id) },
-            modifier = Modifier.semantics { contentDescription = "Run ${schedule.name}" },
-        )
+        },
+    ) {
+        RowTitle(schedule.name, maxLines = 1)
+        RowSubtitle(automationTiming(schedule, model.eventSources))
     }
 }

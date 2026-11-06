@@ -1,10 +1,9 @@
 package dev.crumble.android.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -12,7 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,10 +43,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -73,13 +71,14 @@ fun CommandPaletteDialog(model: AppModel) {
         onDismissRequest = { model.showingPalette = false },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        Surface(modifier = Modifier.fillMaxSize()) {
+        Surface(color = pageColor, modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.systemBarsPadding().imePadding()) {
                 TextField(
                     value = query,
                     onValueChange = { query = it },
                     placeholder = { Text(PLACEHOLDER) },
                     singleLine = true,
+                    shape = CircleShape,
                     leadingIcon = {
                         IconButton(onClick = { model.showingPalette = false }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close")
@@ -99,13 +98,15 @@ fun CommandPaletteDialog(model: AppModel) {
                     colors = TextFieldDefaults.colors(
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
+                        focusedContainerColor = sheetColor,
+                        unfocusedContainerColor = sheetColor,
                     ),
-                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .focusRequester(focus),
                 )
                 LaunchedEffect(Unit) { focus.requestFocus() }
-                HorizontalDivider()
                 if (sections.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
@@ -115,17 +116,18 @@ fun CommandPaletteDialog(model: AppModel) {
                         )
                     }
                 } else {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        sections.forEach { section ->
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(ROW_GAP),
+                    ) {
+                        sections.forEachIndexed { sectionIndex, section ->
                             item(key = section.heading) {
-                                Text(
-                                    text = section.heading,
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 4.dp),
-                                )
+                                Box(modifier = Modifier.padding(top = 8.dp)) { GroupLabel(section.heading) }
                             }
-                            items(section.items) { item -> PaletteRow(model, item) }
+                            itemsIndexed(section.items) { index, item ->
+                                PaletteRow(model, item, groupedShape(index, section.items.size), Tone.entries[sectionIndex % Tone.entries.size])
+                            }
                         }
                     }
                 }
@@ -135,36 +137,17 @@ fun CommandPaletteDialog(model: AppModel) {
 }
 
 @Composable
-private fun PaletteRow(model: AppModel, item: PaletteItem) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { model.runPalette(item.action) }
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        val bot = (item.action as? PaletteAction.OpenBot)?.let { action -> model.agents.firstOrNull { it.id == action.id } }
-        if (bot != null) {
-            BotAvatarView(agent = bot, size = 24.dp)
-        } else {
-            Icon(paletteIcon(item.action), contentDescription = null, modifier = Modifier.size(24.dp))
-        }
-        Text(
-            text = item.title,
-            style = MaterialTheme.typography.bodyLarge,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        item.note?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+private fun PaletteRow(model: AppModel, item: PaletteItem, shape: Shape, tone: Tone) {
+    val bot = (item.action as? PaletteAction.OpenBot)?.let { action -> model.agents.firstOrNull { it.id == action.id } }
+    GroupedRow(
+        title = item.title,
+        subtitle = item.note,
+        shape = shape,
+        onClick = { model.runPalette(item.action) },
+        leading = {
+            if (bot != null) BotAvatarView(agent = bot, size = 44.dp) else IconTile(paletteIcon(item.action), tone)
+        },
+    )
 }
 
 private fun paletteIcon(action: PaletteAction): ImageVector = when (action) {

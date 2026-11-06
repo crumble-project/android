@@ -1,7 +1,5 @@
 package dev.crumble.android.ui
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,7 +7,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -17,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -55,11 +53,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.generated.ScriptRun
 import dev.crumble.android.model.Agent
@@ -68,6 +65,7 @@ import dev.crumble.android.model.EventSource
 import dev.crumble.android.model.EventSourceDraft
 import dev.crumble.android.model.MAX_COMMAND_CHARS
 import dev.crumble.android.model.MAX_EVENT_SOURCE_NAME_CHARS
+import dev.crumble.android.model.Route
 import dev.crumble.android.model.Schedule
 import dev.crumble.android.model.ScheduleStatus
 import dev.crumble.android.model.TaskDraft
@@ -123,25 +121,15 @@ private fun TaskList(model: AppModel) {
     ) {
         items(model.agents, key = { it.id }) { agent ->
             val tasks = listed.filter { it.agentId == agent.id }
-            SectionCard(
+            RowsSection(
                 title = agent.name,
                 footer = "Runs in ${agent.name}’s chat, once or on a schedule.",
             ) {
-                if (tasks.isEmpty()) {
-                    Text(
-                        text = "No tasks yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                if (tasks.isEmpty()) note("No tasks yet.")
                 for (schedule in tasks) {
-                    TaskRow(model, schedule, agent)
+                    row { shape -> TaskRow(model, schedule, agent, shape) }
                 }
-                TextButton(onClick = { model.openTaskForm("", agentID = agent.id) }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("New Task")
-                }
+                add("New Task") { model.openTaskForm("", agentID = agent.id) }
             }
         }
     }
@@ -149,7 +137,7 @@ private fun TaskList(model: AppModel) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TaskRow(model: AppModel, schedule: Schedule, agent: Agent) {
+private fun TaskRow(model: AppModel, schedule: Schedule, agent: Agent, shape: Shape) {
     val isPending = model.schedulePending(schedule.id)
     var confirmingDelete by remember(schedule.id) { mutableStateOf(false) }
     if (confirmingDelete) {
@@ -161,88 +149,50 @@ private fun TaskRow(model: AppModel, schedule: Schedule, agent: Agent) {
             onDismiss = { confirmingDelete = false },
         )
     }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+    GroupedItem(
+        shape = shape,
+        leading = { IconTile(routeIcon(Route.Tasks), Tone.Lavender) },
+        below = {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { model.runSchedule(schedule.id) },
+                    enabled = schedule.enabled && !isPending && !model.pendingMutations.contains("schedule-run:${schedule.id}"),
+                ) {
+                    Text("Run Now")
+                }
+                if (!schedule.finished) {
+                    TextButton(onClick = { model.toggleSchedule(schedule.id) }, enabled = !isPending) {
+                        Text(if (schedule.enabled) "Pause" else "Resume")
+                    }
+                }
+                TextButton(onClick = { model.openTaskForm(schedule.id) }, enabled = !isPending) {
+                    Text("Edit")
+                }
+                TextButton(onClick = { confirmingDelete = true }, enabled = !isPending) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                text = schedule.name,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            if (schedule.kind == "script") ScriptBadge()
+            RowTitle(schedule.name, modifier = Modifier.weight(1f, fill = false))
+            if (schedule.kind == "script") Pill("Script")
         }
-        Text(
+        RowSubtitle(
             text = if (schedule.kind == "script") schedule.command.orEmpty() else schedule.prompt,
-            style = if (schedule.kind == "script") {
-                MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
-            } else {
-                MaterialTheme.typography.bodySmall
-            },
             maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+            fontFamily = if (schedule.kind == "script") FontFamily.Monospace else null,
         )
-        Text(
-            text = "${schedule.status.label} · ${describeTiming(schedule, model.eventSources)}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        RowSubtitle("${schedule.status.label} · ${describeTiming(schedule, model.eventSources)}")
         val nextRun = schedule.nextRunAt
         if (schedule.status == ScheduleStatus.Active && nextRun != null) {
-            Text(
-                text = "Next run ${activityTime(nextRun)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            RowSubtitle("Next run ${activityTime(nextRun)}")
         }
         val creator = schedule.createdByAgentId
         if (creator != null && creator != agent.id) {
             val creatorName = model.agents.firstOrNull { it.id == creator }?.name
-            if (creatorName != null) {
-                Text(
-                    text = "Scheduled by $creatorName",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            if (creatorName != null) RowSubtitle("Scheduled by $creatorName")
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = { model.runSchedule(schedule.id) },
-                enabled = schedule.enabled && !isPending && !model.pendingMutations.contains("schedule-run:${schedule.id}"),
-            ) {
-                Text("Run Now")
-            }
-            if (!schedule.finished) {
-                TextButton(onClick = { model.toggleSchedule(schedule.id) }, enabled = !isPending) {
-                    Text(if (schedule.enabled) "Pause" else "Resume")
-                }
-            }
-            TextButton(onClick = { model.openTaskForm(schedule.id) }, enabled = !isPending) {
-                Text("Edit")
-            }
-            TextButton(onClick = { confirmingDelete = true }, enabled = !isPending) {
-                Text("Delete", color = MaterialTheme.colorScheme.error)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScriptBadge() {
-    Surface(
-        shape = RoundedCornerShape(6.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        color = Color.Transparent,
-    ) {
-        Text(
-            text = "Script",
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-        )
     }
 }
 
@@ -260,11 +210,11 @@ private fun RunList(model: AppModel) {
             runs.isNotEmpty() -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(ROW_GAP),
             ) {
-                items(runs, key = { it.id }) { run ->
+                itemsIndexed(runs, key = { _, run -> run.id }) { index, run ->
                     val bot = model.agents.firstOrNull { it.id == run.agentId }
-                    RunRow(run, bot) {
+                    RunRow(run, bot, groupedShape(index, runs.size)) {
                         when {
                             run.script != null -> open = run
                             bot != null -> model.selectAgent(bot.id)
@@ -289,36 +239,22 @@ private fun RunList(model: AppModel) {
 }
 
 @Composable
-private fun RunRow(run: TaskRun, bot: Agent?, onOpen: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpen)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+private fun RunRow(run: TaskRun, bot: Agent?, shape: Shape, onOpen: () -> Unit) {
+    GroupedItem(
+        shape = shape,
+        onClick = onOpen,
+        leading = { if (bot != null) BotAvatarView(bot, size = 44.dp) else IconTile(routeIcon(Route.Tasks), Tone.Lavender) },
+        trailing = { RunStatus(run) },
     ) {
-        if (bot != null) BotAvatarView(bot, size = 28.dp)
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = run.schedule?.name ?: "Deleted task",
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = listOfNotNull(
-                    bot?.name ?: "Deleted bot",
-                    activityTime(run.startedAt),
-                    run.script?.let(::scriptRunDuration),
-                ).joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        RunStatus(run)
+        RowTitle(run.schedule?.name ?: "Deleted task", maxLines = 1)
+        RowSubtitle(
+            text = listOfNotNull(
+                bot?.name ?: "Deleted bot",
+                activityTime(run.startedAt),
+                run.script?.let(::scriptRunDuration),
+            ).joinToString(" · "),
+            maxLines = 1,
+        )
     }
 }
 
@@ -361,7 +297,7 @@ private fun RunDetailsDialog(run: TaskRun, script: ScriptRun, onClose: () -> Uni
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                Surface(shape = RoundedCornerShape(8.dp), color = sheetColor) {
                     Text(
                         text = script.output.ifEmpty { "No output" },
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
@@ -385,61 +321,41 @@ private fun EventSourceList(model: AppModel) {
         contentPadding = PaddingValues(16.dp),
     ) {
         item {
-            SectionCard(
+            RowsSection(
                 title = "Event sources",
                 footer = "Each source is one webhook address. Tasks that use a source run when an event arrives there.",
             ) {
-                SheetErrorBanner(model.eventSourcesError)
-                if (model.eventSourcesLoaded && model.eventSources.isEmpty()) {
-                    Text(
-                        text = "No event sources yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                if (model.eventSourcesError.isNotEmpty()) note(model.eventSourcesError, isError = true)
+                if (model.eventSourcesLoaded && model.eventSources.isEmpty()) note("No event sources yet.")
                 for (source in model.eventSources) {
-                    EventSourceRow(model, source)
+                    row { shape -> EventSourceRow(model, source, shape) }
                 }
-                TextButton(onClick = { model.openEventSourceForm() }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("Add source")
-                }
+                add("Add source") { model.openEventSourceForm() }
             }
         }
     }
 }
 
 @Composable
-internal fun EventSourceRow(model: AppModel, source: EventSource) {
+internal fun EventSourceRow(model: AppModel, source: EventSource, shape: Shape) {
     val deleting = model.deletingEventSources.contains(source.id)
     var confirming by remember { mutableStateOf(false) }
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = "${source.name} (used by ${source.usedBy})",
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (source.usedBy > 0) {
-                Text(
-                    text = "Remove the tasks that use it first",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    GroupedItem(
+        shape = shape,
+        leading = { LetterTile(source.name) },
+        trailing = {
+            if (deleting) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                IconButton(onClick = { confirming = true }, enabled = source.usedBy == 0L) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete")
+                }
             }
-            model.eventSourceErrors[source.id]?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-            }
-        }
-        if (deleting) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-        } else {
-            IconButton(onClick = { confirming = true }, enabled = source.usedBy == 0L) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete")
-            }
-        }
+        },
+    ) {
+        RowTitle("${source.name} (used by ${source.usedBy})", maxLines = 1)
+        if (source.usedBy > 0) RowSubtitle("Remove the tasks that use it first")
+        model.eventSourceErrors[source.id]?.let { RowSubtitle(it, color = MaterialTheme.colorScheme.error) }
     }
     if (confirming) {
         AlertDialog(

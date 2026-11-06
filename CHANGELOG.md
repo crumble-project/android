@@ -26,7 +26,8 @@
 - Offer the website's file types in the attachment picker, and accept `.rb` files.
 - Start new bots with memory, web search, and messaging, like the website, and remove the Schedule tasks and Code mode toggles, which every bot has anyway.
 - Build bot avatars from the `open-bot-avatar-kt` `0.1.0` tag with a Gradle source dependency instead of a submodule.
-- Match the website's navigation: the drawer's Workspace holds Memory, Automations, and Activity, and Settings is a page listing every settings section in the website's order. General replaces the settings dialog. Back returns from a section to Settings, and from a page to Home.
+- Follow Google Messages and Android Settings: Home is a conversation list with search and an account button at the top right, the Account page leads to Memory, Automations, Activity, and Settings, and chats have Back, a details menu, and a pill composer. Settings lists every section in grouped rows, General replaces the settings dialog, and pages use the system's card colors, tracking, and rounded fields.
+- Carry the grouped look to every page: Memory, Skills, Automations, Activity, Integrations, Credentials, Logins, the connection pages, Avatars, jobs, change history, the bot editor, bot details, the group form, and the command palette.
 - Replace the local glossary with a link to the canonical glossary in the spec repository.
 - Preserve admitted task execution fields for navigation and reject non-admitted or incomplete starts instead of reporting success.
 - Edit a bot proposal before approving it. The sheet stays open with your edits until the server confirms, and fields the editor doesn't show are kept.

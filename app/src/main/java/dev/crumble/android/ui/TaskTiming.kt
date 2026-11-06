@@ -1,7 +1,6 @@
 package dev.crumble.android.ui
 
 import android.text.format.DateFormat
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -10,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -21,7 +20,6 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -119,10 +117,7 @@ private fun <T> Choice(label: String, value: String, options: List<T>, optionLab
 
 @Composable
 private fun PickerRow(label: String, value: String, onClick: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        OutlinedButton(onClick = onClick) { Text(value) }
-    }
+    GroupedRow(title = label, subtitle = value, shape = groupedShape(0, 1), onClick = onClick)
 }
 
 @Composable
@@ -250,7 +245,7 @@ private fun TimezoneDialog(current: String, onDismiss: () -> Unit, onPick: (Stri
     var query by remember { mutableStateOf("") }
     val zones = remember(query, current) { timezoneChoices(query, current) }
     Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = MaterialTheme.shapes.extraLarge) {
+        Surface(shape = MaterialTheme.shapes.extraLarge, color = pageColor) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = query,
@@ -259,19 +254,17 @@ private fun TimezoneDialog(current: String, onDismiss: () -> Unit, onPick: (Stri
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                LazyColumn(modifier = Modifier.fillMaxWidth().height(320.dp)) {
-                    items(zones, key = { it }) { zone ->
-                        Text(
-                            zone,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = if (zone == current) FontWeight.SemiBold else FontWeight.Normal),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onPick(zone)
-                                    onDismiss()
-                                }
-                                .padding(vertical = 10.dp),
-                        )
+                LazyColumn(modifier = Modifier.fillMaxWidth().height(320.dp), verticalArrangement = Arrangement.spacedBy(ROW_GAP)) {
+                    itemsIndexed(zones, key = { _, zone -> zone }) { index, zone ->
+                        GroupedItem(
+                            shape = groupedShape(index, zones.size),
+                            onClick = {
+                                onPick(zone)
+                                onDismiss()
+                            },
+                        ) {
+                            RowTitle(zone, maxLines = 1, fontWeight = if (zone == current) FontWeight.SemiBold else null)
+                        }
                     }
                 }
                 TextButton(onClick = onDismiss) { Text("Cancel") }

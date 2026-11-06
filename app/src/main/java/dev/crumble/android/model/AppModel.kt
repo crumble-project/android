@@ -77,27 +77,19 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 
-/** The website's sidebar pages. Everything else lives under Settings. */
+/** The website's sidebar pages, reached from the account menu. Everything else lives under Settings. */
 val WORKSPACE_PAGES: List<Route> get() = listOf(Route.Memory, Route.Tasks, Route.Activity)
 
-/** The website's settings sections in its order, plus Avatars, which its sidebar doesn't list. */
-val SETTINGS_PAGES: List<Route> get() = listOf(
-    Route.General,
-    Route.Providers,
-    Route.PasswordManagers,
-    Route.WebSearch,
-    Route.Credentials,
-    Route.Logins,
-    Route.JudgeModel,
-    Route.VisionModel,
-    Route.Integrations,
-    Route.Coding,
-    Route.Users,
-    Route.MessageGateways,
-    Route.EventRelay,
-    Route.Skills,
-    Route.Avatars,
+/** The website's settings sections, grouped the way Android's Settings groups its rows. */
+val SETTINGS_GROUPS: List<List<Route>> get() = listOf(
+    listOf(Route.General),
+    listOf(Route.Providers, Route.JudgeModel, Route.VisionModel, Route.WebSearch),
+    listOf(Route.Credentials, Route.Logins, Route.PasswordManagers),
+    listOf(Route.Integrations, Route.Coding, Route.MessageGateways, Route.EventRelay),
+    listOf(Route.Skills, Route.Avatars, Route.Users),
 )
+
+val SETTINGS_PAGES: List<Route> get() = SETTINGS_GROUPS.flatten()
 
 sealed class Route {
     data class AgentChat(val id: String) : Route()
@@ -122,11 +114,13 @@ sealed class Route {
     data object EventRelay : Route()
     data object Settings : Route()
     data object General : Route()
+    data object Account : Route()
 
-    /** Pages under Settings go back to its list; everything else goes Home. */
+    /** Where Back leads. Null is Home. */
     val parent: Route?
         get() = when {
             this in SETTINGS_PAGES -> Settings
+            this in WORKSPACE_PAGES || this == Settings -> Account
             this is MessageGateway -> MessageGateways
             else -> null
         }
@@ -155,6 +149,7 @@ sealed class Route {
             EventRelay -> "Event relay"
             Settings -> "Settings"
             General -> "General"
+            Account -> "Account"
         }
 }
 
@@ -2648,7 +2643,7 @@ class AppModel(
                 loadPasswordManagers()
             }
             Route.Avatars -> loadAgentsForPanel()
-            Route.Settings, Route.General -> Unit
+            Route.Settings, Route.General, Route.Account -> Unit
             Route.Integrations -> {
                 loadPasswordManagers()
                 loadIntegrations()

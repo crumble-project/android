@@ -2,9 +2,7 @@ package dev.crumble.android.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,7 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,6 +32,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -41,6 +40,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -92,26 +93,15 @@ private fun JobStatusLabel(working: Boolean) {
 }
 
 @Composable
-private fun JobRow(kind: JobKind, name: String, subtitle: String, working: Boolean, onClick: () -> Unit) {
-    Surface(
+private fun JobRow(kind: JobKind, name: String, subtitle: String, working: Boolean, shape: Shape, onClick: () -> Unit) {
+    GroupedItem(
+        shape = shape,
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        color = MaterialTheme.colorScheme.surface,
+        leading = { IconTile(kind.icon(), Tone.Lavender) },
+        trailing = { JobStatusLabel(working) },
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Icon(kind.icon(), contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Column(modifier = Modifier.weight(1f)) {
-                Text(name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            JobStatusLabel(working)
-        }
+        RowTitle(name, maxLines = 1)
+        RowSubtitle(subtitle, maxLines = 1)
     }
 }
 
@@ -119,7 +109,7 @@ private fun JobRow(kind: JobKind, name: String, subtitle: String, working: Boole
 @Composable
 fun JobCard(model: AppModel, job: JobRef) {
     val status = model.jobs.firstOrNull { it.name == job.name }?.status ?: job.status
-    JobRow(job.kind, job.name, job.kind.label, jobWorking(status)) { model.openJob(job) }
+    JobRow(job.kind, job.name, job.kind.label, jobWorking(status), groupedShape(0, 1)) { model.openJob(job) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -132,8 +122,10 @@ internal fun JobDialog(
 ) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Scaffold(
+            containerColor = pageColor,
             topBar = {
                 TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = pageColor, scrolledContainerColor = pageColor),
                     title = title,
                     navigationIcon = {
                         IconButton(onClick = onClose) { Icon(Icons.Default.Close, contentDescription = "Close") }
@@ -171,7 +163,7 @@ fun JobListDialog(model: AppModel) {
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(ROW_GAP),
             ) {
                 if (model.jobsFailed) {
                     item { JobLoadError("Couldn't load jobs.", onRetry = { model.openJobList() }) }
@@ -184,8 +176,14 @@ fun JobListDialog(model: AppModel) {
                 if (model.jobsLoaded && model.jobs.isEmpty()) {
                     item { Text("Nothing here yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
-                items(model.jobs, key = { "${it.kind}:${it.name}" }) { job ->
-                    JobRow(job.kind, job.name, listOf(job.kind.label, job.subtitle).filter { it.isNotEmpty() }.joinToString(" · "), jobWorking(job.status)) {
+                itemsIndexed(model.jobs, key = { _, job -> "${job.kind}:${job.name}" }) { index, job ->
+                    JobRow(
+                        job.kind,
+                        job.name,
+                        listOf(job.kind.label, job.subtitle).filter { it.isNotEmpty() }.joinToString(" · "),
+                        jobWorking(job.status),
+                        groupedShape(index, model.jobs.size),
+                    ) {
                         model.openJob(job.ref)
                     }
                 }
@@ -231,67 +229,68 @@ private fun JobDownloadButton(model: AppModel, panel: JobPanel) {
 }
 
 @Composable
-private fun JobStep(step: JobItem.Step) {
+private fun JobStep(step: JobItem.Step, shape: Shape) {
     var open by remember(step.id) { mutableStateOf(false) }
     val result = step.result
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().clickable(enabled = result != null) { open = !open },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (result == null) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-            } else {
-                Icon(stepIcon(step.tool), contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    GroupedItem(
+        shape = shape,
+        onClick = { open = !open },
+        enabled = result != null,
+        leading = {
+            ToneTile(Tone.Lavender) {
+                if (result == null) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
+                } else {
+                    Icon(stepIcon(step.tool), contentDescription = null)
+                }
             }
-            Text(jobStepVerb(step.tool), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
-            Text(
-                text = step.subject.orEmpty(),
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+        },
+        trailing = {
             if (result?.isError == true) {
                 Text("Failed", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
             if (result != null) {
-                Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-        if (open && result != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 24.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                    .horizontalScroll(rememberScrollState())
-                    .padding(8.dp),
-            ) {
-                Text(
-                    text = result.text.trimEnd('\n').ifEmpty { "No output." },
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                )
+        },
+        below = if (open && result != null) {
+            {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(sheetColor, RoundedCornerShape(8.dp))
+                        .horizontalScroll(rememberScrollState())
+                        .padding(8.dp),
+                ) {
+                    Text(
+                        text = result.text.trimEnd('\n').ifEmpty { "No output." },
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    )
+                }
             }
-        }
+        } else {
+            null
+        },
+    ) {
+        RowTitle(jobStepVerb(step.tool), maxLines = 1)
+        step.subject?.takeIf { it.isNotEmpty() }?.let { RowSubtitle(it, maxLines = 1, fontFamily = FontFamily.Monospace) }
     }
 }
 
 @Composable
-private fun JobItemView(item: JobItem) {
+private fun JobItemView(item: JobItem, shape: Shape) {
     when (item) {
-        is JobItem.Task -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Task", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                Text(item.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(12.dp))
-            }
+        is JobItem.Task -> Column(verticalArrangement = Arrangement.spacedBy(ROW_GAP)) {
+            GroupLabel("Task")
+            GroupCard { Text(item.text, style = MaterialTheme.typography.bodyMedium) }
         }
         is JobItem.Reply -> MarkdownText(text = item.text)
-        is JobItem.Step -> JobStep(item)
+        is JobItem.Step -> JobStep(item, shape)
     }
 }
+
+// With the list's ROW_GAP, this keeps 16dp between blocks; consecutive steps stay one group.
+private val BLOCK_GAP = 13.dp
 
 /** A job's task, replies and tool steps, read-only, over the chat. */
 @Composable
@@ -330,12 +329,20 @@ fun JobPanelDialog(model: AppModel, panel: JobPanel) {
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 reverseLayout = true,
                 contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.Bottom),
+                verticalArrangement = Arrangement.spacedBy(ROW_GAP, Alignment.Bottom),
             ) {
                 if (working) {
-                    item(key = "working") { Text("Working…", style = MaterialTheme.typography.bodyMedium) }
+                    item(key = "working") { Text("Working…", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = BLOCK_GAP)) }
                 }
-                items(items.asReversed(), key = { it.id }) { JobItemView(it) }
+                itemsIndexed(items.asReversed(), key = { _, item -> item.id }) { reversedIndex, item ->
+                    val index = items.lastIndex - reversedIndex
+                    val afterStep = item is JobItem.Step && items.getOrNull(index - 1) is JobItem.Step
+                    val beforeStep = item is JobItem.Step && items.getOrNull(index + 1) is JobItem.Step
+                    val position = if (afterStep) 1 else 0
+                    Box(modifier = Modifier.fillMaxWidth().padding(top = if (afterStep) 0.dp else BLOCK_GAP)) {
+                        JobItemView(item, groupedShape(position, position + if (beforeStep) 2 else 1))
+                    }
+                }
                 if (panel.loaded && items.isEmpty()) {
                     item(key = "empty") { Text("Nothing here yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }

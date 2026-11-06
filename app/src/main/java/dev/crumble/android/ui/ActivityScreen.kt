@@ -1,6 +1,5 @@
 package dev.crumble.android.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,7 +12,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,7 +27,6 @@ import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.SubdirectoryArrowRight
 import androidx.compose.material.icons.filled.Timeline
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -45,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -158,23 +157,20 @@ private fun ActivityList(model: AppModel) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(ROW_GAP),
     ) {
         for (day in days) {
             item(key = "day:${day.key}") {
-                Text(
-                    day.label,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
+                Box(modifier = Modifier.padding(top = 8.dp)) { GroupLabel(day.label) }
             }
-            items(day.items, key = { it.id }) { activity -> ActivityRow(model, activity, bots[activity.agentId]) }
+            itemsIndexed(day.items, key = { _, activity -> activity.id }) { index, activity ->
+                ActivityRow(model, activity, bots[activity.agentId], groupedShape(index, day.items.size))
+            }
         }
         if (feed.nextCursor != null) {
             item(key = "older") {
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -212,63 +208,52 @@ private fun headlineText(headline: ActivityHeadline): AnnotatedString {
 
 @Composable
 private fun ActivityMark(activity: ActivityRecord, bot: Agent?) {
-    Box(modifier = Modifier.size(34.dp)) {
-        if (bot != null) {
-            BotAvatarView(bot, size = 30.dp)
-        } else {
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.size(30.dp)) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Psychology, contentDescription = null, modifier = Modifier.size(16.dp))
-                }
-            }
-        }
+    Box(modifier = Modifier.size(48.dp)) {
+        if (bot != null) BotAvatarView(bot, size = 44.dp) else IconTile(Icons.Default.Psychology, Tone.Lavender)
         Surface(
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface,
+            color = sheetColor,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(16.dp).align(Alignment.BottomEnd),
+            modifier = Modifier.size(18.dp).align(Alignment.BottomEnd),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(kindIcon(activity.kind), contentDescription = null, modifier = Modifier.size(11.dp))
+                Icon(kindIcon(activity.kind), contentDescription = null, modifier = Modifier.size(12.dp))
             }
         }
     }
 }
 
 @Composable
-private fun ActivityRow(model: AppModel, activity: ActivityRecord, bot: Agent?) {
+private fun ActivityRow(model: AppModel, activity: ActivityRecord, bot: Agent?, shape: Shape) {
     var expanded by remember(activity.id) { mutableStateOf(false) }
     val preview = remember(activity.id) { activity.preview() }
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ActivityMark(activity, bot)
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(headlineText(activity.headline()), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    if (preview.isNotEmpty()) ActivityPreview(activity, preview)
-                }
-                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(activity.clock(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (activity.failed) ErrorBadge()
-                    Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(18.dp))
-                }
+    GroupedItem(
+        shape = shape,
+        onClick = { expanded = !expanded },
+        clickBelow = true,
+        leading = { ActivityMark(activity, bot) },
+        trailing = {
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(activity.clock(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (activity.failed) ErrorBadge()
+                Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(18.dp))
             }
-            if (expanded) ActivityDetails(model, activity)
-        }
+        },
+        below = if (expanded) {
+            { ActivityDetails(model, activity) }
+        } else {
+            null
+        },
+    ) {
+        Text(headlineText(activity.headline()), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (preview.isNotEmpty()) ActivityPreview(activity, preview)
     }
 }
 
 @Composable
 private fun ActivityPreview(activity: ActivityRecord, text: String) {
     val message = activity.kind == ActivityKind.BotMessage.value
-    Text(
-        text,
-        style = MaterialTheme.typography.bodySmall,
-        fontFamily = if (message) null else FontFamily.Monospace,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = if (message) 2 else 1,
-        overflow = TextOverflow.Ellipsis,
-    )
+    RowSubtitle(text, maxLines = if (message) 2 else 1, fontFamily = if (message) null else FontFamily.Monospace)
 }
 
 @Composable
@@ -292,7 +277,7 @@ private fun ActivityDetails(model: AppModel, activity: ActivityRecord) {
         return
     }
     val text = remember(activity.id) { activity.detailText() }
-    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Surface(color = sheetColor, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
         Text(
             text,
             style = MaterialTheme.typography.bodySmall,

@@ -10,7 +10,6 @@ import dev.crumble.android.model.PaletteSection
 import dev.crumble.android.model.Route
 import dev.crumble.android.model.ThemeChoice
 import dev.crumble.android.model.botStatusLine
-import dev.crumble.android.model.greeting
 import dev.crumble.android.model.paletteSections
 import dev.crumble.android.model.replyNotificationsDescription
 import dev.crumble.android.model.searchPalette
@@ -248,14 +247,6 @@ class GeneralSettingsTests {
 class HomeTests {
     private fun TestScope.model(transport: SettingsTransport) =
         AppModel(client = APIClient(SERVER, "session", transport), scope = backgroundScope)
-
-    @Test
-    fun greetingsFollowTheHour() {
-        assertEquals(
-            listOf("Up late", "Good morning", "Good morning", "Good afternoon", "Good afternoon", "Good evening", "Good evening"),
-            listOf(4, 5, 11, 12, 17, 18, 23).map(::greeting),
-        )
-    }
 
     @Test
     fun theStatusLineLeadsWithWork() {

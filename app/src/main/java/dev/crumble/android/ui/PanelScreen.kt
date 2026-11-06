@@ -1,5 +1,7 @@
 package dev.crumble.android.ui
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.CardDefaults
 import androidx.activity.compose.BackHandler
 import android.content.Context
 import android.content.Intent
@@ -10,9 +12,9 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -55,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -108,6 +111,7 @@ fun PanelView(
             Route.EventRelay -> EventRelayPanel(model)
             Route.Settings -> SettingsPanel(model)
             Route.General -> GeneralPanel(model)
+            Route.Account -> AccountPanel(model)
             is Route.AgentChat, is Route.GroupChat -> Unit
         }
     }
@@ -157,6 +161,7 @@ private fun MemoryPanel(model: AppModel) {
                 value = query,
                 onValueChange = { query = it },
                 label = { Text("Search memories") },
+                shape = CircleShape,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -180,21 +185,17 @@ private fun MemoryPanel(model: AppModel) {
         }
         item {
             if (scope != null && scope != SKILLS_SHARED) return@item
-            SectionCard(
+            RowsSection(
                 title = "Shared · ${model.sharedMemories.size}",
                 footer = sharedFooter,
                 expandable = true,
             ) {
-                MemoryLoadError(model.memoryErrors[SKILLS_SHARED])
+                model.memoryErrors[SKILLS_SHARED]?.let { note(it, isError = true) }
                 if (shared.isEmpty() && SKILLS_SHARED !in model.memoryErrors) {
-                    Text(
-                        text = if (normalizedQuery.isEmpty()) "No shared memories yet." else "No matching shared memories.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    note(if (normalizedQuery.isEmpty()) "No shared memories yet." else "No matching shared memories.")
                 }
                 for (memory in shared) {
-                    MemoryRow(model = model, memory = memory, agentID = null, needle = normalizedQuery, now = now)
+                    row { shape -> MemoryRow(model = model, memory = memory, agentID = null, needle = normalizedQuery, now = now, shape = shape) }
                 }
             }
         }
@@ -202,29 +203,20 @@ private fun MemoryPanel(model: AppModel) {
         items(scopedAgents.filter { scope != SKILLS_SHARED }, key = { it.id }) { agent ->
             val memories = model.agentMemories[agent.id].orEmpty().filter(matches)
             val totalMemories = model.agentMemories[agent.id].orEmpty().size
-            SectionCard(
+            RowsSection(
                 title = "${agent.name} · $totalMemories",
                 expandable = true,
             ) {
-                MemoryLoadError(model.memoryErrors[agent.id])
+                model.memoryErrors[agent.id]?.let { note(it, isError = true) }
                 if (memories.isEmpty() && agent.id !in model.memoryErrors) {
-                    Text(
-                        text = if (normalizedQuery.isEmpty()) "No memories yet." else "No matching memories.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    note(if (normalizedQuery.isEmpty()) "No memories yet." else "No matching memories.")
                 }
                 for (memory in memories) {
-                    MemoryRow(model = model, memory = memory, agentID = agent.id, needle = normalizedQuery, now = now)
+                    row { shape -> MemoryRow(model = model, memory = memory, agentID = agent.id, needle = normalizedQuery, now = now, shape = shape) }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun MemoryLoadError(error: String?) {
-    if (error != null) Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
 }
 
 @Composable
@@ -234,35 +226,28 @@ private fun MemoryRow(
     agentID: String?,
     needle: String,
     now: Instant,
+    shape: Shape,
 ) {
     val isPending = memory.id.startsWith("pending-")
     var confirmingDelete by remember(memory.id) { mutableStateOf(false) }
     val mark = MaterialTheme.colorScheme.tertiaryContainer
     val line = memoryLine(memory, now)
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = highlighted(memory.content, needle, mark),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                if (line.isNotEmpty()) {
-                    Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+    GroupedItem(
+        shape = shape,
+        leading = { IconTile(routeIcon(Route.Memory), Tone.Lavender) },
+        below = {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { model.openMemoryForm(memory.id, agentID = agentID) }, enabled = !isPending) { Text("Edit") }
+                TextButton(
+                    onClick = { confirmingDelete = true },
+                    enabled = !isPending,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("Delete") }
             }
-            TextButton(onClick = { model.openMemoryForm(memory.id, agentID = agentID) }, enabled = !isPending) { Text("Edit") }
-            TextButton(
-                onClick = { confirmingDelete = true },
-                enabled = !isPending,
-                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-            ) { Text("Delete") }
-        }
+        },
+    ) {
+        Text(text = highlighted(memory.content, needle, mark), style = MaterialTheme.typography.titleMedium)
+        if (line.isNotEmpty()) RowSubtitle(line)
     }
     if (confirmingDelete) {
         AlertDialog(
@@ -298,6 +283,7 @@ private fun IntegrationsPanel(model: AppModel) {
                 value = search,
                 onValueChange = { search = it },
                 label = { Text("Search MCP servers") },
+                shape = CircleShape,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -305,57 +291,29 @@ private fun IntegrationsPanel(model: AppModel) {
 
         item {
             val shared = listed.filter { it.agentId == null }
-            SectionCard(
+            RowsSection(
                 title = "Shared",
                 footer = "Every bot can use these. Turn one on for a bot in its profile.",
             ) {
-                if (shared.isEmpty()) {
-                    Text(
-                        text = "No shared MCP servers yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                if (shared.isEmpty()) note("No shared MCP servers yet.")
                 for (server in shared) {
-                    MCPServerRow(
-                        model = model,
-                        server = server,
-                        onOpenBrowser = { url -> openSignInPage(appContext, url) },
-                    )
+                    row { shape -> MCPServerRow(model = model, server = server, shape = shape, onOpenBrowser = { url -> openSignInPage(appContext, url) }) }
                 }
-                TextButton(onClick = { model.openMCPForm("", agentID = null) }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("Add Shared MCP Server")
-                }
+                add("Add Shared MCP Server") { model.openMCPForm("", agentID = null) }
             }
         }
 
         items(model.agents.filter { agent -> needle.isEmpty() || listed.any { it.agentId == agent.id } }, key = { it.id }) { agent ->
             val own = listed.filter { it.agentId == agent.id }
-            SectionCard(
+            RowsSection(
                 title = agent.name,
                 footer = "Only ${agent.name} can use these, with their own sign-in.",
             ) {
-                if (own.isEmpty()) {
-                    Text(
-                        text = "No MCP servers of its own.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                if (own.isEmpty()) note("No MCP servers of its own.")
                 for (server in own) {
-                    MCPServerRow(
-                        model = model,
-                        server = server,
-                        onOpenBrowser = { url -> openSignInPage(appContext, url) },
-                    )
+                    row { shape -> MCPServerRow(model = model, server = server, shape = shape, onOpenBrowser = { url -> openSignInPage(appContext, url) }) }
                 }
-                TextButton(onClick = { model.openMCPForm("", agentID = agent.id) }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("Add MCP Server")
-                }
+                add("Add MCP Server") { model.openMCPForm("", agentID = agent.id) }
             }
         }
     }
@@ -365,6 +323,7 @@ private fun IntegrationsPanel(model: AppModel) {
 private fun MCPServerRow(
     model: AppModel,
     server: MCPServer,
+    shape: Shape,
     onOpenBrowser: (String) -> Unit,
 ) {
     val isPending = server.id.startsWith("pending-")
@@ -374,21 +333,10 @@ private fun MCPServerRow(
         "token" -> "Uses a token"
         else -> "No sign-in"
     }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = server.name,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-            )
+    GroupedItem(
+        shape = shape,
+        leading = { LetterTile(server.name) },
+        trailing = {
             if (!server.enabled) {
                 Text(
                     text = "Disabled",
@@ -396,53 +344,45 @@ private fun MCPServerRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        Text(
-            text = server.url,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.MiddleEllipsis,
-        )
-        Text(
-            text = statusText,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        server.error?.let {
-            Text(text = it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-        }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (model.signingIn == server.id) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            } else if (server.auth == "oauth") {
-                OutlinedButton(onClick = { model.signOutOfMCP(server.id) }) {
-                    Text("Sign Out")
+        },
+        below = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (model.signingIn == server.id) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else if (server.auth == "oauth") {
+                    OutlinedButton(onClick = { model.signOutOfMCP(server.id) }) {
+                        Text("Sign Out")
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { model.beginMCPSignIn(server.id, onOpenBrowser) },
+                        enabled = model.signingIn == null && !isPending,
+                    ) {
+                        Text("Sign In…")
+                    }
                 }
-            } else {
-                OutlinedButton(
-                    onClick = { model.beginMCPSignIn(server.id, onOpenBrowser) },
-                    enabled = model.signingIn == null && !isPending,
+                TextButton(
+                    onClick = { model.openMCPForm(server.id) },
+                    enabled = !isPending,
                 ) {
-                    Text("Sign In…")
+                    Text("Edit")
+                }
+                TextButton(
+                    onClick = { confirmingDelete = true },
+                    enabled = !isPending,
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             }
-            TextButton(
-                onClick = { model.openMCPForm(server.id) },
-                enabled = !isPending,
-            ) {
-                Text("Edit")
-            }
-            TextButton(
-                onClick = { confirmingDelete = true },
-                enabled = !isPending,
-            ) {
-                Text("Delete", color = MaterialTheme.colorScheme.error)
-            }
-        }
+        },
+    ) {
+        RowTitle(server.name)
+        RowSubtitle(server.url, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+        RowSubtitle(statusText)
+        server.error?.let { RowSubtitle(it, color = MaterialTheme.colorScheme.error) }
     }
     if (confirmingDelete) {
         AlertDialog(
@@ -471,8 +411,45 @@ fun SectionCard(
     expandable: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    SectionFrame(title, footer, expandable) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = cardColor),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                content()
+            }
+        }
+    }
+}
+
+/** A SectionCard for a list: each row is its own surface in a group. */
+@Composable
+fun RowsSection(
+    title: String,
+    footer: String? = null,
+    expandable: Boolean = false,
+    build: GroupScope.() -> Unit,
+) {
+    SectionFrame(title, footer, expandable) { GroupedRows(build) }
+}
+
+/** A section's heading and footer around its content, which an expandable heading hides. */
+@Composable
+internal fun SectionFrame(
+    title: String,
+    footer: String? = null,
+    expandable: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     var expanded by remember(title) { mutableStateOf(true) }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(ROW_GAP)) {
         if (expandable) {
             Row(
                 modifier = Modifier
@@ -480,47 +457,31 @@ fun SectionCard(
                     .clickable { expanded = !expanded }
                     .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
                     .heightIn(min = 48.dp)
-                    .padding(horizontal = 4.dp),
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
                 Icon(
                     imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = if (expanded) "Collapse $title" else "Expand $title",
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         } else {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
+            GroupLabel(title)
         }
-        if (!expandable || expanded) {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    content()
-                }
-            }
-        }
+        if (!expandable || expanded) content()
         if (!footer.isNullOrEmpty()) {
             Text(
                 text = footer,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
             )
         }
     }

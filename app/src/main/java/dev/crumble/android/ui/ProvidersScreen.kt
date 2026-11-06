@@ -1,5 +1,7 @@
 package dev.crumble.android.ui
 
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,36 +56,43 @@ import dev.crumble.android.model.signInAvailable
 
 @Composable
 private fun ProviderSection(model: AppModel, title: String, description: String?, providers: List<Provider>) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+    Column(verticalArrangement = Arrangement.spacedBy(ROW_GAP)) {
+        GroupLabel(title)
         if (description != null) {
-            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+            )
         }
-        for (provider in providers) ProviderRow(model, provider)
+        providers.forEachIndexed { index, provider -> ProviderRow(model, provider, groupedShape(index, providers.size)) }
     }
 }
 
 @Composable
-private fun ProviderRow(model: AppModel, provider: Provider) {
+private fun ProviderRow(model: AppModel, provider: Provider, shape: Shape) {
     val label = providerStatus(provider, model.passwordManagers)
     val oauth = provider.authMethods.firstOrNull { it.type == "oauth" }
     val busy = "provider:${provider.provider}" in model.pendingMutations
     val external = provider.externalAuth
-    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(provider.name.take(1).uppercase(), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold))
+    Surface(shape = shape, color = cardColor, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                ToneTile(if (provider.configured) Tone.Green else Tone.Lavender) {
+                    Text(provider.name.take(1).uppercase(), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold))
+                }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(provider.name, style = MaterialTheme.typography.bodyMedium)
+                    Text(provider.name, style = MaterialTheme.typography.titleMedium)
                     if (label != null) {
                         Text(
                             label,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = if (provider.configured) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     if (oauth != null) {
-                        Text(oauth.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(oauth.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 when {
@@ -163,6 +172,7 @@ fun ProvidersPanel(model: AppModel) {
                 value = search,
                 onValueChange = { search = it },
                 label = { Text("Search providers") },
+                shape = CircleShape,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )

@@ -1,5 +1,14 @@
 package dev.crumble.android.ui
 
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.filled.Tune
 import androidx.activity.compose.BackHandler
 import dev.crumble.android.model.WORKSPACE_PAGES
@@ -97,58 +106,31 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CrumbleAppScreen(model: AppModel) {
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    // Home follows them itself.
-    val listShown = drawerState.targetValue == DrawerValue.Open && model.route != null
-    LaunchedEffect(listShown) {
-        if (listShown) model.followBotStatuses()
-    }
-    val scope = rememberCoroutineScope()
+    val inChat = model.route is Route.AgentChat || model.route is Route.GroupChat
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet(modifier = Modifier.width(310.dp)) {
-                SidebarView(
-                    model = model,
-                    onSelectRoute = { route ->
-                        model.navigate(route)
-                        scope.launch { drawerState.close() }
-                    },
-                    onOpenSettings = {
-                        model.navigate(Route.Settings)
-                        scope.launch { drawerState.close() }
-                    },
-                    onOpenSearch = {
-                        model.showingPalette = true
-                        scope.launch { drawerState.close() }
-                    },
-                    onCreateAgent = {
-                        model.createAgent()
-                        scope.launch { drawerState.close() }
-                    },
-                    onCreateGroup = {
-                        model.openNewGroup()
-                        scope.launch { drawerState.close() }
-                    },
-                )
-            }
+    Scaffold(
+        containerColor = pageColor,
+        topBar = {
+            CrumbleTopBar(model = model)
         },
-    ) {
-        Scaffold(
-            topBar = {
-                CrumbleTopBar(
-                    model = model,
-                    onOpenDrawer = { scope.launch { drawerState.open() } },
-                )
-            },
-        ) { innerPadding ->
+    ) { innerPadding ->
+        // The chat sheet runs under the gesture bar, so only the top inset comes off here.
+        val top = PaddingValues(top = innerPadding.calculateTopPadding())
+        Surface(
+            color = if (inChat) sheetColor else Color.Transparent,
+            shape = if (inChat) RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp) else RectangleShape,
+            modifier = Modifier.fillMaxSize().padding(top).consumeWindowInsets(top),
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
-                    .consumeWindowInsets(innerPadding)
-                    .imePadding(),
+                    .then(
+                        if (inChat) {
+                            Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                        } else {
+                            Modifier.imePadding()
+                        },
+                    ),
             ) {
                 when (val currentRoute = model.route) {
                     is Route.GroupChat -> GroupChatView(model = model)
@@ -178,7 +160,7 @@ fun CrumbleAppScreen(model: AppModel) {
         }
     }
 
-    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+    BackHandler(enabled = inChat) { model.navigate(null) }
     model.agentDraft?.let { draft ->
         AgentEditorDialog(model = model, draft = draft)
     }
@@ -250,23 +232,20 @@ fun CrumbleAppScreen(model: AppModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CrumbleTopBar(
-    model: AppModel,
-    onOpenDrawer: () -> Unit,
-) {
+private fun CrumbleTopBar(model: AppModel) {
     val currentRoute = model.route
     val selectedAgent = model.selectedAgent
 
     TopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = pageColor, scrolledContainerColor = pageColor),
         navigationIcon = {
-            val parent = currentRoute?.parent
-            if (parent != null) {
+            if (currentRoute != null && currentRoute != Route.Account) {
+                val parent = currentRoute.parent
                 IconButton(onClick = { model.navigate(parent) }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to ${parent.title.lowercase()}")
-                }
-            } else {
-                IconButton(onClick = onOpenDrawer) {
-                    Icon(Icons.Default.Menu, contentDescription = "Open Navigation")
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = parent?.let { "Back to ${it.title.lowercase()}" } ?: "Back",
+                    )
                 }
             }
         },
@@ -278,7 +257,7 @@ private fun CrumbleTopBar(
                 ) {
                     BotAvatarView(
                         agent = selectedAgent,
-                        size = 30.dp,
+                        size = 40.dp,
                         state = model.botState(selectedAgent),
                         live = true,
                     )
@@ -328,6 +307,12 @@ private fun CrumbleTopBar(
                     IconButton(onClick = { model.showingPalette = true }) {
                         Icon(Icons.Default.Search, contentDescription = "Search")
                     }
+                    AccountButton(model)
+                }
+                Route.Account -> {
+                    IconButton(onClick = { model.navigate(null) }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
                 }
                 is Route.AgentChat -> {
                     if (model.jobs.isNotEmpty() || selectedAgent?.tools.orEmpty().any { it == "coding" || it == "desktop" }) {
@@ -335,10 +320,14 @@ private fun CrumbleTopBar(
                             Icon(Icons.Default.Build, contentDescription = "Jobs")
                         }
                     }
+                    ChatMenu {
+                        item("Details") { model.openBotDetails() }
+                        item("Bot settings") { model.openEditor() }
+                    }
                 }
                 is Route.GroupChat -> {
-                    IconButton(onClick = { model.openGroupEditor(currentRoute.id) }) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit group chat")
+                    ChatMenu {
+                        item("Group settings") { model.openGroupEditor(currentRoute.id) }
                     }
                 }
                 Route.Settings, Route.General -> Unit
@@ -420,131 +409,7 @@ private fun CrumbleTopBar(
     )
 }
 
-@Composable
-private fun SidebarView(
-    model: AppModel,
-    onSelectRoute: (Route?) -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenSearch: () -> Unit,
-    onCreateAgent: () -> Unit,
-    onCreateGroup: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxHeight()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = "Crumble",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            )
-            Row {
-                IconButton(onClick = onCreateAgent) {
-                    Icon(Icons.Default.Edit, contentDescription = "New Agent")
-                }
-            }
-        }
-
-        HorizontalDivider()
-
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(vertical = 8.dp),
-        ) {
-            item {
-                NavigationDrawerItem(
-                    label = { Text("Home") },
-                    icon = { Icon(Icons.Default.Home, contentDescription = null) },
-                    selected = model.route == null,
-                    onClick = { onSelectRoute(null) },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-                )
-                NavigationDrawerItem(
-                    label = { Text("Search") },
-                    icon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    selected = false,
-                    onClick = onOpenSearch,
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-                )
-            }
-            item {
-                Text(
-                    text = "Agents",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                )
-            }
-            if (model.agents.isEmpty()) {
-                item {
-                    Text(
-                        text = "No agents yet",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                    )
-                }
-            } else {
-                items(model.agents, key = { it.id }) { agent ->
-                    SidebarAgentRow(
-                        model = model,
-                        agent = agent,
-                        selected = model.route == Route.AgentChat(agent.id),
-                        onClick = { onSelectRoute(Route.AgentChat(agent.id)) },
-                    )
-                }
-            }
-
-            item {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                GroupsHeader(model = model, onCreateGroup = onCreateGroup)
-            }
-            items(model.groupChats, key = { it.id }) { group ->
-                SidebarGroupRow(
-                    model = model,
-                    group = group,
-                    selected = model.route == Route.GroupChat(group.id),
-                    onClick = { onSelectRoute(Route.GroupChat(group.id)) },
-                )
-            }
-
-            item {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                Text(
-                    text = "Workspace",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                )
-            }
-
-            items(WORKSPACE_PAGES, key = { it.title }) { route ->
-                NavigationDrawerItem(
-                    label = { Text(route.title) },
-                    icon = { Icon(routeIcon(route), contentDescription = null) },
-                    selected = model.route == route,
-                    onClick = { onSelectRoute(route) },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-                )
-            }
-        }
-
-        HorizontalDivider()
-        NavigationDrawerItem(
-            label = { Text(Route.Settings.title) },
-            icon = { Icon(routeIcon(Route.Settings), contentDescription = null) },
-            selected = model.route == Route.Settings || model.route?.parent == Route.Settings,
-            onClick = onOpenSettings,
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-        )
-        ConnectionStatus(model = model)
-    }
-}
-
-/** The drawer's icon for a page. Chats have avatars instead. */
+/** A page's icon. Chats have avatars instead. */
 fun routeIcon(route: Route): ImageVector = when (route) {
     Route.Memory -> Icons.Default.Psychology
     Route.Skills -> Icons.AutoMirrored.Filled.MenuBook
@@ -565,72 +430,8 @@ fun routeIcon(route: Route): ImageVector = when (route) {
     Route.EventRelay -> Icons.Default.Webhook
     Route.Settings -> Icons.Default.Settings
     Route.General -> Icons.Default.Tune
+    Route.Account -> Icons.Default.Person
     is Route.AgentChat, is Route.GroupChat -> Icons.AutoMirrored.Filled.Message
-}
-
-@Composable
-private fun SidebarAgentRow(
-    model: AppModel,
-    agent: Agent,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val isPending = model.pendingMutations.contains("agent:${agent.id}")
-    val bgColor = if (selected) {
-        MaterialTheme.colorScheme.secondaryContainer
-    } else {
-        Color.Transparent
-    }
-    Surface(
-        color = bgColor,
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp)
-            .clickable(enabled = !isPending, onClick = onClick),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            BotAvatarView(
-                agent = agent,
-                size = 44.dp,
-                state = model.botState(agent),
-            )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = agent.name,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (!agent.enabled) {
-                        Text(
-                            text = "Paused",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Text(
-                    text = botListLine(agent, model.isWorking(agent.id)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
 }
 
 @Composable
@@ -642,8 +443,7 @@ fun ConnectionStatus(model: AppModel) {
     }
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(top = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

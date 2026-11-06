@@ -1,10 +1,11 @@
 package dev.crumble.android.ui
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,6 +30,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxColors
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -51,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
@@ -100,7 +104,7 @@ private fun Muted(text: String, maxLines: Int = Int.MAX_VALUE) {
 }
 
 @Composable
-private fun Pill(text: String) {
+internal fun Pill(text: String) {
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(50)) {
         Text(text, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
     }
@@ -158,7 +162,7 @@ fun SkillUsedByField(bots: List<Agent>, selected: Set<String>, onChange: (Set<St
 }
 
 @Composable
-private fun SelectionBox(model: AppModel, ids: List<String>, label: String, busy: Boolean) {
+private fun SelectionBox(model: AppModel, ids: List<String>, label: String, busy: Boolean, colors: CheckboxColors = CheckboxDefaults.colors()) {
     if (ids.isEmpty()) return
     val count = ids.count { it in model.selectedSkills }
     val state = when (count) {
@@ -170,6 +174,7 @@ private fun SelectionBox(model: AppModel, ids: List<String>, label: String, busy
         state = state,
         enabled = !busy,
         onClick = { model.toggleSkillSelection(ids, count != ids.size) },
+        colors = colors,
         modifier = Modifier.semantics { contentDescription = label },
     )
 }
@@ -192,34 +197,45 @@ private fun RowMenu(content: @Composable (close: () -> Unit) -> Unit) {
     }
 }
 
+/** The checkbox takes the tile's place on a selectable row, so the name keeps its width on a phone. */
+@Composable
+private fun TileSelectionBox(model: AppModel, id: String, label: String, busy: Boolean) {
+    val tone = Tone.Lavender
+    SelectionBox(
+        model,
+        listOf(id),
+        label,
+        busy,
+        CheckboxDefaults.colors(checkedColor = tone.content, uncheckedColor = tone.content, checkmarkColor = tone.container),
+    )
+}
+
 /** A skill row: its name and first line, and what follows on the right. */
 @Composable
 private fun SkillRow(
     name: String,
     line: String,
     onOpen: () -> Unit,
-    selection: @Composable () -> Unit = {},
+    shape: Shape,
+    selection: (@Composable () -> Unit)? = null,
     badge: String? = null,
     usage: String? = null,
     actions: @Composable () -> Unit = {},
+    below: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        selection()
-        Column(modifier = Modifier.weight(1f).clickable(onClick = onOpen).padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    name,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (badge != null) Pill(badge)
-            }
-            Muted(line, maxLines = 1)
-            if (usage != null) Muted(usage)
-        }
-        actions()
+    GroupedItem(
+        shape = shape,
+        onClick = onOpen,
+        leading = {
+            if (selection != null) ToneTile(Tone.Lavender) { selection() } else LetterTile(name)
+        },
+        trailing = { actions() },
+        below = below,
+    ) {
+        RowTitle(name, maxLines = 1)
+        RowSubtitle(line, maxLines = 1)
+        if (usage != null) RowSubtitle(usage)
+        if (badge != null) Pill(badge)
     }
 }
 
@@ -227,51 +243,53 @@ private fun usedByLine(model: AppModel, skillID: String): String? =
     model.agents.count { it.sharedSkills?.contains(skillID) == true }.takeIf { it > 0 }?.let { "(used by $it)" }
 
 @Composable
-private fun SharedSkillRow(model: AppModel, skill: SharedSkill, busy: Boolean) {
+private fun SharedSkillRow(model: AppModel, skill: SharedSkill, busy: Boolean, shape: Shape) {
     var deleting by remember(skill.id) { mutableStateOf(false) }
     var expanded by remember(skill.id) { mutableStateOf(false) }
     val pending = skill.id.startsWith("pending-") || "skill:${skill.id}" in model.pendingMutations
     val origin = skill.origin
     val update = skill.update
-    Column {
-        SkillRow(
-            name = skill.name,
-            line = skillSummary(skill.description, skill.instructions),
-            selection = { if (!pending) SelectionBox(model, listOf(skill.id), "Select ${skill.name} (Shared)", busy) },
-            badge = update?.let { if (it.removed) "Removed upstream" else "Update available" },
-            usage = usedByLine(model, skill.id),
-            onOpen = { if (origin != null) model.openInstalledSkill(skill.id) else expanded = !expanded },
-            actions = {
-                RowMenu { close ->
-                    if (origin != null) {
-                        DropdownMenuItem(text = { Text("View") }, onClick = { close(); model.openInstalledSkill(skill.id) })
-                        if (update != null && !update.removed) {
-                            DropdownMenuItem(text = { Text("Update") }, onClick = { close(); model.openSkillUpdate(skill.id) })
-                        }
-                        DropdownMenuItem(text = { Text("Make a copy") }, enabled = !pending, onClick = { close(); model.copySkill(skill.id) })
-                    } else {
-                        DropdownMenuItem(text = { Text("Edit") }, enabled = !pending, onClick = { close(); model.openSkillForm(skill.id) })
+    SkillRow(
+        name = skill.name,
+        line = skillSummary(skill.description, skill.instructions),
+        shape = shape,
+        selection = if (pending) null else {
+            { TileSelectionBox(model, skill.id, "Select ${skill.name} (Shared)", busy) }
+        },
+        badge = update?.let { if (it.removed) "Removed upstream" else "Update available" },
+        usage = usedByLine(model, skill.id),
+        onOpen = { if (origin != null) model.openInstalledSkill(skill.id) else expanded = !expanded },
+        actions = {
+            RowMenu { close ->
+                if (origin != null) {
+                    DropdownMenuItem(text = { Text("View") }, onClick = { close(); model.openInstalledSkill(skill.id) })
+                    if (update != null && !update.removed) {
+                        DropdownMenuItem(text = { Text("Update") }, onClick = { close(); model.openSkillUpdate(skill.id) })
                     }
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text(if (origin != null) "Uninstall" else "Delete", color = MaterialTheme.colorScheme.error) },
-                        enabled = !pending,
-                        onClick = { close(); deleting = true },
-                    )
+                    DropdownMenuItem(text = { Text("Make a copy") }, enabled = !pending, onClick = { close(); model.copySkill(skill.id) })
+                } else {
+                    DropdownMenuItem(text = { Text("Edit") }, enabled = !pending, onClick = { close(); model.openSkillForm(skill.id) })
                 }
-            },
-        )
-        if (expanded) {
-            Column(modifier = Modifier.padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(skill.instructions, style = MaterialTheme.typography.bodySmall)
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text(if (origin != null) "Uninstall" else "Delete", color = MaterialTheme.colorScheme.error) },
+                    enabled = !pending,
+                    onClick = { close(); deleting = true },
+                )
+            }
+        },
+        below = if (!expanded) null else {
+            {
+                Text(skill.instructions, style = MaterialTheme.typography.bodyMedium)
                 Text(
                     "Assign to bots",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
                 )
                 for (agent in model.agents) {
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(agent.name, style = MaterialTheme.typography.bodySmall)
+                        Text(agent.name, style = MaterialTheme.typography.bodyMedium)
                         Switch(
                             checked = agent.sharedSkills?.contains(skill.id) == true,
                             enabled = "agent-shared-skills:${agent.id}" !in model.pendingMutations,
@@ -280,8 +298,8 @@ private fun SharedSkillRow(model: AppModel, skill: SharedSkill, busy: Boolean) {
                     }
                 }
             }
-        }
-    }
+        },
+    )
     if (deleting) {
         ConfirmDialog(
             title = if (origin != null) "Uninstall ${skill.name}?" else "Delete ${skill.name}?",
@@ -294,13 +312,16 @@ private fun SharedSkillRow(model: AppModel, skill: SharedSkill, busy: Boolean) {
 }
 
 @Composable
-private fun PersonalSkillRow(model: AppModel, agent: Agent, skill: SkillPackage, busy: Boolean) {
+private fun PersonalSkillRow(model: AppModel, agent: Agent, skill: SkillPackage, busy: Boolean, shape: Shape) {
     var deleting by remember(skill.id) { mutableStateOf(false) }
     val pending = skill.id.startsWith("pending-") || "agent-skill:${skill.id}" in model.pendingMutations
     SkillRow(
         name = skill.name,
         line = skillGlimpse(skill.instructions),
-        selection = { if (!pending) SelectionBox(model, listOf(skill.id), "Select ${skill.name} (${agent.name})", busy) },
+        shape = shape,
+        selection = if (pending) null else {
+            { TileSelectionBox(model, skill.id, "Select ${skill.name} (${agent.name})", busy) }
+        },
         badge = if (skill.pinned) "Pinned" else null,
         onOpen = { if (!pending) model.openSkillForm(skill.id, agent.id) },
         actions = {
@@ -328,23 +349,22 @@ private fun PersonalSkillRow(model: AppModel, agent: Agent, skill: SkillPackage,
 }
 
 @Composable
-private fun BundledRow(skill: SharedSkill) {
+private fun BundledRow(skill: SharedSkill, shape: Shape) {
     var expanded by remember(skill.id) { mutableStateOf(false) }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(skill.name)
-                Muted(skillSummary(skill.description, skill.instructions), maxLines = 1)
+    GroupedItem(
+        shape = shape,
+        onClick = { expanded = !expanded },
+        leading = { LetterTile(skill.name) },
+        trailing = { Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null) },
+        below = if (!expanded) null else {
+            {
+                Text(skill.instructions.ifEmpty { "No instructions." }, style = MaterialTheme.typography.bodyMedium)
+                skill.path?.let { Text(it, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
-            Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
-        }
-        if (expanded) {
-            Text(skill.instructions.ifEmpty { "No instructions." }, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp))
-            skill.path?.let { Text(it, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
+        },
+    ) {
+        RowTitle(skill.name, maxLines = 1)
+        RowSubtitle(skillSummary(skill.description, skill.instructions), maxLines = 1)
     }
 }
 
@@ -404,6 +424,7 @@ fun SkillsPanel(model: AppModel) {
                         value = search,
                         onValueChange = { search = it },
                         label = { Text("Search skills") },
+                        shape = CircleShape,
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -438,14 +459,12 @@ fun SkillsPanel(model: AppModel) {
             item { SelectAll(model, catalog.visibleIn(scope, needle).map { it.id }, "Select all results", busy) }
             if (scope == SKILLS_ALL || scope == SKILLS_SHARED) {
                 item {
-                    SectionCard(title = "Shared", footer = "Turn a shared skill on for the bots that should have it.") {
+                    SectionFrame(title = "Shared", footer = "Turn a shared skill on for the bots that should have it.") {
                         SelectAll(model, shared.filterNot { it.id.startsWith("pending-") }.map { it.id }, "Select all shared skills", busy)
-                        if (shared.isEmpty()) Muted("No shared skills yet.")
-                        for (skill in shared) SharedSkillRow(model, skill, busy)
-                        TextButton(onClick = { model.openSkillForm("") }) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.size(4.dp))
-                            Text("Add shared skill")
+                        GroupedRows {
+                            if (shared.isEmpty()) note("No shared skills yet.")
+                            for (skill in shared) row { shape -> SharedSkillRow(model, skill, busy, shape) }
+                            add("Add shared skill") { model.openSkillForm("") }
                         }
                     }
                 }
@@ -454,23 +473,21 @@ fun SkillsPanel(model: AppModel) {
                 items(owners, key = { it.id }) { agent ->
                     val skills = model.agentSkills[agent.id].orEmpty()
                     val shown = skills.filter { matchesSkill(it.name, it.instructions, needle) }
-                    SectionCard(title = agent.name, footer = "Personal skills only ${agent.name} follows.") {
+                    SectionFrame(title = agent.name, footer = "Personal skills only ${agent.name} follows.") {
                         SelectAll(model, shown.filterNot { it.id.startsWith("pending-") }.map { it.id }, "Select all ${agent.name} skills", busy)
-                        if (shown.isEmpty()) Muted(if (skills.isEmpty()) "No personal skills yet." else "No skills match your search.")
-                        for (skill in shown) PersonalSkillRow(model, agent, skill, busy)
-                        TextButton(onClick = { model.openSkillForm("", agent.id) }) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.size(4.dp))
-                            Text("Add personal skill")
+                        GroupedRows {
+                            if (shown.isEmpty()) note(if (skills.isEmpty()) "No personal skills yet." else "No skills match your search.")
+                            for (skill in shown) row { shape -> PersonalSkillRow(model, agent, skill, busy, shape) }
+                            add("Add personal skill") { model.openSkillForm("", agent.id) }
                         }
                     }
                 }
             }
             if (scope == SKILLS_ALL || scope == SKILLS_DEFAULT) {
                 item {
-                    SectionCard(title = "Default", footer = "Every bot has these. They're files on the server: edit them there and restart it.") {
-                        if (bundled.isEmpty()) Muted("No default skills.")
-                        for (skill in bundled) BundledRow(skill)
+                    RowsSection(title = "Default", footer = "Every bot has these. They're files on the server: edit them there and restart it.") {
+                        if (bundled.isEmpty()) note("No default skills.")
+                        for (skill in bundled) row { shape -> BundledRow(skill, shape) }
                     }
                 }
             }
@@ -512,7 +529,11 @@ private val BULK_ACTIONS = listOf(
 @Composable
 private fun BulkBar(model: AppModel, picked: List<SelectableSkill>, busy: Boolean, onAction: (BulkAction) -> Unit) {
     val notInstalled = picked.filter { !it.installed }
-    Surface(tonalElevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
+    Surface(
+        color = cardColor,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.horizontalScroll(rememberScrollState())) {
                 IconButton(enabled = !busy, onClick = { model.selectedSkills = emptySet() }) {
@@ -640,7 +661,7 @@ fun InstallSkillsDialog(model: AppModel, form: SkillInstallForm) {
 @Composable
 private fun SkillContent(skill: SkillPackage) {
     if (skill.description.isNotEmpty()) Text(skill.description, style = MaterialTheme.typography.bodyMedium)
-    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Surface(color = sheetColor, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
         Text(skill.instructions, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(10.dp))
     }
     if (skill.documents.isNotEmpty()) {

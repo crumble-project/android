@@ -1,5 +1,7 @@
 package dev.crumble.android.ui
 
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.AddCircleOutline
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -809,6 +811,9 @@ fun Composer(
 }
 
 /** The message field with its reply preview, mention suggestions, attachments, and send and stop buttons. */
+private val COMPOSER_HEIGHT = 56.dp
+private val IMAGE_PICKER_TYPES = arrayOf("image/*")
+
 @Composable
 fun ComposerBar(
     draft: String,
@@ -859,10 +864,7 @@ fun ComposerBar(
         )
     }
 
-    Surface(
-        tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
+    Box(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -956,38 +958,62 @@ fun ComposerBar(
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                IconButton(
-                    onClick = {
-                        filePicker.launch(ATTACHMENT_PICKER_TYPES)
-                    },
-                    enabled = enabled,
+                Surface(
+                    shape = RoundedCornerShape(COMPOSER_HEIGHT / 2),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.weight(1f).heightIn(min = COMPOSER_HEIGHT),
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Attach Files",
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        IconButton(
+                            onClick = { filePicker.launch(ATTACHMENT_PICKER_TYPES) },
+                            enabled = enabled,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AddCircleOutline,
+                                contentDescription = "Attach Files",
+                            )
+                        }
+                        TextField(
+                            value = draft,
+                            onValueChange = onDraftChange,
+                            modifier = Modifier.weight(1f),
+                            enabled = enabled,
+                            placeholder = { Text(placeholder) },
+                            maxLines = 6,
+                            colors = TextFieldDefaults.colors(
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedContainerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent,
+                            ),
+                        )
+                        Box(modifier = Modifier.padding(vertical = 4.dp)) { footer() }
+                        IconButton(
+                            onClick = { filePicker.launch(IMAGE_PICKER_TYPES) },
+                            enabled = enabled,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Image,
+                                contentDescription = "Attach Images",
+                            )
+                        }
+                    }
                 }
 
-                TextField(
-                    value = draft,
-                    onValueChange = onDraftChange,
-                    modifier = Modifier.weight(1f),
-                    enabled = enabled,
-                    placeholder = { Text(placeholder) },
-                    maxLines = 6,
-                    shape = RoundedCornerShape(22.dp),
-                    colors = TextFieldDefaults.colors(
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
-                    ),
-                )
-
+                val canSend = enabled && (draft.isNotBlank() || attachments.isNotEmpty())
                 if (running) {
-                    FilledTonalIconButton(onClick = onStop, enabled = stopEnabled) {
+                    FilledTonalIconButton(
+                        onClick = onStop,
+                        enabled = stopEnabled,
+                        modifier = Modifier.size(COMPOSER_HEIGHT),
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Stop,
                             contentDescription = "Stop",
@@ -995,20 +1021,19 @@ fun ComposerBar(
                         )
                     }
                 }
-
-                val canSend = enabled && (draft.isNotBlank() || attachments.isNotEmpty())
-                FilledIconButton(
-                    onClick = onSend,
-                    enabled = canSend,
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                    )
+                if (!running || canSend) {
+                    FilledIconButton(
+                        onClick = onSend,
+                        enabled = canSend,
+                        modifier = Modifier.size(COMPOSER_HEIGHT),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Send",
+                        )
+                    }
                 }
             }
-
-            footer()
         }
     }
 }
@@ -1139,14 +1164,14 @@ fun ChatBubble(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    val bg = if (owner) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (owner) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    val bg = if (owner) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh
+    val fg = if (owner) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
     Surface(
         color = bg,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
         modifier = modifier,
     ) {
-        Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
+        Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             CompositionLocalProvider(LocalContentColor provides fg) {
                 content()
             }

@@ -60,26 +60,34 @@ fun AvatarsPanel(model: AppModel) {
     val page = model.avatarPage
     val bots = model.agents.filterNot { it.id.startsWith("pending:") }
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
             "Choose a gallery shape, import a definition, or copy a prompt to design your own.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp),
         )
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            for (state in BotState.entries) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    BotAvatarView(avatar = page.value, size = 88.dp, state = state, live = true)
-                    Text(state.name.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.bodySmall)
+        GroupCard {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                for (state in BotState.entries) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        BotAvatarView(avatar = page.value, size = 88.dp, state = state, live = true)
+                        Text(state.name.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }
-        AvatarBotField(bots, page.botID, enabled = !page.saving, onSelect = { model.pickAvatarBot(it) })
-        // The editor keeps its color drafts, which start over for each bot.
-        key(page.botID) {
-            AvatarEditor(value = page.value, enabled = !page.saving, onChange = { model.changeAvatar(it) })
+        GroupCard {
+            AvatarBotField(bots, page.botID, enabled = !page.saving, onSelect = { model.pickAvatarBot(it) })
+            // The editor keeps its color drafts, which start over for each bot.
+            key(page.botID) {
+                AvatarEditor(value = page.value, enabled = !page.saving, onChange = { model.changeAvatar(it) })
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(enabled = page.botID.isNotEmpty() && !page.saving, onClick = { model.saveAvatar() }) { Text("Save avatar to bot") }

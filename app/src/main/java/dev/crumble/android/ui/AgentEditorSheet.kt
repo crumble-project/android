@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,8 +19,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -37,9 +44,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -75,8 +85,10 @@ fun AgentEditorDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Scaffold(
+            containerColor = pageColor,
             topBar = {
                 TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = pageColor, scrolledContainerColor = pageColor),
                     title = {
                         Text(
                             when {
@@ -262,93 +274,93 @@ fun AgentEditorDialog(
                 }
 
                 item {
-                    SectionCard(
+                    RowsSection(
                         title = "Capabilities",
                         footer = "Memory lets the agent keep notes between chats, including notes every bot with memory sees. When Message other bots is enabled, it can ask any other bot and relay their answers.",
                     ) {
                         for (capability in shownCapabilities(model.capabilities, draft.initialTools)) {
-                            when (capability.tool) {
-                                "memory" -> ToggleRow(
-                                    label = capability.label,
-                                    subtitle = capability.help,
-                                    checked = draft.toolsMemory,
-                                    onCheckedChange = { model.agentDraft = draft.copy(toolsMemory = it) },
-                                )
-                                "delegate" -> ToggleRow(
-                                    label = capability.label,
-                                    subtitle = capability.help,
-                                    checked = draft.toolsDelegate,
-                                    onCheckedChange = { model.agentDraft = draft.copy(toolsDelegate = it) },
-                                )
-                                else -> {
-                                    ToggleRow(
+                            row { shape ->
+                                when (capability.tool) {
+                                    "memory" -> ToggleRow(
                                         label = capability.label,
+                                        icon = capabilityIcon(capability.tool),
+                                        shape = shape,
+                                        subtitle = capability.help,
+                                        checked = draft.toolsMemory,
+                                        onCheckedChange = { model.agentDraft = draft.copy(toolsMemory = it) },
+                                    )
+                                    "delegate" -> ToggleRow(
+                                        label = capability.label,
+                                        icon = capabilityIcon(capability.tool),
+                                        shape = shape,
+                                        subtitle = capability.help,
+                                        checked = draft.toolsDelegate,
+                                        onCheckedChange = { model.agentDraft = draft.copy(toolsDelegate = it) },
+                                    )
+                                    else -> ToggleRow(
+                                        label = capability.label,
+                                        icon = capabilityIcon(capability.tool),
+                                        shape = shape,
                                         subtitle = capability.help,
                                         checked = capability.tool in draft.otherTools,
                                         onCheckedChange = { on ->
                                             val tool = capability.tool
                                             model.agentDraft = draft.copy(otherTools = if (on) draft.otherTools + tool else draft.otherTools - tool)
                                         },
+                                        below = if (capability.tool == "desktop" && capability.tool in draft.otherTools) {
+                                            { DesktopModelFields(model, draft) }
+                                        } else {
+                                            null
+                                        },
                                     )
-                                    if (capability.tool == "desktop" && capability.tool in draft.otherTools) {
-                                        DesktopModelFields(model, draft)
-                                    }
                                 }
                             }
                         }
                         if ("web" in draft.otherTools) {
-                            ChoiceField(
-                                label = "Web search provider",
-                                options = WEB_SEARCH_OPTIONS,
-                                value = draft.webSearchProvider ?: WEB_SEARCH_ACCOUNT_DEFAULT,
-                                onChoose = { choice ->
-                                    model.agentDraft = draft.copy(webSearchProvider = choice.takeIf { it != WEB_SEARCH_ACCOUNT_DEFAULT })
-                                },
-                            )
-                            Text(
-                                text = "Manage the default and Exa key in Settings → Web search.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            row { shape ->
+                                GroupCard(shape) {
+                                    ChoiceField(
+                                        label = "Web search provider",
+                                        options = WEB_SEARCH_OPTIONS,
+                                        value = draft.webSearchProvider ?: WEB_SEARCH_ACCOUNT_DEFAULT,
+                                        onChoose = { choice ->
+                                            model.agentDraft = draft.copy(webSearchProvider = choice.takeIf { it != WEB_SEARCH_ACCOUNT_DEFAULT })
+                                        },
+                                    )
+                                    Text(
+                                        text = "Manage the default and Exa key in Settings → Web search.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
 
                 item {
-                    SectionCard(title = "Integrations") {
+                    RowsSection(title = "Integrations") {
                         val servers = model.usableServers(forAgentID = draft.agentID)
-                        if (servers.isEmpty()) {
-                            Text(
-                                text = "Add an MCP server under Integrations to use its tools here.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        if (servers.isEmpty()) note("Add an MCP server under Integrations to use its tools here.")
                         for (server in servers) {
-                            val checked = draft.mcpServers.contains(server.id)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(server.name)
-                                    if (server.agentId != null) {
-                                        Text(
-                                            text = "Only this agent",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            row { shape ->
+                                GroupedItem(
+                                    shape = shape,
+                                    leading = { LetterTile(server.name) },
+                                    trailing = {
+                                        Switch(
+                                            checked = draft.mcpServers.contains(server.id),
+                                            enabled = server.enabled,
+                                            onCheckedChange = { enabled ->
+                                                val next = if (enabled) draft.mcpServers + server.id else draft.mcpServers - server.id
+                                                model.agentDraft = draft.copy(mcpServers = next)
+                                            },
                                         )
-                                    }
-                                }
-                                Switch(
-                                    checked = checked,
-                                    enabled = server.enabled,
-                                    onCheckedChange = { enabled ->
-                                        val next = if (enabled) draft.mcpServers + server.id else draft.mcpServers - server.id
-                                        model.agentDraft = draft.copy(mcpServers = next)
                                     },
-                                )
+                                ) {
+                                    RowTitle(server.name)
+                                    if (server.agentId != null) RowSubtitle("Only this agent")
+                                }
                             }
                         }
                     }
@@ -432,10 +444,7 @@ fun AgentEditorDialog(
 
 @Composable
 private fun DesktopModelFields(model: AppModel, draft: AgentDraft) {
-    Column(
-        modifier = Modifier.padding(start = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ChoiceField(
             label = "Desktop job provider",
             options = desktopProviderOptions(model.providers, draft.desktopProvider),
@@ -471,29 +480,32 @@ private fun DesktopModelFields(model: AppModel, draft: AgentDraft) {
     }
 }
 
+private fun capabilityIcon(tool: String): ImageVector = when (tool) {
+    "memory" -> Icons.Default.Psychology
+    "web" -> Icons.Default.Language
+    "delegate" -> Icons.Default.Forum
+    "coding" -> Icons.Default.Code
+    "desktop" -> Icons.Default.DesktopWindows
+    else -> Icons.Default.SmartToy
+}
+
 @Composable
 private fun ToggleRow(
     label: String,
+    icon: ImageVector,
+    shape: Shape,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
     subtitle: String? = null,
+    below: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+    GroupedItem(
+        shape = shape,
+        leading = { IconTile(icon, Tone.Lavender) },
+        trailing = { Switch(checked = checked, onCheckedChange = onCheckedChange) },
+        below = below,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label)
-            if (subtitle != null) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        RowTitle(label)
+        if (subtitle != null) RowSubtitle(subtitle)
     }
 }

@@ -107,10 +107,8 @@ fun AvatarEditor(value: BotAvatarDefinition, onChange: (BotAvatarDefinition) -> 
                                     status = ""
                                 },
                                 shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(
-                                    if (picked) 2.dp else 1.dp,
-                                    if (picked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                ),
+                                color = sheetColor,
+                                border = if (picked) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                             ) {
                                 Column(
                                     modifier = Modifier.padding(6.dp),

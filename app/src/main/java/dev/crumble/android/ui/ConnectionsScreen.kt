@@ -9,7 +9,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +31,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -58,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
@@ -65,7 +68,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -123,7 +125,7 @@ private fun ConnectionPage(content: @Composable ColumnScope.() -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         content = content,
     )
@@ -152,11 +154,10 @@ private fun StatusBadge(text: String, error: Boolean = false) {
     }
 }
 
+/** A setting inside a card; a list of settings uses SettingItem. */
 @Composable
 private fun SettingRow(
     title: String,
-    description: String = "",
-    descriptionIsError: Boolean = false,
     badge: @Composable () -> Unit = {},
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
@@ -165,26 +166,53 @@ private fun SettingRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                badge()
-            }
-            if (description.isNotEmpty()) {
-                Text(
-                    description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (descriptionIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            RowTitle(title, modifier = Modifier.weight(1f, fill = false))
+            badge()
         }
         trailing()
+    }
+}
+
+@Composable
+private fun SettingItem(
+    title: String,
+    shape: Shape,
+    leading: @Composable () -> Unit,
+    description: String = "",
+    descriptionIsError: Boolean = false,
+    badge: @Composable () -> Unit = {},
+    trailing: @Composable RowScope.() -> Unit = {},
+    below: (@Composable ColumnScope.() -> Unit)? = null,
+) {
+    GroupedItem(shape = shape, leading = leading, trailing = trailing, below = below) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            RowTitle(title, modifier = Modifier.weight(1f, fill = false))
+            badge()
+        }
+        if (description.isNotEmpty()) {
+            RowSubtitle(description, color = if (descriptionIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+private fun GroupScope.error(text: String) {
+    if (text.isNotEmpty()) note(text, isError = true)
+}
+
+private fun GroupScope.attention(title: String, text: String) {
+    row { shape ->
+        SettingItem(
+            title = title,
+            shape = shape,
+            leading = { IconTile(Icons.Default.Warning, Tone.Lavender) },
+            description = text,
+            descriptionIsError = true,
+        )
     }
 }
 
@@ -314,35 +342,39 @@ private fun SimpleSheet(
 
 // MARK: Plugin settings
 
-@Composable
-private fun PluginRows(model: AppModel, contributes: String? = null, pluginID: String? = null, secretKey: String? = null) {
-    ErrorLine(model.pluginSettings.error)
-    for (row in pluginRows(model.pluginSettings.value, contributes, pluginID, secretKey)) {
-        PluginRowView(model, row)
+private fun GroupScope.pluginItems(model: AppModel, contributes: String? = null, pluginID: String? = null, secretKey: String? = null) {
+    error(model.pluginSettings.error)
+    for (plugin in pluginRows(model.pluginSettings.value, contributes, pluginID, secretKey)) {
+        row { shape -> PluginRowView(model, plugin, shape) }
     }
 }
 
 @Composable
-private fun PluginRowView(model: AppModel, row: PluginRow) {
+private fun PluginRowView(model: AppModel, row: PluginRow, shape: Shape) {
     val secret = row.setting.secret
     val manager = model.passwordManagers.firstOrNull { it.id == secret.passwordManager }
     val busy = "plugin:${row.pluginID}:${row.setting.key}" in model.pendingMutations
-    SettingRow(title = row.setting.label + (manager?.let { " (${it.name})" } ?: "")) {
-        when {
-            busy -> Spinner()
-            secret.configured -> SecretOverflowMenu { close ->
-                DropdownMenuItem(text = { Text("Edit") }, onClick = {
-                    close()
-                    model.openPluginSetting(row)
-                })
-                DropdownMenuItem(text = { Text("Remove") }, onClick = {
-                    close()
-                    model.removePluginSetting(row)
-                })
+    SettingItem(
+        title = row.setting.label + (manager?.let { " (${it.name})" } ?: ""),
+        shape = shape,
+        leading = { LetterTile(row.setting.label) },
+        trailing = {
+            when {
+                busy -> Spinner()
+                secret.configured -> SecretOverflowMenu { close ->
+                    DropdownMenuItem(text = { Text("Edit") }, onClick = {
+                        close()
+                        model.openPluginSetting(row)
+                    })
+                    DropdownMenuItem(text = { Text("Remove") }, onClick = {
+                        close()
+                        model.removePluginSetting(row)
+                    })
+                }
+                else -> OutlinedButton(onClick = { model.openPluginSetting(row) }) { Text("Add") }
             }
-            else -> OutlinedButton(onClick = { model.openPluginSetting(row) }) { Text("Add") }
-        }
-    }
+        },
+    )
 }
 
 @Composable
@@ -371,26 +403,37 @@ private fun PluginSecretDialog(model: AppModel, form: PluginSecretForm) {
 @Composable
 fun WebSearchPanel(model: AppModel) {
     ConnectionPage {
-        SectionCard(title = "Search provider", footer = "Bots use this unless their own settings choose another provider.") {
-            ErrorLine(model.webSearch.error)
+        RowsSection(title = "Search provider", footer = "Bots use this unless their own settings choose another provider.") {
+            error(model.webSearch.error)
             model.webSearch.value?.let { data ->
-                val busy = "web-search:default" in model.pendingMutations
                 val description = if (data.defaultProvider == "exa" && !data.exaKeyConfigured) {
                     "Exa needs a key before bots can search with it."
                 } else {
                     model.webSearch.failure
                 }
-                SettingRow(title = "Default", description = description, descriptionIsError = model.webSearch.failure == description && description.isNotEmpty()) {
-                    for (provider in WEB_SEARCH_PROVIDERS) {
-                        FilterChip(
-                            selected = data.defaultProvider == provider.value,
-                            enabled = !busy,
-                            onClick = { model.chooseWebSearchProvider(provider.value) },
-                            label = { Text(provider.label) },
-                        )
-                    }
+                row { shape ->
+                    val busy = "web-search:default" in model.pendingMutations
+                    SettingItem(
+                        title = "Default",
+                        shape = shape,
+                        leading = { IconTile(routeIcon(Route.WebSearch), Tone.Lavender) },
+                        description = description,
+                        descriptionIsError = model.webSearch.failure == description && description.isNotEmpty(),
+                        below = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                                for (provider in WEB_SEARCH_PROVIDERS) {
+                                    FilterChip(
+                                        selected = data.defaultProvider == provider.value,
+                                        enabled = !busy,
+                                        onClick = { model.chooseWebSearchProvider(provider.value) },
+                                        label = { Text(provider.label) },
+                                    )
+                                }
+                            }
+                        },
+                    )
                 }
-                PluginRows(model, contributes = "webSearchProviders")
+                pluginItems(model, contributes = "webSearchProviders")
             }
         }
     }
@@ -459,45 +502,44 @@ fun VisionModelPanel(model: AppModel) {
 @Composable
 fun EventRelayPanel(model: AppModel) {
     ConnectionPage {
-        SectionCard(
+        RowsSection(
             title = "Relay",
             footer = "A Doorstep relay receives webhooks for this account and forwards them to this server, so the server needs no public address.",
         ) {
-            ErrorLine(model.eventRelay.error)
+            error(model.eventRelay.error)
             model.eventRelay.value?.let { relay ->
                 val next = model.relayDraft.trim().ifEmpty { null }
-                SettingRow(title = "Relay URL", badge = { StatusBadge(relayStatusLabel(relay.status), relay.status == "error") })
-                OutlinedTextField(
-                    value = model.relayDraft,
-                    onValueChange = { model.relayDraft = it },
-                    placeholder = { Text("https://relay.example.com") },
-                    singleLine = true,
-                    enabled = !model.relaySaving,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { model.saveRelay() }, enabled = !model.relaySaving && next != relay.url) { Text("Save") }
-                    if (model.relaySaving) Spinner()
+                row { shape ->
+                    GroupCard(shape) {
+                        SettingRow(title = "Relay URL", badge = { StatusBadge(relayStatusLabel(relay.status), relay.status == "error") })
+                        OutlinedTextField(
+                            value = model.relayDraft,
+                            onValueChange = { model.relayDraft = it },
+                            placeholder = { Text("https://relay.example.com") },
+                            singleLine = true,
+                            enabled = !model.relaySaving,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { model.saveRelay() }, enabled = !model.relaySaving && next != relay.url) { Text("Save") }
+                            if (model.relaySaving) Spinner()
+                        }
+                        ErrorLine(model.eventRelay.failure)
+                    }
                 }
-                ErrorLine(model.eventRelay.failure)
-                relay.error?.let {
-                    SettingRow(title = "Relay needs attention", description = it, descriptionIsError = true)
-                }
-                PluginRows(model, pluginID = "doorstep")
+                relay.error?.let { attention("Relay needs attention", it) }
+                pluginItems(model, pluginID = "doorstep")
             }
         }
-        SectionCard(
+        RowsSection(
             title = "Event sources",
             footer = "Each source is one webhook address. Automations that use a source run when an event arrives there.",
         ) {
-            ErrorLine(model.eventSourcesError)
-            if (model.eventSourcesLoaded && model.eventSources.isEmpty()) SecretNote("No event sources yet.")
-            for (source in model.eventSources) EventSourceRow(model, source)
-            TextButton(onClick = { model.openEventSourceForm() }) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("Add source")
-            }
+            error(model.eventSourcesError)
+            if (model.eventSourcesLoaded && model.eventSources.isEmpty()) note("No event sources yet.")
+            for (source in model.eventSources) row { shape -> EventSourceRow(model, source, shape) }
+            add("Add source") { model.openEventSourceForm() }
         }
     }
 }
@@ -514,21 +556,21 @@ fun MessageGatewaysPanel(model: AppModel) {
     ConnectionPage {
         ErrorLine(model.gateways.error)
         model.gateways.value?.let { list ->
-            SectionCard(title = "Gateways", footer = "Message your bots from other chat apps.") {
-                if (list.isEmpty()) SecretNote("This server has no message gateways.")
+            RowsSection(title = "Gateways", footer = "Message your bots from other chat apps.") {
+                if (list.isEmpty()) note("This server has no message gateways.")
                 for (gateway in list) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { model.navigate(Route.MessageGateway(gateway.id)) }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(gateway.label, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
-                        GatewayBadge(gateway)
-                        Box(modifier = Modifier.weight(1f))
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+                    row { shape ->
+                        GroupedItem(
+                            shape = shape,
+                            onClick = { model.navigate(Route.MessageGateway(gateway.id)) },
+                            leading = { LetterTile(gateway.label) },
+                            trailing = {
+                                GatewayBadge(gateway)
+                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+                            },
+                        ) {
+                            RowTitle(gateway.label)
+                        }
                     }
                 }
             }
@@ -559,16 +601,19 @@ private fun GatewayEditor(model: AppModel, gateway: MessageGateway, form: Gatewa
         model.gatewayForm?.let { model.gatewayForm = change(it).copy(saved = false, error = "") }
     }
 
-    SectionCard(title = "Connection") {
+    RowsSection(title = "Connection") {
         val deliveries = gatewayDeliveries(gateway)
-        SettingRow(
-            title = gateway.label + if (deliveries.isEmpty()) "" else " ($deliveries)",
-            badge = { GatewayBadge(gateway) },
-        ) {
-            Switch(checked = form.enabled, onCheckedChange = { on -> edit { it.copy(enabled = on) } })
+        row { shape ->
+            SettingItem(
+                title = gateway.label + if (deliveries.isEmpty()) "" else " ($deliveries)",
+                shape = shape,
+                leading = { LetterTile(gateway.label) },
+                badge = { GatewayBadge(gateway) },
+                trailing = { Switch(checked = form.enabled, onCheckedChange = { on -> edit { it.copy(enabled = on) } }) },
+            )
         }
-        gateway.error?.let { SettingRow(title = "Connection needs attention", description = it, descriptionIsError = true) }
-        PluginRows(model, contributes = "chatAdapters", secretKey = gateway.secretKey)
+        gateway.error?.let { attention("Connection needs attention", it) }
+        pluginItems(model, contributes = "chatAdapters", secretKey = gateway.secretKey)
     }
 
     SectionCard(title = "Bots", footer = "Start a message with @alias to pick a bot.") {
@@ -695,32 +740,34 @@ private fun WorkspaceSection(model: AppModel) {
     val missing = capabilities?.let { workspaceHelp(it.coding, it.desktop) }.orEmpty()
     val admin = model.isAdmin == true
     if (!admin && missing.isEmpty()) return
-    SectionCard(title = "Workspaces") {
-        for (note in missing) {
-            Text(note, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
-        }
-        ErrorLine(model.serverSettings.error)
+    RowsSection(title = "Workspaces") {
+        for (help in missing) note(help, fontFamily = FontFamily.Monospace)
+        error(model.serverSettings.error)
         val settings = model.serverSettings.value
         if (admin && settings != null) {
             val busy = "server-settings:patch" in model.pendingMutations
             for (field in WorkspaceField.entries) {
-                SettingRow(title = workspaceRowTitle(field, settings)) {
-                    OutlinedButton(enabled = !busy, onClick = { model.openServerSettings(field) }) { Text("Edit") }
+                row { shape ->
+                    SettingItem(
+                        title = workspaceRowTitle(field, settings),
+                        shape = shape,
+                        leading = { IconTile(routeIcon(Route.Coding), Tone.Lavender) },
+                        trailing = { OutlinedButton(enabled = !busy, onClick = { model.openServerSettings(field) }) { Text("Edit") } },
+                    )
                 }
             }
         }
-        if (admin) OutdatedWorkspaces(model)
+        if (admin) outdatedWorkspaces(model)
     }
 }
 
-@Composable
-private fun OutdatedWorkspaces(model: AppModel) {
-    ErrorLine(model.outdatedWorkspaces.error)
+private fun GroupScope.outdatedWorkspaces(model: AppModel) {
+    error(model.outdatedWorkspaces.error)
     val rows = outdatedWorkspaceRows(model.outdatedWorkspaces.value.orEmpty(), model.agents, model.adminUsers.value.orEmpty())
     if (rows.isEmpty()) return
-    SecretNote("Running on an older image. Each workspace switches at its next idle stop, keeping its files.")
-    for (row in rows) {
-        SettingRow(title = row.bot, description = row.owner)
+    note("Running on an older image. Each workspace switches at its next idle stop, keeping its files.")
+    for (outdated in rows) {
+        row { shape -> SettingItem(title = outdated.bot, shape = shape, leading = { LetterTile(outdated.bot) }, description = outdated.owner) }
     }
 }
 
@@ -745,49 +792,57 @@ fun UsersPanel(model: AppModel) {
 
 @Composable
 private fun UsersSection(model: AppModel) {
-    SectionCard(title = "Users") {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = { model.createInvite() }) { Text("Invite") }
-            ErrorLine(model.adminUsers.error)
-            ErrorLine(model.adminUsers.failure)
-            ErrorLine(model.invites.error)
-            ErrorLine(model.invites.failure)
-            if (model.adminUsers.value == null && model.adminUsers.error.isEmpty()) Spinner()
-            for (user in model.adminUsers.value.orEmpty()) {
-                UserRow(model, user)
-            }
-            for (invite in model.invites.value.orEmpty()) {
-                SettingRow(title = "Invite from ${dateOnly(invite.createdAt)}") {
-                    OutlinedButton(onClick = { model.revokeInvite(invite) }) { Text("Revoke") }
-                }
+    RowsSection(title = "Users") {
+        add("Invite") { model.createInvite() }
+        error(model.adminUsers.error)
+        error(model.adminUsers.failure)
+        error(model.invites.error)
+        error(model.invites.failure)
+        if (model.adminUsers.value == null && model.adminUsers.error.isEmpty()) row { shape -> GroupCard(shape) { Spinner() } }
+        for (user in model.adminUsers.value.orEmpty()) {
+            row { shape -> UserRow(model, user, shape) }
+        }
+        for (invite in model.invites.value.orEmpty()) {
+            row { shape ->
+                SettingItem(
+                    title = "Invite from ${dateOnly(invite.createdAt)}",
+                    shape = shape,
+                    leading = { IconTile(Icons.Default.Link, Tone.Lavender) },
+                    trailing = { OutlinedButton(onClick = { model.revokeInvite(invite) }) { Text("Revoke") } },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun UserRow(model: AppModel, user: AdminUser) {
+private fun UserRow(model: AppModel, user: AdminUser, shape: Shape) {
     var removing by remember { mutableStateOf(false) }
     val busy = "admin-user:${user.id}" in model.pendingMutations
-    SettingRow(title = userRowTitle(user)) {
-        when {
-            busy -> Spinner()
-            model.accountID != null && user.id != model.accountID -> SecretOverflowMenu { close ->
-                val admin = user.role == "admin"
-                DropdownMenuItem(text = { Text(if (admin) "Make regular user" else "Make admin") }, onClick = {
-                    close()
-                    model.setUserRole(user, if (admin) "user" else "admin")
-                })
-                DropdownMenuItem(
-                    text = { Text("Remove account and data", color = MaterialTheme.colorScheme.error) },
-                    onClick = {
+    SettingItem(
+        title = userRowTitle(user),
+        shape = shape,
+        leading = { LetterTile(user.name.ifEmpty { user.email }) },
+        trailing = {
+            when {
+                busy -> Spinner()
+                model.accountID != null && user.id != model.accountID -> SecretOverflowMenu { close ->
+                    val admin = user.role == "admin"
+                    DropdownMenuItem(text = { Text(if (admin) "Make regular user" else "Make admin") }, onClick = {
                         close()
-                        removing = true
-                    },
-                )
+                        model.setUserRole(user, if (admin) "user" else "admin")
+                    })
+                    DropdownMenuItem(
+                        text = { Text("Remove account and data", color = MaterialTheme.colorScheme.error) },
+                        onClick = {
+                            close()
+                            removing = true
+                        },
+                    )
+                }
             }
-        }
-    }
+        },
+    )
     if (removing) {
         ConfirmDelete(
             title = "Remove account and data",
@@ -883,37 +938,41 @@ private fun ServerSettingsDialog(model: AppModel, form: ServerSettingsForm) {
 
 @Composable
 private fun AppsSection(model: AppModel) {
-    SectionCard(
+    RowsSection(
         title = "GitHub Apps",
         footer = "Each App is a GitHub identity in one account. Bots assigned to it push, commit, and open pull requests as it there.",
     ) {
-        ErrorLine(model.githubApps.error)
+        error(model.githubApps.error)
         val apps = model.githubApps.value
-        if (apps?.isEmpty() == true) SecretNote("No GitHub Apps yet.")
-        apps?.forEach { AppRow(model, it) }
-        TextButton(onClick = { model.openCreateApp() }) {
-            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text("New GitHub App")
-        }
+        if (apps?.isEmpty() == true) note("No GitHub Apps yet.")
+        apps?.forEach { app -> row { shape -> AppRow(model, app, shape) } }
+        add("New GitHub App") { model.openCreateApp() }
     }
 }
 
 @Composable
-private fun AppRow(model: AppModel, app: GitHubApp) {
+private fun AppRow(model: AppModel, app: GitHubApp, shape: Shape) {
     var confirming by remember { mutableStateOf(false) }
     val busy = "github-app:${app.id}" in model.pendingMutations
     val detail = (app.user?.let { "as $it, " } ?: "") + "used by ${app.botIds.size}"
-    SettingRow(title = "${app.login} ($detail)") {
-        if (!app.installed) {
-            OutlinedButton(onClick = { model.installGitHubApp(app) }) { Text("Install") }
-        }
-        IconButton(onClick = { model.openGitHubApp(app) }) { Icon(Icons.Default.Edit, contentDescription = "Edit") }
-        if (busy) {
-            Spinner()
+    SettingItem(
+        title = "${app.login} ($detail)",
+        shape = shape,
+        leading = { LetterTile(app.login) },
+        trailing = {
+            IconButton(onClick = { model.openGitHubApp(app) }) { Icon(Icons.Default.Edit, contentDescription = "Edit") }
+            if (busy) {
+                Spinner()
+            } else {
+                IconButton(onClick = { confirming = true }) { Icon(Icons.Default.Delete, contentDescription = "Remove") }
+            }
+        },
+        below = if (app.installed) {
+            null
         } else {
-            IconButton(onClick = { confirming = true }) { Icon(Icons.Default.Delete, contentDescription = "Remove") }
-        }
-    }
+            { OutlinedButton(onClick = { model.installGitHubApp(app) }) { Text("Install") } }
+        },
+    )
     if (confirming) {
         ConfirmDelete(
             title = "Remove ${app.login}?",
@@ -1053,33 +1112,35 @@ private fun ClientSecretFields(model: AppModel, form: GitHubAppForm) {
 
 @Composable
 private fun AccountsSection(model: AppModel) {
-    SectionCard(
+    RowsSection(
         title = "Machine accounts",
         footer = "GitHub users for your bots to act as wherever none of their Apps does.",
     ) {
-        ErrorLine(model.githubAccounts.error)
+        error(model.githubAccounts.error)
         val accounts = model.githubAccounts.value
-        if (accounts?.isEmpty() == true) SecretNote("No machine accounts yet.")
-        accounts?.forEach { AccountRow(model, it) }
-        TextButton(onClick = { model.openAddAccount() }) {
-            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text("New machine account")
-        }
+        if (accounts?.isEmpty() == true) note("No machine accounts yet.")
+        accounts?.forEach { account -> row { shape -> AccountRow(model, account, shape) } }
+        add("New machine account") { model.openAddAccount() }
     }
 }
 
 @Composable
-private fun AccountRow(model: AppModel, account: GitHubAccount) {
+private fun AccountRow(model: AppModel, account: GitHubAccount, shape: Shape) {
     var confirming by remember { mutableStateOf(false) }
     val busy = "github-account:${account.id}" in model.pendingMutations
-    SettingRow(title = "${account.login} (used by ${account.botIds.size})") {
-        IconButton(onClick = { model.openGitHubAccount(account) }) { Icon(Icons.Default.Edit, contentDescription = "Edit") }
-        if (busy) {
-            Spinner()
-        } else {
-            IconButton(onClick = { confirming = true }) { Icon(Icons.Default.Delete, contentDescription = "Remove") }
-        }
-    }
+    SettingItem(
+        title = "${account.login} (used by ${account.botIds.size})",
+        shape = shape,
+        leading = { LetterTile(account.login) },
+        trailing = {
+            IconButton(onClick = { model.openGitHubAccount(account) }) { Icon(Icons.Default.Edit, contentDescription = "Edit") }
+            if (busy) {
+                Spinner()
+            } else {
+                IconButton(onClick = { confirming = true }) { Icon(Icons.Default.Delete, contentDescription = "Remove") }
+            }
+        },
+    )
     if (confirming) {
         ConfirmDelete(
             title = "Remove ${account.login}?",

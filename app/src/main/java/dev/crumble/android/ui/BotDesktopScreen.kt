@@ -220,7 +220,7 @@ fun DesktopPreviewSection(model: AppModel, agentID: String) {
     }
     val preview = model.desktopPreview?.takeIf { it.agentID == agentID } ?: return
     Column(modifier = Modifier.padding(horizontal = 16.dp).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Desktop", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        GroupLabel("Desktop")
         val tile = Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black, RoundedCornerShape(12.dp))
         when {
             preview.running == null -> Box(tile, contentAlignment = Alignment.Center) {
