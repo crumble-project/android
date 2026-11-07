@@ -158,20 +158,13 @@ fun AgentEditorDialog(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        val avatar = draft.avatar ?: placeholderAvatar(draft.id.toString())
-                        BotAvatarView(avatar = avatar, size = 96.dp, live = true)
+                        AvatarPicker(
+                            value = draft.avatar ?: placeholderAvatar(draft.id.toString()),
+                            onChange = { model.agentDraft = draft.copy(avatar = it) },
+                        )
                         Text(
                             text = draft.name.trim().nilIfEmpty ?: "New Agent",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        )
-                    }
-                }
-
-                item {
-                    SectionCard(title = "Avatar") {
-                        AvatarEditor(
-                            value = draft.avatar ?: placeholderAvatar(draft.id.toString()),
-                            onChange = { model.agentDraft = draft.copy(avatar = it) },
                         )
                     }
                 }

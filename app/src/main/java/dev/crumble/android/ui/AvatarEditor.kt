@@ -3,12 +3,20 @@ package dev.crumble.android.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -16,6 +24,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -24,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -31,6 +41,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import dev.crumble.android.R
 import dev.crumble.android.generated.BotAvatarDefinition
 import re.leob.openbotavatar.kt.AvatarCatalog
@@ -48,6 +59,41 @@ internal fun importAvatar(json: String, current: BotAvatarDefinition): Result<Bo
 
 internal fun avatarGenerationPrompt(template: String, description: String) =
     "$template\n\n## User description\n\n${description.trim()}\n"
+
+/** The portrait with a pencil, which opens the editor in a dialog as the web's popover, so the form stays short. */
+@Composable
+fun AvatarPicker(value: BotAvatarDefinition, onChange: (BotAvatarDefinition) -> Unit) {
+    var editing by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(onClickLabel = "Change avatar") { editing = true }
+            .padding(4.dp),
+    ) {
+        BotAvatarView(avatar = value, size = 96.dp, live = true)
+        Surface(
+            modifier = Modifier.align(Alignment.BottomEnd).size(30.dp),
+            shape = CircleShape,
+            color = sheetColor,
+        ) {
+            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.padding(7.dp))
+        }
+    }
+    if (editing) {
+        Dialog(onDismissRequest = { editing = false }) {
+            Surface(shape = RoundedCornerShape(24.dp), color = sheetColor) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                        AvatarEditor(value = value, onChange = onChange)
+                    }
+                    TextButton(onClick = { editing = false }, modifier = Modifier.align(Alignment.End)) {
+                        Text("Done")
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun AvatarEditor(value: BotAvatarDefinition, onChange: (BotAvatarDefinition) -> Unit, enabled: Boolean = true) {
