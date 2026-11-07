@@ -1,0 +1,56 @@
+name: Android release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - name: Read the version from the tag
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^([0-9]+)\.([0-9]{1,2})\.([0-9]{1,2})$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME must be vMAJOR.MINOR.PATCH with MINOR and PATCH below 100"
+            exit 1
+          fi
+          echo "name=$version" >> "$GITHUB_OUTPUT"
+          echo "code=$((BASH_REMATCH[1] * 10000 + 10#${BASH_REMATCH[2]} * 100 + 10#${BASH_REMATCH[3]}))" >> "$GITHUB_OUTPUT"
+      - name: Restore the signing key and Firebase config
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          GOOGLE_SERVICES: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          echo "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "$GOOGLE_SERVICES" | base64 --decode > app/google-services.json
+      - name: Build the signed APK
+        env:
+          CRUMBLE_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          CRUMBLE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: >-
+          ./gradlew assembleRelease
+          -Pcrumble.versionName=${{ steps.version.outputs.name }}
+          -Pcrumble.versionCode=${{ steps.version.outputs.code }}
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          apk="crumble-$VERSION.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$apk"
+          gh release create "$GITHUB_REF_NAME" "$apk" --repo "$GITHUB_REPOSITORY" --title "Crumble $VERSION" --generate-notes

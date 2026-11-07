@@ -17,8 +17,21 @@ android {
         applicationId = "ng.crumbli.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = providers.gradleProperty("crumble.versionCode").orNull?.toInt() ?: 1
+        versionName = providers.gradleProperty("crumble.versionName").orNull ?: "1.0"
+    }
+
+    // Release signing needs the key, which only CI and the maintainer have; without it, release builds stay unsigned.
+    val releaseKeystore = providers.environmentVariable("CRUMBLE_KEYSTORE_PATH").orNull
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = providers.environmentVariable("CRUMBLE_KEYSTORE_PASSWORD").get()
+                keyAlias = "crumble"
+                keyPassword = storePassword
+            }
+        }
     }
 
     buildTypes {
@@ -27,6 +40,7 @@ android {
             applicationIdSuffix = ".dev"
         }
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

@@ -33,6 +33,18 @@ python3 scripts/contract.py update --release contract-vX.Y.Z # Update to a publi
 python3 scripts/contract.py update --local EXPORT_DIR       # Update from a local bot bundle
 ```
 
+## Release
+
+Pushing a `vMAJOR.MINOR.PATCH` tag runs `.github/workflows/release.yml`, which builds a signed release APK with FCM and attaches it to a GitHub release. The version code is `MAJOR * 10000 + MINOR * 100 + PATCH`, so minor and patch stay below 100.
+
+The workflow reads three repository secrets: `ANDROID_KEYSTORE_BASE64` (the base64 of the release keystore), `ANDROID_KEYSTORE_PASSWORD`, and `GOOGLE_SERVICES_JSON_BASE64`. Every update must be signed with the same keystore, alias `crumble`, so keep a backup of it.
+
+To sign a release build locally:
+
+```bash
+CRUMBLE_KEYSTORE_PATH=~/crumble-release.jks CRUMBLE_KEYSTORE_PASSWORD=... ./gradlew assembleRelease
+```
+
 ## Push notifications (optional)
 
 Without `app/google-services.json`, the app builds cleanly and posts local notifications while connected to `/v1/events`. To enable background delivery via Firebase Cloud Messaging (FCM), place `google-services.json` registering `ng.crumbli.android` and `ng.crumbli.android.dev` in `app/` and set `CRUMBLE_FCM_SERVICE_ACCOUNT_PATH` on the server (see `bot/docs/native-push.md`).
