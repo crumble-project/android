@@ -14,6 +14,23 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import dev.crumble.android.MainActivity
 import dev.crumble.android.R
+import dev.crumble.android.storage.CredentialStore
+
+/** This device's choices, like the website's per-browser ones. Unset means on. */
+class NotificationSettings(private val credentials: CredentialStore) {
+    var replies: Boolean
+        get() = credentials.read(REPLIES_KEY) != "off"
+        set(on) = credentials.write(REPLIES_KEY, if (on) "on" else "off")
+
+    var sound: Boolean
+        get() = credentials.read(SOUND_KEY) != "off"
+        set(on) = credentials.write(SOUND_KEY, if (on) "on" else "off")
+
+    private companion object {
+        const val REPLIES_KEY = "notifications"
+        const val SOUND_KEY = "notification-sound"
+    }
+}
 
 /** What the owner is looking at, which decides whether an event is worth a notification. */
 data class NotificationContext(
@@ -34,10 +51,11 @@ fun notification(forEvent: ActivityEvent, inContext: NotificationContext): Notif
     return when (forEvent.type) {
         "reply" -> {
             if (forEvent.origin == "bot") return null
-            if (inContext.appActive && inContext.route == Route.AgentChat(forEvent.agentId)) return null
+            val chat = forEvent.groupId?.let { Route.GroupChat(it) } ?: Route.AgentChat(forEvent.agentId)
+            if (inContext.appActive && inContext.route == chat) return null
             val text = preview(forEvent.preview ?: "")
             NotificationNote(
-                title = forEvent.agentName,
+                title = if (forEvent.groupId != null) "${forEvent.agentName} in ${forEvent.groupName?.nilIfEmpty ?: "a group"}" else forEvent.agentName,
                 body = text.ifEmpty { "Replied" },
             )
         }
@@ -61,6 +79,7 @@ object NoOpNotifier : ReplyNotifier {
 class AndroidReplyNotifier(
     private val context: Context,
     private val connectionIdentity: () -> String? = { null },
+    private val sound: () -> Boolean = { true },
 ) : ReplyNotifier {
     init {
         createChannel()
@@ -79,6 +98,7 @@ class AndroidReplyNotifier(
     }
 
     override fun post(event: ActivityEvent, title: String, body: String) {
+        val chat = event.groupId ?: event.agentId
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 return
@@ -87,15 +107,16 @@ class AndroidReplyNotifier(
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_AGENT_ID, event.agentId)
+            putExtra(EXTRA_GROUP_ID, event.groupId)
             putExtra(EXTRA_SERVER_ID, event.serverId)
             putExtra(EXTRA_CONNECTION_ID, connectionIdentity())
             data = Uri.Builder().scheme("crumble-notification").authority("reply")
                 .appendPath(event.serverId ?: connectionIdentity().orEmpty())
-                .appendPath(event.agentId).build()
+                .appendPath(chat).build()
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
-            event.agentId.hashCode(),
+            chat.hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -106,9 +127,10 @@ class AndroidReplyNotifier(
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
+            .setSilent(!sound())
             .build()
         try {
-            NotificationManagerCompat.from(context).notify("reply-${event.agentId}", event.agentId.hashCode(), notification)
+            NotificationManagerCompat.from(context).notify("reply-$chat", chat.hashCode(), notification)
         } catch (_: SecurityException) {
         }
     }
@@ -116,6 +138,7 @@ class AndroidReplyNotifier(
     companion object {
         const val CHANNEL_ID = "crumble_replies"
         const val EXTRA_AGENT_ID = "dev.crumble.android.AGENT_ID"
+        const val EXTRA_GROUP_ID = "dev.crumble.android.GROUP_ID"
         const val EXTRA_SERVER_ID = "dev.crumble.android.SERVER_ID"
         const val EXTRA_CONNECTION_ID = "dev.crumble.android.CONNECTION_ID"
     }

@@ -1,5 +1,8 @@
 package dev.crumble.android.theme
 
+import androidx.compose.ui.unit.dp
+import androidx.compose.material3.Shapes
+import androidx.compose.foundation.shape.RoundedCornerShape
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +32,8 @@ private val LightColorScheme =
     */
   )
 
+private val AppShapes = Shapes(extraSmall = RoundedCornerShape(12.dp))
+
 @Composable
 fun CrumbleTheme(
   darkTheme: Boolean = isSystemInDarkTheme(),
@@ -46,5 +51,5 @@ fun CrumbleTheme(
       else -> LightColorScheme
     }
 
-  MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
+  MaterialTheme(colorScheme = colorScheme, typography = Typography, shapes = AppShapes, content = content)
 }

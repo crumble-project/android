@@ -91,3 +91,7 @@ fun insertingNewline(into: String, replacing: IntRange? = null): NewlineInsertio
     val edited = into.substring(0, start) + "\n" + into.substring(endExclusive)
     return NewlineInsertion(text = edited, caret = start + 1)
 }
+
+/** The bots an `@` mention can reach from `bot`. */
+fun mentionableBots(bot: Agent, bots: List<Agent>): List<Agent> =
+    if ("delegate" in bot.tools.orEmpty()) bots.filter { it.enabled && it.id != bot.id } else emptyList()

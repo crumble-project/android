@@ -4,11 +4,20 @@ import dev.crumble.android.model.ActivityEvent
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AgentDraft
 import dev.crumble.android.model.AppModel
+import dev.crumble.android.network.wire
+import dev.crumble.android.ui.avatarColor
+import dev.crumble.android.ui.geometry
+import dev.crumble.android.ui.importAvatar
+import dev.crumble.android.ui.isAvatarColor
+import dev.crumble.android.ui.placeholderAvatar
+import dev.crumble.android.ui.withColors
+import dev.crumble.android.model.BotRequestRef
+import dev.crumble.android.model.HeldActionRef
 import dev.crumble.android.model.AttachmentError
 import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
-import dev.crumble.android.model.displayLabel
+import dev.crumble.android.model.headline
 import dev.crumble.android.model.Memory
 import dev.crumble.android.model.MentionCompletion
 import dev.crumble.android.model.Message
@@ -38,9 +47,7 @@ import dev.crumble.android.network.SSEParser
 import dev.crumble.android.network.SignInError
 import dev.crumble.android.network.friendlyError
 import dev.crumble.android.network.oauthResult
-import dev.crumble.android.ui.BotLook
 import dev.crumble.android.ui.MarkdownBlock
-import dev.crumble.android.ui.agentAvatarSeed
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.time.ZoneId
@@ -121,12 +128,11 @@ class CrumbleTests {
 
     @Test
     fun personalSkillFailureRestoresDraftAndSkillsWithoutClobberingNewerAgentFields() = runTest {
-        val oldSkill = Skill(id = "old", name = "Old", instructions = "Keep this")
         val transport = GatedTransport(500, "{\"error\":\"busy\"}")
         val client = APIClient(baseURL = "http://crumble.test/", token = "token", transport = transport)
         val model = AppModel(client = client, scope = TestScope(StandardTestDispatcher(testScheduler)))
         model.route = Route.Skills
-        model.agents = listOf(Agent(id = "a1", name = "Before", skills = listOf(oldSkill)))
+        model.agents = listOf(Agent(id = "a1", name = "Before"))
         model.skillDraft = dev.crumble.android.model.SkillDraft(
             skillID = "",
             agentID = "a1",
@@ -136,13 +142,14 @@ class CrumbleTests {
 
         model.saveSkill()
         testScheduler.runCurrent()
+        assertEquals("New skill", model.agentSkills["a1"]?.last()?.name)
         assertEquals("New skill", model.agents.single().skills?.last()?.name)
         model.agents = model.agents.map { it.copy(name = "Newer name") }
         transport.gate.complete(Unit)
         advanceUntilIdle()
 
         assertEquals("Newer name", model.agents.single().name)
-        assertEquals(listOf(oldSkill), model.agents.single().skills)
+        assertEquals(emptyList<Skill>(), model.agents.single().skills)
         assertEquals("New skill", model.skillDraft?.name)
         assertTrue(model.errorText.contains("busy"))
     }
@@ -183,13 +190,13 @@ class CrumbleTests {
     fun activityFeedDecodesOperationalRecordsAndDetails() = runTest {
         val (client, stub) = StubTransport.client { req ->
             assertEquals("/v1/activity/feed", req.pathWithQuery)
-            200 to """{"activities":[{"id":"evt-1","agentId":"a1","agentName":"Atlas","entryId":"run-1","timestamp":1720000000000,"kind":"tool-call","details":{"toolName":"search","query":"calendar"}}],"hasMore":true}"""
+            200 to """{"activities":[{"id":"evt-1","agentId":"a1","agentName":"Atlas","entryId":"run-1","timestamp":1720000000000,"kind":"tool-call","details":{"toolName":"search","query":"calendar"}}],"nextCursor":null,"hasMore":true}"""
         }
         val feed = client.activityFeed()
         assertTrue(feed.hasMore)
         assertEquals("evt-1", feed.activities.single().id)
         assertEquals("tool-call", feed.activities.single().kind)
-        assertEquals("search", feed.activities.single().displayLabel())
+        assertEquals("search", feed.activities.single().headline().target)
         assertEquals("/v1/activity/feed", stub.requests.single().pathWithQuery)
     }
 
@@ -345,7 +352,7 @@ class CrumbleTests {
         val (client, stub) = StubTransport.client { req ->
             when (req.pathWithQuery) {
                 "/v1/mcp-servers/s1/oauth" -> 200 to """{"authorizationUrl":"https://auth.example.com/authorize?state=x"}"""
-                "/v1/mcp-servers/s1/oauth/callback" -> 200 to """{"id":"s1","name":"Linear","url":"https://mcp.linear.app/mcp","enabled":true,"agentId":null,"auth":"oauth","authenticated":true}"""
+                "/v1/mcp-servers/s1/oauth/callback" -> 200 to """{"id":"s1","name":"Linear","url":"https://mcp.linear.app/mcp","enabled":true,"agentId":null,"oauthClientId":null,"oauthClientSecret":{"configured":false,"passwordManager":null,"reference":null},"token":{"configured":false,"passwordManager":null,"reference":null},"error":null,"auth":"oauth","authenticated":true}"""
                 else -> 404 to ""
             }
         }
@@ -368,7 +375,7 @@ class CrumbleTests {
         } catch (e: APIError) {
             assertEquals(401, e.statusCode)
             assertEquals("bad token", e.body)
-            assertEquals("Authentication failed. Check the server token in Settings.", friendlyError(e))
+            assertEquals("Authentication failed. Sign in again in Settings.", friendlyError(e))
         }
     }
 
@@ -381,7 +388,7 @@ class CrumbleTests {
     @Test
     fun taskPickersPreserveTheInstantAndSubmitOnlyTheSelectedMode() = runTest {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
-        val response = """{"id":"s1","agentId":"a1","name":"Greeting","prompt":"Say hi","enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z","cron":null,"nextRunAt":null,"createdAt":"2026-10-18T10:00:00Z","createdByAgentId":null}"""
+        val response = """{"id":"s1","agentId":"a1","name":"Greeting","kind":"prompt","prompt":"Say hi","command":null,"timeoutSeconds":600,"notify":true,"eventSourceId":null,"enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z","cron":null,"nextRunAt":null,"createdAt":"2026-10-18T10:00:00Z","createdByAgentId":null}"""
         val (client, stub) = StubTransport.client { req ->
             200 to if (req.method == "PATCH") response else "[]"
         }
@@ -471,6 +478,88 @@ class CrumbleTests {
         )
         assertEquals(1, model.messages.count { it.text == "instant" })
         assertEquals(MessageDeliveryState.confirmed, model.messages.first().deliveryState)
+        model.cancelStream()
+    }
+
+    @Test
+    fun heldActionKeepsItsCardWhenADecisionFailsThenSettles() = runTest {
+        val testScope = TestScope(StandardTestDispatcher(testScheduler))
+        var status = "pending"
+        var refuse = true
+        fun held() = """{"id":"h1","job":"browse","action":"Pay the invoice","page":null,"ownerMessages":[],"reason":"Not asked for","status":"$status","declineReason":null,"heldAt":"2026-11-05T10:00:00Z","decidedAt":null}"""
+        val (client, _) = StubTransport.client { req ->
+            when (req.pathWithQuery) {
+                "/v1/agents/a1/held-actions" -> 200 to "[${held()}]"
+                "/v1/agents/a1/held-actions/h1/approve" ->
+                    if (refuse) 503 to """{"error":"busy"}""" else { status = "approved"; 200 to held() }
+                else -> 503 to ""
+            }
+        }
+        val model = AppModel(client = client, credentials = dev.crumble.android.storage.InMemoryCredentialStore(), scope = testScope)
+        model.selectAgent("a1")
+        val event = Message(id = "e1", entryId = "e1", role = "event", content = JsonPrimitive("Pay the invoice"), heldAction = HeldActionRef("h1", "browse"))
+        model.applySnapshot(ChatSnapshot(agentId = "a1", messages = listOf(event), hasMore = false, oldestEntryId = null))
+        testScheduler.runCurrent()
+        assertEquals("pending", model.heldActions.single().status)
+
+        model.decideHeldAction("h1", approve = true)
+        assertTrue("h1" in model.decidingIDs)
+        testScheduler.runCurrent()
+        assertTrue(model.decisionErrors["h1"].orEmpty().contains("busy"))
+        assertEquals("pending", model.heldActions.single().status)
+        assertTrue(model.decidingIDs.isEmpty())
+
+        refuse = false
+        model.decideHeldAction("h1", approve = true)
+        testScheduler.runCurrent()
+        assertTrue(model.decisionErrors.isEmpty())
+        assertEquals("approved", model.heldActions.single().status)
+        model.cancelStream()
+    }
+
+    @Test
+    fun requestBotResultBecomesAChatRow() = runTest {
+        val (client, _) = StubTransport.client {
+            200 to """{"messages":[{"id":"t1","entryId":"t","role":"toolResult","content":"","toolName":"request_bot","toolDetails":{"id":"r1","proposal":{"name":"Scout"}}},{"id":"t2","entryId":"t","role":"toolResult","content":"","toolName":"request_bot","isError":true}],"hasMore":false,"oldestEntryId":null}"""
+        }
+        val messages = client.chatHistory("a1", before = "t", limit = 10).messages.orEmpty()
+        assertEquals(BotRequestRef("r1", "Scout"), messages[0].botRequest)
+        assertEquals(listOf(true, false), messages.map { ChatRow.shownInChat(it) })
+    }
+
+    @Test
+    fun avatarColorsExpandShortHex() {
+        assertEquals(avatarColor("#aabbcc"), avatarColor("#abc"))
+        assertTrue(isAvatarColor("#ABC") && isAvatarColor("#38bdf8"))
+        assertFalse(isAvatarColor("38bdf8") || isAvatarColor("#38bd"))
+    }
+
+    @Test
+    fun avatarImportKeepsColorsAndRejectsInvalidGeometry() {
+        val current = placeholderAvatar("a1").copy(color = "#123456", eyeColor = "#654321")
+        val json = """{"version":1,"id":"box","name":"Box","body":{"path":"M20 20H80V80H20Z"},"eyes":{"x":50,"y":46,"spacing":15,"scale":1}}"""
+        val imported = importAvatar(json, current).getOrThrow()
+        assertEquals("box", imported.definition.id)
+        assertEquals("#123456", imported.color)
+        assertTrue(importAvatar("""{"version":1}""", current).isFailure)
+    }
+
+    @Test
+    fun avatarRoundTripsThroughTheCreateRequest() {
+        val avatar = placeholderAvatar("a1")
+        assertEquals(avatar.definition.body.path, avatar.wire()?.definition?.body?.path)
+        assertEquals(avatar, avatar.geometry().withColors(avatar.color, avatar.eyeColor))
+    }
+
+    @Test
+    fun emptyChatSnapshotAppliesWithoutMessages() = runTest {
+        val credentials = dev.crumble.android.storage.InMemoryCredentialStore()
+        val testScope = TestScope(StandardTestDispatcher(testScheduler))
+        val (client, _) = StubTransport.client(token = "owner-one") { 503 to "" }
+        val model = AppModel(client = client, credentials = credentials, scope = testScope)
+        model.selectAgent("a1")
+        model.applySnapshot(ChatSnapshot(agentId = "a1", messages = emptyList(), status = "idle", hasMore = false, oldestEntryId = null))
+        assertTrue(model.messages.isEmpty())
         model.cancelStream()
     }
 
@@ -708,7 +797,7 @@ class CrumbleTests {
         val model = AppModel(client = client, scope = testScope)
         model.agents = listOf(Agent(id = "a1", name = "Before", lastMessage = "Latest reply"))
         model.route = Route.Memory
-        model.agentDraft = AgentDraft(isNew = false, agentID = "a1", name = "After")
+        model.agentDraft = AgentDraft(isNew = false, agentID = "a1", name = "After", provider = "openai", model = "gpt")
         model.saveAgentEditor()
         assertEquals("After", model.agents.first().name)
         assertEquals("Latest reply", model.agents.first().lastMessage)
@@ -728,7 +817,7 @@ class CrumbleTests {
         }
         val model = AppModel(client = client, scope = testScope)
         model.route = Route.Memory
-        model.agentDraft = AgentDraft(isNew = true, agentID = "", name = "New bot")
+        model.agentDraft = AgentDraft(isNew = true, agentID = "", name = "New bot", provider = "openai", model = "gpt")
         model.saveAgentEditor()
         assertTrue(model.agents.first().id.startsWith("pending:"))
         assertNull(model.agentDraft)
@@ -823,21 +912,6 @@ class CrumbleTests {
     fun requestIDsAreVersion4UUIDs() {
         val regex = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
         assertTrue(regex.matches(newRequestID()))
-    }
-
-    @Test
-    fun avatarSeedsAcceptLegacyValues() {
-        val cases = mapOf(
-            "bot:violet" to "violet",
-            "critters:violet" to "violet",
-            "sparkles" to "a1",
-            "😀" to "a1",
-            "" to "a1",
-        )
-        for ((avatar, seed) in cases) {
-            assertEquals(seed, agentAvatarSeed(Agent(id = "a1", avatar = avatar)))
-        }
-        assertEquals(BotLook("agent-seed"), BotLook("agent-seed"))
     }
 
     @Test

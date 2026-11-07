@@ -1,5 +1,9 @@
 package dev.crumble.android.ui
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.CardDefaults
+import androidx.activity.compose.BackHandler
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
@@ -8,9 +12,9 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,8 +30,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -54,7 +56,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -68,17 +75,12 @@ import dev.crumble.android.model.MCPServer
 import dev.crumble.android.model.Memory
 import dev.crumble.android.model.MemoryDraft
 import dev.crumble.android.model.Route
-import dev.crumble.android.model.Schedule
 import dev.crumble.android.model.SkillDraft
-import dev.crumble.android.model.TaskDraft
+import dev.crumble.android.model.SKILLS_SHARED
 import dev.crumble.android.model.activityTime
-import dev.crumble.android.model.timeLabel
-import dev.crumble.android.model.displayLabel
+import dev.crumble.android.model.matchesMCP
+import dev.crumble.android.model.memoryLine
 import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
 
 @Composable
 fun PanelView(
@@ -86,6 +88,7 @@ fun PanelView(
     panel: Route,
     modifier: Modifier = Modifier,
 ) {
+    BackHandler { model.navigate(panel.parent) }
     Box(modifier = modifier.fillMaxSize()) {
         when (panel) {
             Route.Memory -> MemoryPanel(model)
@@ -93,22 +96,53 @@ fun PanelView(
             Route.Tasks -> TasksPanel(model)
             Route.Activity -> ActivityPanel(model)
             Route.Integrations -> IntegrationsPanel(model)
-            is Route.AgentChat -> Unit
+            Route.Avatars -> AvatarsPanel(model)
+            Route.Providers -> ProvidersPanel(model)
+            Route.PasswordManagers -> PasswordManagersPanel(model)
+            Route.Credentials -> CredentialsPanel(model)
+            Route.Logins -> LoginsPanel(model)
+            Route.WebSearch -> WebSearchPanel(model)
+            Route.JudgeModel -> JudgeModelPanel(model)
+            Route.VisionModel -> VisionModelPanel(model)
+            Route.Coding -> CodingPanel(model)
+            Route.Users -> UsersPanel(model)
+            Route.MessageGateways -> MessageGatewaysPanel(model)
+            is Route.MessageGateway -> MessageGatewayPanel(model, panel.id)
+            Route.EventRelay -> EventRelayPanel(model)
+            Route.Settings -> SettingsPanel(model)
+            Route.General -> GeneralPanel(model)
+            Route.Account -> AccountPanel(model)
+            Route.NewChat -> NewChatPanel(model)
+            Route.NewGroup -> NewGroupPanel(model)
+            is Route.AgentChat, is Route.GroupChat -> Unit
         }
+    }
+}
+
+/** The text with every occurrence of `needle`, already lowercased, marked. */
+internal fun highlighted(text: String, needle: String, mark: Color): AnnotatedString = buildAnnotatedString {
+    append(text)
+    if (needle.isEmpty()) return@buildAnnotatedString
+    val lower = text.lowercase()
+    if (lower.length != text.length) return@buildAnnotatedString
+    var at = lower.indexOf(needle)
+    while (at >= 0) {
+        addStyle(SpanStyle(background = mark), at, at + needle.length)
+        at = lower.indexOf(needle, at + needle.length)
     }
 }
 
 @Composable
 private fun MemoryPanel(model: AppModel) {
     var query by remember { mutableStateOf("") }
-    var scope by remember { mutableStateOf<String?>(null) }
+    val scope = model.memoryScope
     val normalizedQuery = query.trim().lowercase()
     val matches: (Memory) -> Boolean = { memory -> normalizedQuery.isEmpty() || memory.content.lowercase().contains(normalizedQuery) }
     val shared = model.sharedMemories.filter(matches)
     val scopedAgents = model.agents
         .filter { scope == null || scope == it.id }
         .filter { agent ->
-            scope != null || model.agentMemories[agent.id].orEmpty().any(matches)
+            scope != null || agent.id in model.memoryErrors || model.agentMemories[agent.id].orEmpty().any(matches)
         }
     val sharedEnabledBots = model.agents.filter { it.sharedMemory == true }.map { it.name }
     val sharedFooter = if (sharedEnabledBots.isEmpty()) {
@@ -116,6 +150,8 @@ private fun MemoryPanel(model: AppModel) {
     } else {
         "Used by: ${sharedEnabledBots.joinToString(", ")}"
     }
+    val total = model.sharedMemories.size + model.agents.sumOf { model.agentMemories[it.id].orEmpty().size }
+    val now = Instant.now()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -127,6 +163,7 @@ private fun MemoryPanel(model: AppModel) {
                 value = query,
                 onValueChange = { query = it },
                 label = { Text("Search memories") },
+                shape = CircleShape,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -136,49 +173,48 @@ private fun MemoryPanel(model: AppModel) {
                     .padding(top = 8.dp)
                     .horizontalScroll(rememberScrollState()),
             ) {
-                FilterChip(selected = scope == null, onClick = { scope = null }, label = { Text("All") })
-                FilterChip(selected = scope == "shared", onClick = { scope = "shared" }, label = { Text("Shared") })
+                FilterChip(selected = scope == null, onClick = { model.memoryScope = null }, label = { Text("All · $total") })
+                FilterChip(selected = scope == SKILLS_SHARED, onClick = { model.memoryScope = SKILLS_SHARED }, label = { Text("Shared · ${model.sharedMemories.size}") })
                 for (agent in model.agents) {
-                    FilterChip(selected = scope == agent.id, onClick = { scope = agent.id }, label = { Text(agent.name) })
+                    FilterChip(
+                        selected = scope == agent.id,
+                        onClick = { model.memoryScope = agent.id },
+                        label = { Text("${agent.name} · ${model.agentMemories[agent.id].orEmpty().size}") },
+                        leadingIcon = { BotAvatarView(agent = agent, size = 18.dp) },
+                    )
                 }
             }
         }
         item {
-            if (scope != null && scope != "shared") return@item
-            SectionCard(
+            if (scope != null && scope != SKILLS_SHARED) return@item
+            RowsSection(
                 title = "Shared · ${model.sharedMemories.size}",
                 footer = sharedFooter,
                 expandable = true,
             ) {
-                if (shared.isEmpty()) {
-                    Text(
-                        text = if (normalizedQuery.isEmpty()) "No shared memories yet." else "No matching shared memories.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                model.memoryErrors[SKILLS_SHARED]?.let { note(it, isError = true) }
+                if (shared.isEmpty() && SKILLS_SHARED !in model.memoryErrors) {
+                    note(if (normalizedQuery.isEmpty()) "No shared memories yet." else "No matching shared memories.")
                 }
                 for (memory in shared) {
-                    MemoryRow(model = model, memory = memory, agentID = null)
+                    row { shape -> MemoryRow(model = model, memory = memory, agentID = null, needle = normalizedQuery, now = now, shape = shape) }
                 }
             }
         }
 
-        items(scopedAgents.filter { scope != "shared" }, key = { it.id }) { agent ->
+        items(scopedAgents.filter { scope != SKILLS_SHARED }, key = { it.id }) { agent ->
             val memories = model.agentMemories[agent.id].orEmpty().filter(matches)
             val totalMemories = model.agentMemories[agent.id].orEmpty().size
-            SectionCard(
+            RowsSection(
                 title = "${agent.name} · $totalMemories",
                 expandable = true,
             ) {
-                if (memories.isEmpty()) {
-                    Text(
-                        text = if (normalizedQuery.isEmpty()) "No memories yet." else "No matching memories.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                model.memoryErrors[agent.id]?.let { note(it, isError = true) }
+                if (memories.isEmpty() && agent.id !in model.memoryErrors) {
+                    note(if (normalizedQuery.isEmpty()) "No memories yet." else "No matching memories.")
                 }
                 for (memory in memories) {
-                    MemoryRow(model = model, memory = memory, agentID = agent.id)
+                    row { shape -> MemoryRow(model = model, memory = memory, agentID = agent.id, needle = normalizedQuery, now = now, shape = shape) }
                 }
             }
         }
@@ -190,29 +226,30 @@ private fun MemoryRow(
     model: AppModel,
     memory: Memory,
     agentID: String?,
+    needle: String,
+    now: Instant,
+    shape: Shape,
 ) {
     val isPending = memory.id.startsWith("pending-")
     var confirmingDelete by remember(memory.id) { mutableStateOf(false) }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = memory.content,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = { model.openMemoryForm(memory.id, agentID = agentID) }, enabled = !isPending) { Text("Edit") }
-            TextButton(
-                onClick = { confirmingDelete = true },
-                enabled = !isPending,
-                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-            ) { Text("Delete") }
-        }
+    val mark = MaterialTheme.colorScheme.tertiaryContainer
+    val line = memoryLine(memory, now)
+    GroupedItem(
+        shape = shape,
+        leading = { IconTile(routeIcon(Route.Memory), Tone.Lavender) },
+        below = {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { model.openMemoryForm(memory.id, agentID = agentID) }, enabled = !isPending) { Text("Edit") }
+                TextButton(
+                    onClick = { confirmingDelete = true },
+                    enabled = !isPending,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("Delete") }
+            }
+        },
+    ) {
+        Text(text = highlighted(memory.content, needle, mark), style = MaterialTheme.typography.titleMedium)
+        if (line.isNotEmpty()) RowSubtitle(line)
     }
     if (confirmingDelete) {
         AlertDialog(
@@ -233,430 +270,52 @@ private fun MemoryRow(
 }
 
 @Composable
-private fun SkillsPanel(model: AppModel) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        item {
-            SectionCard(
-                title = "Shared skills",
-                footer = "Optional shared skills can be assigned to individual bots. Built-in defaults apply to every bot.",
-            ) {
-                if (model.sharedSkills.isEmpty()) {
-                    Text(
-                        text = "No shared skills yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                for (skill in model.sharedSkills.filter { !it.isDefault }) {
-                    var expanded by remember(skill.id) { mutableStateOf(false) }
-                    val isPending = skill.id.startsWith("pending-")
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { expanded = !expanded }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = skill.name,
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                )
-                                val sub = if (skill.isDefault) {
-                                    "Default · Every bot"
-                                } else {
-                                    val enabled = model.agents
-                                        .filter { it.sharedSkills?.contains(skill.id) == true }
-                                        .map { it.name }
-                                    if (enabled.isEmpty()) "No bots enabled" else "Enabled for: ${enabled.joinToString(", ")}"
-                                }
-                                Text(
-                                    text = sub,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            if (!skill.isDefault) {
-                                val pending = model.pendingMutations.contains("skill:${skill.id}")
-                                TextButton(
-                                    onClick = { model.openSkillForm(skill.id) },
-                                    enabled = !isPending && !pending,
-                                ) {
-                                    Text("Edit")
-                                }
-                                TextButton(
-                                    onClick = { model.deleteSharedSkill(skill.id) },
-                                    enabled = !isPending && !pending,
-                                ) {
-                                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                                }
-                            }
-                            Icon(
-                                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = null,
-                            )
-                        }
-                        AnimatedVisibility(visible = expanded) {
-                            Column(
-                                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                Text(
-                                    text = skill.instructions,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                if (!skill.path.isNullOrEmpty()) {
-                                    Text(
-                                        text = "Source: ${skill.path}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                if (!skill.isDefault) {
-                                    Text(
-                                        text = "Assign to bots",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        modifier = Modifier.padding(top = 6.dp),
-                                    )
-                                    for (agent in model.agents) {
-                                        val enabled = agent.sharedSkills?.contains(skill.id) == true
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                        ) {
-                                            Text(agent.name, style = MaterialTheme.typography.bodySmall)
-                                            Switch(
-                                                checked = enabled,
-                                            enabled = !model.pendingMutations.contains("agent-shared-skills:${agent.id}"),
-                                                onCheckedChange = { model.setSharedSkillEnabled(agent.id, skill.id, it) },
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                val builtIns = model.sharedSkills.filter { it.isDefault }
-                if (builtIns.isNotEmpty()) {
-                    Text(
-                        text = "Built-in skills",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    for (skill in builtIns) {
-                        var expanded by remember(skill.id) { mutableStateOf(false) }
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { expanded = !expanded }
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(skill.name, modifier = Modifier.weight(1f))
-                                Text("Every bot", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
-                            }
-                            AnimatedVisibility(expanded) {
-                                Text(skill.instructions, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp))
-                            }
-                        }
-                    }
-                }
-                TextButton(onClick = { model.openSkillForm("") }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("Add shared skill")
-                }
-            }
-        }
-
-        items(model.agents, key = { it.id }) { agent ->
-            val skills = agent.skills.orEmpty()
-            SectionCard(
-                title = agent.name,
-                footer = "Personal skills only ${agent.name} follows.",
-            ) {
-                if (skills.isEmpty()) {
-                    Text(
-                        text = "No personal skills yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                for (skill in skills) {
-                    var expanded by remember(skill.id) { mutableStateOf(false) }
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { expanded = !expanded }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = skill.name,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                modifier = Modifier.weight(1f),
-                            )
-                            val pending = model.pendingMutations.contains("agent-skills:${agent.id}")
-                            TextButton(enabled = !pending, onClick = { model.openSkillForm(skill.id, agent.id) }) { Text("Edit") }
-                            TextButton(enabled = !pending, onClick = { model.deleteAgentSkill(agent.id, skill.id) }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-                            Icon(
-                                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = null,
-                            )
-                        }
-                        AnimatedVisibility(visible = expanded) {
-                            Text(
-                                text = skill.instructions,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(bottom = 6.dp),
-                            )
-                        }
-                    }
-                }
-                TextButton(enabled = !model.pendingMutations.contains("agent-skills:${agent.id}"), onClick = { model.openSkillForm("", agent.id) }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("Add personal skill")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TasksPanel(model: AppModel) {
-    if (model.agents.isEmpty()) {
-        EmptyWorkspacePlaceholder(
-            icon = Icons.Default.Schedule,
-            title = "No Tasks",
-            description = "Create an agent, then give it a task to run once or on a schedule.",
-        )
-    } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            items(model.agents, key = { it.id }) { agent ->
-                val tasks = model.schedules.filter { it.agentId == agent.id }
-                SectionCard(
-                    title = agent.name,
-                    footer = "Runs in ${agent.name}’s chat, once or on a schedule.",
-                ) {
-                    if (tasks.isEmpty()) {
-                        Text(
-                            text = "No tasks yet.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    for (schedule in tasks) {
-                        val isPending = schedule.id.startsWith("pending-")
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text(
-                                text = schedule.name,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                            )
-                            Text(
-                                text = schedule.prompt,
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = scheduleTiming(schedule),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            val creator = schedule.createdByAgentId
-                            if (creator != null && creator != agent.id) {
-                                val creatorName = model.agents.firstOrNull { it.id == creator }?.name
-                                if (creatorName != null) {
-                                    Text(
-                                        text = "Scheduled by $creatorName",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(
-                                    onClick = { model.runSchedule(schedule.id) },
-                                    enabled = schedule.enabled && !isPending,
-                                ) {
-                                    Text("Run Now")
-                                }
-                                TextButton(
-                                    onClick = { model.openTaskForm(schedule.id) },
-                                    enabled = !isPending,
-                                ) {
-                                    Text("Edit")
-                                }
-                                TextButton(
-                                    onClick = { model.deleteSchedule(schedule.id) },
-                                    enabled = !isPending,
-                                ) {
-                                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                                }
-                            }
-                        }
-                    }
-                    TextButton(onClick = { model.openTaskForm("", agentID = agent.id) }) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.size(4.dp))
-                        Text("New Task")
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun scheduleTiming(schedule: Schedule): String {
-    var timing = schedule.runAt ?: ""
-    if (!schedule.cron.isNullOrEmpty()) {
-        timing = "${schedule.cron} · ${schedule.timezone ?: ""}"
-    }
-    return if (schedule.enabled) timing else "Paused · $timing"
-}
-
-@Composable
-private fun ActivityPanel(model: AppModel) {
-    if (model.activities.isEmpty()) {
-        EmptyWorkspacePlaceholder(
-            icon = Icons.Default.Timeline,
-            title = "No Activity",
-            description = "Tool calls and bot messages will appear here.",
-        )
-    } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(model.activities, key = { it.id }) { activity ->
-                var expanded by remember(activity.id) { mutableStateOf(false) }
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { expanded = !expanded }
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(50)) {
-                                Text(
-                                    text = activity.kind.replace('-', ' ').replaceFirstChar { it.uppercase() },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                )
-                            }
-                            Text(activity.displayLabel(), style = MaterialTheme.typography.titleSmall)
-                            if (activity.agentName.isNotEmpty()) Text(activity.agentName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(activity.timestamp?.let { timeLabel(Instant.ofEpochMilli(it)) } ?: "", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.weight(1f))
-                            Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
-                        }
-                        if (expanded) {
-                            Text(
-                                activity.details?.toString()?.replace(",\"", ",\n\"") ?: "No details",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            if (activity.agentId.isNotEmpty()) {
-                                OutlinedButton(onClick = { model.selectAgent(activity.agentId) }) { Text("Open Chat") }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun IntegrationsPanel(model: AppModel) {
-    val context = LocalContext.current
+    val appContext = LocalContext.current.applicationContext
+    var search by remember { mutableStateOf("") }
+    val needle = search.trim().lowercase()
+    val listed = model.mcpServers.filter { matchesMCP(it, needle) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            val shared = model.mcpServers.filter { it.agentId == null }
-            SectionCard(
+            OutlinedTextField(
+                value = search,
+                onValueChange = { search = it },
+                label = { Text("Search MCP servers") },
+                shape = CircleShape,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        item {
+            val shared = listed.filter { it.agentId == null }
+            RowsSection(
                 title = "Shared",
                 footer = "Every bot can use these. Turn one on for a bot in its profile.",
             ) {
-                if (shared.isEmpty()) {
-                    Text(
-                        text = "No shared MCP servers yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                if (shared.isEmpty()) note("No shared MCP servers yet.")
                 for (server in shared) {
-                    MCPServerRow(
-                        model = model,
-                        server = server,
-                        onOpenBrowser = { url ->
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        },
-                    )
+                    row { shape -> MCPServerRow(model = model, server = server, shape = shape, onOpenBrowser = { url -> openSignInPage(appContext, url) }) }
                 }
-                TextButton(onClick = { model.openMCPForm("", agentID = null) }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("Add Shared MCP Server")
-                }
+                add("Add Shared MCP Server") { model.openMCPForm("", agentID = null) }
             }
         }
 
-        items(model.agents, key = { it.id }) { agent ->
-            val own = model.mcpServers.filter { it.agentId == agent.id }
-            SectionCard(
+        items(model.agents.filter { agent -> needle.isEmpty() || listed.any { it.agentId == agent.id } }, key = { it.id }) { agent ->
+            val own = listed.filter { it.agentId == agent.id }
+            RowsSection(
                 title = agent.name,
                 footer = "Only ${agent.name} can use these, with their own sign-in.",
             ) {
-                if (own.isEmpty()) {
-                    Text(
-                        text = "No MCP servers of its own.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                if (own.isEmpty()) note("No MCP servers of its own.")
                 for (server in own) {
-                    MCPServerRow(
-                        model = model,
-                        server = server,
-                        onOpenBrowser = { url ->
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        },
-                    )
+                    row { shape -> MCPServerRow(model = model, server = server, shape = shape, onOpenBrowser = { url -> openSignInPage(appContext, url) }) }
                 }
-                TextButton(onClick = { model.openMCPForm("", agentID = agent.id) }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("Add MCP Server")
-                }
+                add("Add MCP Server") { model.openMCPForm("", agentID = agent.id) }
             }
         }
     }
@@ -666,29 +325,20 @@ private fun IntegrationsPanel(model: AppModel) {
 private fun MCPServerRow(
     model: AppModel,
     server: MCPServer,
+    shape: Shape,
     onOpenBrowser: (String) -> Unit,
 ) {
     val isPending = server.id.startsWith("pending-")
+    var confirmingDelete by remember { mutableStateOf(false) }
     val statusText = when (server.auth) {
         "oauth" -> "Signed in with OAuth"
         "token" -> "Uses a token"
         else -> "No sign-in"
     }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = server.name,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-            )
+    GroupedItem(
+        shape = shape,
+        leading = { LetterTile(server.name) },
+        trailing = {
             if (!server.enabled) {
                 Text(
                     text = "Disabled",
@@ -696,50 +346,63 @@ private fun MCPServerRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        Text(
-            text = server.url,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.MiddleEllipsis,
-        )
-        Text(
-            text = statusText,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (model.signingIn == server.id) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            } else if (server.auth == "oauth") {
-                OutlinedButton(onClick = { model.signOutOfMCP(server.id) }) {
-                    Text("Sign Out")
+        },
+        below = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (model.signingIn == server.id) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else if (server.auth == "oauth") {
+                    OutlinedButton(onClick = { model.signOutOfMCP(server.id) }) {
+                        Text("Sign Out")
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { model.beginMCPSignIn(server.id, onOpenBrowser) },
+                        enabled = model.signingIn == null && !isPending,
+                    ) {
+                        Text("Sign In…")
+                    }
                 }
-            } else {
-                OutlinedButton(
-                    onClick = { model.beginMCPSignIn(server.id, onOpenBrowser) },
-                    enabled = model.signingIn == null && !isPending,
+                TextButton(
+                    onClick = { model.openMCPForm(server.id) },
+                    enabled = !isPending,
                 ) {
-                    Text("Sign In…")
+                    Text("Edit")
+                }
+                TextButton(
+                    onClick = { confirmingDelete = true },
+                    enabled = !isPending,
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             }
-            TextButton(
-                onClick = { model.openMCPForm(server.id) },
-                enabled = !isPending,
-            ) {
-                Text("Edit")
-            }
-            TextButton(
-                onClick = { model.deleteMCP(server.id) },
-                enabled = !isPending,
-            ) {
-                Text("Delete", color = MaterialTheme.colorScheme.error)
-            }
-        }
+        },
+    ) {
+        RowTitle(server.name)
+        RowSubtitle(server.url, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+        RowSubtitle(statusText)
+        server.error?.let { RowSubtitle(it, color = MaterialTheme.colorScheme.error) }
+    }
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete ${server.name}?") },
+            text = { Text("Bots lose its tools and its sign-in is removed. This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmingDelete = false
+                        model.deleteMCP(server.id)
+                    },
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") } },
+        )
     }
 }
 
@@ -750,8 +413,45 @@ fun SectionCard(
     expandable: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    SectionFrame(title, footer, expandable) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = cardColor),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                content()
+            }
+        }
+    }
+}
+
+/** A SectionCard for a list: each row is its own surface in a group. */
+@Composable
+fun RowsSection(
+    title: String,
+    footer: String? = null,
+    expandable: Boolean = false,
+    build: GroupScope.() -> Unit,
+) {
+    SectionFrame(title, footer, expandable) { GroupedRows(build) }
+}
+
+/** A section's heading and footer around its content, which an expandable heading hides. */
+@Composable
+internal fun SectionFrame(
+    title: String,
+    footer: String? = null,
+    expandable: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     var expanded by remember(title) { mutableStateOf(true) }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(ROW_GAP)) {
         if (expandable) {
             Row(
                 modifier = Modifier
@@ -759,54 +459,38 @@ fun SectionCard(
                     .clickable { expanded = !expanded }
                     .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
                     .heightIn(min = 48.dp)
-                    .padding(horizontal = 4.dp),
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
                 Icon(
                     imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = if (expanded) "Collapse $title" else "Expand $title",
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         } else {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
+            GroupLabel(title)
         }
-        if (!expandable || expanded) {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    content()
-                }
-            }
-        }
+        if (!expandable || expanded) content()
         if (!footer.isNullOrEmpty()) {
             Text(
                 text = footer,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
             )
         }
     }
 }
 
 @Composable
-private fun EmptyWorkspacePlaceholder(
+internal fun EmptyWorkspacePlaceholder(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     description: String,
@@ -901,7 +585,7 @@ fun MemoryFormDialog(
                 }
                 OutlinedTextField(
                     value = draft.content,
-                    onValueChange = { model.memoryDraft = draft.copy(content = it) },
+                    onValueChange = { model.memoryDraft = draft.copy(content = it.take(32_000)) },
                     label = { Text("Memory Entry") },
                     minLines = 4,
                     modifier = Modifier.fillMaxWidth(),
@@ -931,165 +615,12 @@ fun MemoryFormDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TaskFormDialog(
-    model: AppModel,
-    draft: TaskDraft,
-) {
-    var botMenuExpanded by remember { mutableStateOf(false) }
-    val selectedBotName = model.agents.firstOrNull { it.id == draft.agentID }?.name ?: ""
-    val zone = remember(draft.timezone) {
-        try {
-            ZoneId.of(draft.timezone)
-        } catch (_: Exception) {
-            ZoneId.systemDefault()
-        }
-    }
-    val localFormatter = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm") }
-    var runDateText by remember(draft.id, zone) {
-        mutableStateOf(ZonedDateTime.ofInstant(draft.runDate, zone).format(localFormatter))
-    }
-
-    AlertDialog(
-        onDismissRequest = {
-            model.errorText = ""
-            model.taskDraft = null
-        },
-        title = { Text(if (draft.scheduleID.isEmpty()) "New Task" else "Edit Task") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                SheetErrorBanner(model.errorText)
-                ExposedDropdownMenuBox(
-                    expanded = botMenuExpanded,
-                    onExpandedChange = { botMenuExpanded = it },
-                ) {
-                    OutlinedTextField(
-                        value = selectedBotName,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Runs on") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = botMenuExpanded) },
-                        modifier = Modifier
-                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                            .fillMaxWidth(),
-                    )
-                    ExposedDropdownMenu(
-                        expanded = botMenuExpanded,
-                        onDismissRequest = { botMenuExpanded = false },
-                    ) {
-                        for (agent in model.agents) {
-                            DropdownMenuItem(
-                                text = { Text(agent.name) },
-                                onClick = {
-                                    model.taskDraft = draft.copy(agentID = agent.id)
-                                    botMenuExpanded = false
-                                },
-                            )
-                        }
-                    }
-                }
-                OutlinedTextField(
-                    value = draft.name,
-                    onValueChange = { model.taskDraft = draft.copy(name = it) },
-                    label = { Text("Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("Enabled")
-                    Switch(
-                        checked = draft.enabled,
-                        onCheckedChange = { model.taskDraft = draft.copy(enabled = it) },
-                    )
-                }
-                OutlinedTextField(
-                    value = draft.prompt,
-                    onValueChange = { model.taskDraft = draft.copy(prompt = it) },
-                    label = { Text("Prompt") },
-                    minLines = 3,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = !draft.repeats,
-                        onClick = { model.taskDraft = draft.copy(repeats = false) },
-                        label = { Text("Run once") },
-                    )
-                    FilterChip(
-                        selected = draft.repeats,
-                        onClick = { model.taskDraft = draft.copy(repeats = true) },
-                        label = { Text("Repeat") },
-                    )
-                }
-                if (draft.repeats) {
-                    OutlinedTextField(
-                        value = draft.cron,
-                        onValueChange = { model.taskDraft = draft.copy(cron = it) },
-                        label = { Text("Cron expression") },
-                        placeholder = { Text("0 9 * * 1-5") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    OutlinedTextField(
-                        value = runDateText,
-                        onValueChange = { text ->
-                            runDateText = text
-                            try {
-                                val ldt = LocalDateTime.parse(text.trim(), localFormatter)
-                                val instant = ldt.atZone(zone).toInstant()
-                                model.taskDraft = draft.copy(runDate = instant)
-                            } catch (_: Exception) {
-                            }
-                        },
-                        label = { Text("Run at (YYYY-MM-DD HH:mm)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                OutlinedTextField(
-                    value = draft.timezone,
-                    onValueChange = { model.taskDraft = draft.copy(timezone = it) },
-                    label = { Text("Time zone") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { model.saveTask() },
-                enabled = !model.loading,
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = {
-                    model.errorText = ""
-                    model.taskDraft = null
-                },
-            ) {
-                Text("Cancel")
-            }
-        },
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
 fun MCPFormDialog(
     model: AppModel,
     draft: MCPDraft,
 ) {
     var ownerMenuExpanded by remember { mutableStateOf(false) }
+    val server = model.mcpServers.firstOrNull { it.id == draft.serverID }
     val selectedOwnerName = if (draft.agentID == null) {
         "Every bot (shared)"
     } else {
@@ -1161,13 +692,39 @@ fun MCPFormDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                SecretSourceField(
+                    model = model,
+                    label = "Token (Optional)",
+                    draft = draft.token,
+                    onChange = { model.mcpDraft = model.mcpDraft?.copy(token = it) },
+                    valueDescription = "Leave the token empty for servers that use OAuth, then choose Sign In in the list after saving.",
+                    valuePlaceholder = server?.takeIf { it.auth == "token" && it.token?.reference == null }?.let { "Replace the saved token" },
+                )
+                Text(
+                    text = "OAuth app",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+                Text(
+                    text = "Only for servers whose sign-in can't register Crumble, such as GitHub's. Register an OAuth app there with the callback URL ${AppModel.oauthRedirectURI} and enter its client ID and secret.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 OutlinedTextField(
-                    value = draft.token,
-                    onValueChange = { model.mcpDraft = draft.copy(token = it) },
-                    label = { Text("Token (Optional)") },
-                    visualTransformation = PasswordVisualTransformation(),
+                    value = draft.clientID,
+                    onValueChange = { model.mcpDraft = model.mcpDraft?.copy(clientID = it) },
+                    label = { Text("Client ID") },
+                    placeholder = { Text("Optional") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
+                )
+                SecretSourceField(
+                    model = model,
+                    label = "Client secret",
+                    draft = draft.clientSecret,
+                    onChange = { model.mcpDraft = model.mcpDraft?.copy(clientSecret = it) },
+                    valueDescription = "Stored encrypted and never shown again. Changing the app signs the server out.",
+                    valuePlaceholder = if (server?.oauthClientSecret?.configured == true) "Replace the saved secret" else "Optional",
+                    enabled = draft.clientID.isNotBlank(),
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1180,17 +737,12 @@ fun MCPFormDialog(
                         onCheckedChange = { model.mcpDraft = draft.copy(enabled = it) },
                     )
                 }
-                Text(
-                    text = "Leave the token empty for servers that use OAuth, then choose Sign In in the list after saving.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         },
         confirmButton = {
             Button(
                 onClick = { model.saveMCP() },
-                enabled = !model.loading,
+                enabled = !model.loading && !draft.saving,
             ) {
                 Text("Save")
             }
@@ -1265,23 +817,27 @@ fun SkillFormDialog(
                 }
                 OutlinedTextField(
                     value = draft.name,
-                    onValueChange = { model.skillDraft = draft.copy(name = it) },
+                    onValueChange = { model.skillDraft = draft.copy(name = it.take(100)) },
                     label = { Text("Name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = draft.instructions,
-                    onValueChange = { model.skillDraft = draft.copy(instructions = it) },
+                    onValueChange = { model.skillDraft = draft.copy(instructions = it.take(32_000)) },
                     label = { Text("Instructions") },
                     minLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(
-                    text = if (draft.agentID == null) "Assign this shared skill to bots from its expanded row." else "Only this bot follows this personal skill.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (draft.agentID == null) {
+                    SkillUsedByField(model.agents, draft.usedBy) { model.skillDraft = draft.copy(usedBy = it) }
+                } else {
+                    Text(
+                        text = "Only this bot follows this personal skill.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         },
         confirmButton = {
@@ -1321,4 +877,9 @@ fun SheetErrorBanner(errorText: String) {
             )
         }
     }
+}
+
+/** The sign-in outlives the activity that started it, so this can't go through that activity. */
+private fun openSignInPage(context: Context, url: String) {
+    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }

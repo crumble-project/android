@@ -1,5 +1,6 @@
 package dev.crumble.android.model
 
+import dev.crumble.android.generated.SecretStatus
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -35,10 +36,12 @@ data class Agent(
     val name: String = "",
     val description: String? = null,
     val instructions: String? = null,
-    val avatar: String? = null,
+    val avatar: dev.crumble.android.generated.BotAvatarDefinition? = null,
     val enabled: Boolean = false,
     val provider: String? = null,
     val model: String? = null,
+    val webSearchProvider: String? = null,
+    val desktopModel: ModelChoice? = null,
     val tools: List<String>? = null,
     val delegates: List<String>? = null,
     val skills: List<Skill>? = null,
@@ -48,6 +51,9 @@ data class Agent(
     val inference: Inference? = null,
     val lastMessage: String? = null,
 )
+
+@Serializable
+data class ModelChoice(val provider: String = "", val model: String = "")
 
 @Serializable
 data class Inference(
@@ -63,6 +69,7 @@ data class ModelSummary(
     val name: String? = null,
     val contextWindow: Int? = null,
     val reasoning: Boolean? = null,
+    val thinkingLevels: List<String>? = null,
 )
 
 @Serializable
@@ -78,6 +85,7 @@ data class MessageOrigin(
     val kind: String = "",
     val name: String? = null,
     val agentId: String? = null,
+    val source: String? = null,
 )
 
 /** A persisted request or reply exchanged between two bots. */
@@ -90,6 +98,22 @@ data class BotCommunication(
     val toName: String = "",
     val status: String = "",
 )
+
+/** A desktop job action in the transcript; its live state comes from the bot's held actions. */
+@Serializable
+data class HeldActionRef(val id: String = "", val job: String = "")
+
+/** A coding job's question in the transcript; whether it still waits comes from the job listing. */
+@Serializable
+data class JobQuestionRef(val id: String = "", val job: String = "")
+
+/** A `request_bot` result in the transcript; its live state comes from the bot's requests. */
+@Serializable
+data class BotRequestRef(val id: String = "", val name: String = "")
+
+/** A page a group message's bot searched or read, stored with the message. */
+@Serializable
+data class MessageSource(val url: String = "", val title: String = "")
 
 /** Client-side delivery state for an optimistic owner message. */
 @Serializable
@@ -117,6 +141,16 @@ data class Message(
     /** The idempotency key echoed by the server for owner messages. */
     val requestId: String? = null,
     val deliveryState: MessageDeliveryState = MessageDeliveryState.confirmed,
+    val heldAction: HeldActionRef? = null,
+    val jobQuestion: JobQuestionRef? = null,
+    val botRequest: BotRequestRef? = null,
+    val credentialRequest: SecretRequestRef? = null,
+    val loginRequest: SecretRequestRef? = null,
+    val toolName: String? = null,
+    val toolCallId: String? = null,
+    val isError: Boolean? = null,
+    val toolDetails: JsonElement? = null,
+    val sources: List<MessageSource>? = null,
 ) {
     val text: String
         get() = contentText(content)
@@ -162,6 +196,9 @@ data class Memory(
     val id: String = "",
     val content: String = "",
     val createdAt: String? = null,
+    val agentId: String? = null,
+    val source: dev.crumble.android.generated.MemorySource? = null,
+    val updatedAt: String? = null,
 )
 
 /** A shared skill: bundled defaults apply to every bot; library entries are opt-in. */
@@ -172,6 +209,9 @@ data class SharedSkill(
     val instructions: String = "",
     val source: String? = null,
     val path: String? = null,
+    val description: String? = null,
+    val origin: dev.crumble.android.generated.SkillOrigin? = null,
+    val update: dev.crumble.android.generated.SkillUpdate? = null,
 ) {
     val isDefault: Boolean
         get() = source == "bundled"
@@ -189,6 +229,12 @@ data class Schedule(
     val enabled: Boolean = false,
     /** The bot that saved this task. Null when the owner saved it. */
     val createdByAgentId: String? = null,
+    val kind: String = "prompt",
+    val command: String? = null,
+    val timeoutSeconds: Long = 600,
+    val notify: Boolean = true,
+    val eventSourceId: String? = null,
+    val nextRunAt: String? = null,
 )
 
 @Serializable
@@ -201,6 +247,7 @@ data class Execution(
     val error: String? = null,
     val createdAt: String? = null,
     val updatedAt: String? = null,
+    val scheduleId: String? = null,
 )
 
 @Serializable
@@ -221,6 +268,10 @@ data class MCPServer(
     val authenticated: Boolean? = null,
     /** How the server signs in: "oauth", "token", or "none". */
     val auth: String? = null,
+    val oauthClientId: String? = null,
+    val token: SecretStatus? = null,
+    val oauthClientSecret: SecretStatus? = null,
+    val error: String? = null,
 )
 
 /** The start of an OAuth sign-in: a URL to open, or `authorized` when saved tokens still work. */
@@ -243,6 +294,8 @@ data class ActivityEvent(
     val eventId: String? = null,
     val serverId: String? = null,
     val createdAt: String? = null,
+    val groupId: String? = null,
+    val groupName: String? = null,
 )
 
 @Serializable
@@ -254,24 +307,44 @@ data class ActivityRecord(
     val timestamp: Long? = null,
     val kind: String = "",
     val details: JsonElement? = null,
+    val change: dev.crumble.android.generated.LearnedChange? = null,
 )
 
 @Serializable
 data class ActivityFeedResponse(
     val activities: List<ActivityRecord> = emptyList(),
     val hasMore: Boolean = false,
+    val nextCursor: String? = null,
 )
 
-fun ActivityRecord.displayLabel(): String {
-    val objectDetails = details as? JsonObject
-    val communication = objectDetails?.get("communication") as? JsonObject
-    val from = (communication?.get("fromName") as? JsonPrimitive)?.contentOrNull
-    val to = (communication?.get("toName") as? JsonPrimitive)?.contentOrNull
-    if (!from.isNullOrEmpty() && !to.isNullOrEmpty()) return "$from → $to"
-    return listOf("name", "toolName", "serverName")
-        .firstNotNullOfOrNull { (objectDetails?.get(it) as? JsonPrimitive)?.contentOrNull }
-        ?: kind.replace('-', ' ').replaceFirstChar { it.uppercase() }
+private val CHANGE_VERBS = mapOf("create" to "added", "update" to "changed", "delete" to "deleted", "revert" to "reverted")
+
+private fun changeText(source: JsonObject?, key: String) = (source?.get(key) as? JsonPrimitive)?.contentOrNull
+
+/** What a learned change did, such as "Kev's review changed a skill". */
+internal fun changeSummary(change: JsonObject, botName: String?): String {
+    val actor = when (changeText(change, "actor")) {
+        "owner" -> "You"
+        "review" -> botName?.let { "$it's review" } ?: "A review"
+        "curator" -> "The curator"
+        else -> botName ?: "A bot"
+    }
+    val target = when {
+        changeText(change, "target") == "skill" -> "a skill"
+        changeText(change, "agentId") != null -> "a memory"
+        else -> "a shared memory"
+    }
+    return "$actor ${CHANGE_VERBS[changeText(change, "action")] ?: "changed"} $target"
 }
+
+/** The record a learned change touched: a memory's first line or a skill's name. */
+internal fun changeTitle(change: JsonObject): String {
+    val state = change["after"] as? JsonObject ?: change["before"] as? JsonObject
+    return changeText(state, "content")?.substringBefore('\n') ?: changeText(state, "name") ?: changeText(change, "targetId").orEmpty()
+}
+
+/** What a learned change did and to what, such as "Kev's review changed a skill · Triage". */
+internal fun changeLabel(change: JsonObject, botName: String?): String = "${changeSummary(change, botName)} · ${changeTitle(change)}"
 
 /** Reads the visible text of message content: a string, text parts, or a text object. */
 fun contentText(value: JsonElement?): String {
@@ -321,12 +394,17 @@ sealed class ChatRow {
     }
 
     companion object {
-        fun rows(messages: List<Message>, snapshot: ChatSnapshot?, hasMore: Boolean): List<ChatRow> {
+        fun rows(
+            messages: List<Message>,
+            snapshot: ChatSnapshot?,
+            hasMore: Boolean,
+            shown: (Message) -> Boolean = ::shownInChat,
+        ): List<ChatRow> {
             val rows = mutableListOf<ChatRow>()
             if (hasMore) rows.add(Older)
             var last: Long = 0
             for (message in messages) {
-                if (!shownInChat(message)) continue
+                if (!shown(message)) continue
                 val at = message.timestamp
                 if (at != null && at > 0) {
                     if (at - last > 30L * 60L * 1000L) {
@@ -350,12 +428,14 @@ sealed class ChatRow {
 
         /**
          * Keeps the conversation itself: owner and agent text and context events, not thinking,
-         * tool calls, or tool results.
+         * tool calls, or tool results other than decisions, jobs, and display cards.
          */
         fun shownInChat(message: Message): Boolean {
             return when (message.role) {
-                "user" -> message.text.isNotEmpty() || !message.attachments.isNullOrEmpty()
+                "user" -> (message.text.isNotEmpty() || !message.attachments.isNullOrEmpty()) && !isJobOrigin(message.origin?.kind)
                 "event" -> message.text.isNotEmpty()
+                "toolResult" -> message.botRequest != null || message.credentialRequest != null || message.loginRequest != null ||
+                    jobOf(message) != null || displayOf(message) != null || isDesktopScreenshot(message)
                 "assistant" -> {
                     val blocks = message.blocks
                     if (blocks is JsonArray) {
@@ -416,9 +496,24 @@ fun validateTask(
     cron: String,
     runAt: String,
     timezone: String = ZoneId.systemDefault().id,
+    kind: String = "prompt",
+    command: String = "",
+    timeoutSeconds: String = "600",
+    onEvent: Boolean = false,
+    eventSourceID: String = "",
 ): String? {
-    if (name.trim().isEmpty() || prompt.trim().isEmpty()) {
+    if (kind == "script") {
+        if (name.trim().isEmpty() || command.isBlank()) {
+            return "Task name and command are required."
+        }
+        if (timeoutSeconds.trim().toLongOrNull()?.takeIf { it in 1..3600 } == null) {
+            return "Timeout must be between 1 and 3600 seconds."
+        }
+    } else if (name.trim().isEmpty() || prompt.trim().isEmpty()) {
         return "Task name and prompt are required."
+    }
+    if (onEvent) {
+        return if (eventSourceID.isEmpty()) "Choose an event source." else null
     }
     if (cron.isEmpty() == runAt.isEmpty()) {
         return "Choose either a recurring cron or a one-time run time."
@@ -436,6 +531,27 @@ fun validateTask(
         return "Choose a valid date and time."
     }
     return null
+}
+
+/** Undoes one saved edit; a field someone changed since keeps its newer value. */
+internal fun Agent.undoingEdit(edit: Agent, old: Agent): Agent {
+    fun <T> undone(field: (Agent) -> T) = if (field(this) == field(edit)) field(old) else field(this)
+    return copy(
+        name = undone { it.name },
+        description = undone { it.description },
+        instructions = undone { it.instructions },
+        avatar = undone { it.avatar },
+        enabled = undone { it.enabled },
+        provider = undone { it.provider },
+        model = undone { it.model },
+        webSearchProvider = undone { it.webSearchProvider },
+        desktopModel = undone { it.desktopModel },
+        tools = undone { it.tools },
+        delegates = undone { it.delegates },
+        sharedMemory = undone { it.sharedMemory },
+        mcpServers = undone { it.mcpServers },
+        inference = undone { it.inference },
+    )
 }
 
 fun newRequestID(): String = UUID.randomUUID().toString().lowercase(Locale.ROOT)
@@ -465,10 +581,25 @@ fun messageOrder(id: String): IntArray {
 fun messageLabel(message: Message): String {
     if (message.role == "assistant") return "Agent"
     if (message.role != "user") return "Tool result"
-    if (message.origin?.kind == "task") return "Task · ${message.origin.name ?: ""}"
-    if (message.origin?.kind == "bot") return "From ${message.origin.name ?: ""}"
-    return "You"
+    return noticeTitle(message) ?: "You"
 }
+
+/** What a message the owner didn't write is collapsed under; null for the owner's own. */
+fun noticeTitle(message: Message): String? {
+    val origin = message.origin ?: return null
+    val name = origin.name.orEmpty()
+    return when (origin.kind) {
+        "task" -> "Automation · $name"
+        "event" -> "Automation · $name, event from ${origin.source ?: "a deleted source"}"
+        "script" -> "Script automation · $name"
+        "credential" -> "Credential · $name"
+        "bot" -> "From $name"
+        "bot_request" -> "Bot request"
+        else -> null
+    }
+}
+
+fun isNotice(message: Message) = message.role == "user" && noticeTitle(message) != null
 
 fun preview(text: String): String {
     var plain = text
