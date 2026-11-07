@@ -64,7 +64,7 @@ class GeneratedContractTests {
                 assertEquals(status, error.statusCode)
                 assertEquals("DELETE", error.method)
                 assertEquals("/v1/agents/a1", error.path)
-                assertEquals(if (status == 401) "Authentication failed. Check the server token in Settings." else "Invalid request: Choose a bot", friendlyError(error))
+                assertEquals(if (status == 401) "Authentication failed. Sign in again in Settings." else "Invalid request: Choose a bot", friendlyError(error))
                 assertEquals("Bearer owner", transport.requests.single().headers["Authorization"])
             }
         }

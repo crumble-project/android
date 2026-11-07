@@ -1,5 +1,18 @@
 package dev.crumble.android.ui
 
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.filled.Tune
+import androidx.activity.compose.BackHandler
+import dev.crumble.android.model.WORKSPACE_PAGES
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,19 +36,36 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Balance
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Webhook
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
@@ -54,18 +84,22 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.model.Agent
+import dev.crumble.android.model.botListLine
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.Route
+import dev.crumble.android.model.SKILLS_SHARED
 import dev.crumble.android.model.nilIfEmpty
 import dev.crumble.android.model.preview
 import kotlinx.coroutines.launch
@@ -73,48 +107,36 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CrumbleAppScreen(model: AppModel) {
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
+    val inChat = model.route is Route.AgentChat || model.route is Route.GroupChat
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet(modifier = Modifier.width(310.dp)) {
-                SidebarView(
-                    model = model,
-                    onSelectRoute = { route ->
-                        model.navigate(route)
-                        scope.launch { drawerState.close() }
-                    },
-                    onOpenSettings = {
-                        model.showingSettings = true
-                        scope.launch { drawerState.close() }
-                    },
-                    onCreateAgent = {
-                        model.createAgent()
-                        scope.launch { drawerState.close() }
-                    },
-                )
-            }
+    Scaffold(
+        containerColor = pageColor,
+        topBar = {
+            CrumbleTopBar(model = model)
         },
-    ) {
-        Scaffold(
-            topBar = {
-                CrumbleTopBar(
-                    model = model,
-                    onOpenDrawer = { scope.launch { drawerState.open() } },
-                )
-            },
-        ) { innerPadding ->
+    ) { innerPadding ->
+        // The chat sheet runs under the gesture bar, so only the top inset comes off here.
+        val top = PaddingValues(top = innerPadding.calculateTopPadding())
+        Surface(
+            color = if (inChat) sheetColor else Color.Transparent,
+            shape = if (inChat) RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp) else RectangleShape,
+            modifier = Modifier.fillMaxSize().padding(top).consumeWindowInsets(top),
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
-                    .consumeWindowInsets(innerPadding)
-                    .imePadding(),
+                    .then(
+                        if (inChat) {
+                            Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                        } else {
+                            Modifier.imePadding()
+                        },
+                    ),
             ) {
                 when (val currentRoute = model.route) {
-                    is Route.AgentChat, null -> {
+                    is Route.GroupChat -> GroupChatView(model = model)
+                    null -> HomeView(model = model)
+                    is Route.AgentChat -> {
                         val agent = model.selectedAgent
                         if (agent != null) {
                             ChatView(model = model, agent = agent)
@@ -139,6 +161,7 @@ fun CrumbleAppScreen(model: AppModel) {
         }
     }
 
+    BackHandler(enabled = inChat) { model.navigate(null) }
     model.agentDraft?.let { draft ->
         AgentEditorDialog(model = model, draft = draft)
     }
@@ -148,41 +171,94 @@ fun CrumbleAppScreen(model: AppModel) {
     model.taskDraft?.let { draft ->
         TaskFormDialog(model = model, draft = draft)
     }
+    model.eventSourceDraft?.let { draft ->
+        EventSourceDialog(model = model, draft = draft)
+    }
     model.mcpDraft?.let { draft ->
         MCPFormDialog(model = model, draft = draft)
     }
     model.skillDraft?.let { draft ->
         SkillFormDialog(model = model, draft = draft)
     }
-    if (model.showingSettings) {
-        SettingsDialog(model = model)
+    model.groupDraft?.let { draft ->
+        GroupFormDialog(model = model, draft = draft)
+    }
+    model.skillInstall?.let { form ->
+        InstallSkillsDialog(model = model, form = form)
+    }
+    model.installedSkill?.let { view ->
+        InstalledSkillDialog(model = model, view = view)
+    }
+    model.skillUpdate?.let { view ->
+        SkillUpdateDialog(model = model, view = view)
+    }
+    model.credentialForm?.let { form ->
+        CredentialFormDialog(model = model, form = form)
+    }
+    model.loginForm?.let { form ->
+        LoginFormDialog(model = model, form = form)
+    }
+    model.tokenForm?.let { form ->
+        ManagerTokenDialog(model = model, form = form)
+    }
+    model.providerKeyForm?.let { form ->
+        ProviderKeyDialog(model = model, form = form)
+    }
+    model.providerLogin?.let { view ->
+        ProviderLoginDialog(model = model, view = view)
+    }
+    model.secretUses?.let { view ->
+        SecretUsesDialog(model = model, view = view)
+    }
+    ConnectionDialogs(model)
+    if (model.showingChanges) {
+        ChangeHistoryDialog(model = model)
+    }
+    if (model.showingPalette) {
+        CommandPaletteDialog(model = model)
+    }
+    if (model.showingBotDetails) {
+        model.selectedAgent?.let { BotDetailsDialog(model = model, bot = it) }
+    }
+    if (model.showingJobs) {
+        JobListDialog(model = model)
+    }
+    model.jobPanel?.let { panel ->
+        JobPanelDialog(model = model, panel = panel)
+    }
+    model.botDesktop?.let { desktop ->
+        BotDesktopDialog(model = model, desktop = desktop)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CrumbleTopBar(
-    model: AppModel,
-    onOpenDrawer: () -> Unit,
-) {
+private fun CrumbleTopBar(model: AppModel) {
     val currentRoute = model.route
     val selectedAgent = model.selectedAgent
 
     TopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = pageColor, scrolledContainerColor = pageColor),
         navigationIcon = {
-            IconButton(onClick = onOpenDrawer) {
-                Icon(Icons.Default.Menu, contentDescription = "Open Navigation")
+            if (currentRoute != null && currentRoute != Route.Account) {
+                val parent = currentRoute.parent
+                IconButton(onClick = { model.navigate(parent) }) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = parent?.let { "Back to ${it.title.lowercase()}" } ?: "Back",
+                    )
+                }
             }
         },
         title = {
-            if ((currentRoute is Route.AgentChat || currentRoute == null) && selectedAgent != null) {
+            if (currentRoute is Route.AgentChat && selectedAgent != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     BotAvatarView(
                         agent = selectedAgent,
-                        size = 30.dp,
+                        size = 40.dp,
                         state = model.botState(selectedAgent),
                         live = true,
                     )
@@ -191,8 +267,8 @@ private fun CrumbleTopBar(
                             .heightIn(min = 48.dp)
                             .clickable(
                                 role = Role.Button,
-                                onClickLabel = "Open ${selectedAgent.name} profile",
-                                onClick = { model.openEditor() },
+                                onClickLabel = "Show details",
+                                onClick = { model.openBotDetails() },
                             ),
                         verticalArrangement = Arrangement.Center,
                     ) {
@@ -218,16 +294,50 @@ private fun CrumbleTopBar(
                         }
                     }
                 }
+            } else if (currentRoute is Route.GroupChat) {
+                GroupTitle(model = model, groupID = currentRoute.id)
+            } else if (currentRoute is Route.MessageGateway) {
+                Text(model.gateways.value?.firstOrNull { it.id == currentRoute.id }?.label ?: currentRoute.title)
             } else {
                 Text(currentRoute?.title ?: "Crumble")
             }
         },
         actions = {
             when (currentRoute) {
-                is Route.AgentChat, null -> Unit
+                null -> {
+                    IconButton(onClick = { model.showingPalette = true }) {
+                        Icon(Icons.Default.Search, contentDescription = "Search")
+                    }
+                    AccountButton(model)
+                }
+                Route.Account -> {
+                    IconButton(onClick = { model.navigate(null) }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+                is Route.AgentChat -> {
+                    if (model.jobs.isNotEmpty() || selectedAgent?.tools.orEmpty().any { it == "coding" || it == "desktop" }) {
+                        IconButton(onClick = { model.openJobList() }) {
+                            Icon(Icons.Default.Build, contentDescription = "Jobs")
+                        }
+                    }
+                    ChatMenu {
+                        item("Details") { model.openBotDetails() }
+                        item("Bot settings") { model.openEditor() }
+                    }
+                }
+                is Route.GroupChat -> {
+                    ChatMenu {
+                        item("Group settings") { model.openGroupEditor(currentRoute.id) }
+                    }
+                }
+                Route.Settings, Route.General, Route.NewChat, Route.NewGroup -> Unit
                 Route.Memory -> {
-                    IconButton(onClick = { model.openMemoryForm("", agentID = null) }) {
+                    IconButton(onClick = { model.openMemoryForm("", agentID = model.memoryScope?.takeIf { it != SKILLS_SHARED }) }) {
                         Icon(Icons.Default.Add, contentDescription = "New Shared Memory")
+                    }
+                    IconButton(onClick = { model.openChanges() }) {
+                        Icon(Icons.Default.History, contentDescription = "Change history")
                     }
                     IconButton(onClick = { model.openPanel(Route.Memory) }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh")
@@ -236,6 +346,9 @@ private fun CrumbleTopBar(
                 Route.Skills -> {
                     IconButton(onClick = { model.openSkillForm("") }) {
                         Icon(Icons.Default.Add, contentDescription = "New Shared Skill")
+                    }
+                    IconButton(onClick = { model.openChanges() }) {
+                        Icon(Icons.Default.History, contentDescription = "Change history")
                     }
                     IconButton(onClick = { model.openPanel(Route.Skills) }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh")
@@ -265,184 +378,75 @@ private fun CrumbleTopBar(
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                     }
                 }
+                Route.Avatars, Route.WebSearch, Route.JudgeModel, Route.VisionModel -> Unit
+                is Route.MessageGateway -> {
+                    IconButton(onClick = { model.loadGateways() }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                    }
+                }
+                Route.Providers, Route.PasswordManagers, Route.Coding, Route.Users, Route.MessageGateways, Route.EventRelay -> {
+                    IconButton(onClick = { model.openPanel(currentRoute) }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                    }
+                }
+                Route.Credentials -> {
+                    IconButton(onClick = { model.openCredentialForm(null) }, enabled = model.agents.isNotEmpty()) {
+                        Icon(Icons.Default.Add, contentDescription = "New credential")
+                    }
+                    IconButton(onClick = { model.openPanel(Route.Credentials) }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                    }
+                }
+                Route.Logins -> {
+                    IconButton(onClick = { model.openLoginForm(null) }, enabled = model.agents.isNotEmpty()) {
+                        Icon(Icons.Default.Add, contentDescription = "New login")
+                    }
+                    IconButton(onClick = { model.openPanel(Route.Logins) }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                    }
+                }
             }
         },
     )
 }
 
-@Composable
-private fun SidebarView(
-    model: AppModel,
-    onSelectRoute: (Route) -> Unit,
-    onOpenSettings: () -> Unit,
-    onCreateAgent: () -> Unit,
-) {
-    val workspaceItems = listOf(
-        Triple(Route.Memory, "Memory", Icons.Default.Psychology),
-        Triple(Route.Skills, "Skills", Icons.AutoMirrored.Filled.MenuBook),
-        Triple(Route.Tasks, "Tasks", Icons.Default.Schedule),
-        Triple(Route.Activity, "Activity", Icons.Default.Timeline),
-        Triple(Route.Integrations, "Integrations", Icons.Default.Extension),
-    )
-
-    Column(modifier = Modifier.fillMaxHeight()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = "Crumble",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            )
-            Row {
-                IconButton(onClick = onCreateAgent) {
-                    Icon(Icons.Default.Edit, contentDescription = "New Agent")
-                }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Default.Settings, contentDescription = "Settings")
-                }
-            }
-        }
-
-        HorizontalDivider()
-
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(vertical = 8.dp),
-        ) {
-            item {
-                Text(
-                    text = "Agents",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                )
-            }
-            if (model.agents.isEmpty()) {
-                item {
-                    Text(
-                        text = "No agents yet",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                    )
-                }
-            } else {
-                items(model.agents, key = { it.id }) { agent ->
-                    SidebarAgentRow(
-                        model = model,
-                        agent = agent,
-                        selected = model.route == Route.AgentChat(agent.id),
-                        onClick = { onSelectRoute(Route.AgentChat(agent.id)) },
-                    )
-                }
-            }
-
-            item {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                Text(
-                    text = "Workspace",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                )
-            }
-
-            items(workspaceItems, key = { it.second }) { (route, title, icon) ->
-                NavigationDrawerItem(
-                    label = { Text(title) },
-                    icon = { Icon(icon, contentDescription = null) },
-                    selected = model.route == route,
-                    onClick = { onSelectRoute(route) },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-                )
-            }
-        }
-
-        HorizontalDivider()
-        ConnectionStatus(model = model)
-    }
-}
-
-@Composable
-private fun SidebarAgentRow(
-    model: AppModel,
-    agent: Agent,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val isPending = model.pendingMutations.contains("agent:${agent.id}")
-    val bgColor = if (selected) {
-        MaterialTheme.colorScheme.secondaryContainer
-    } else {
-        Color.Transparent
-    }
-    Surface(
-        color = bgColor,
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp)
-            .clickable(enabled = !isPending, onClick = onClick),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            BotAvatarView(
-                agent = agent,
-                size = 44.dp,
-                state = model.botState(agent),
-            )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = agent.name,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (!agent.enabled) {
-                        Text(
-                            text = "Paused",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Text(
-                    text = preview(agent.lastMessage ?: "").nilIfEmpty ?: "No messages yet",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
+/** A page's icon. Chats have avatars instead. */
+fun routeIcon(route: Route): ImageVector = when (route) {
+    Route.Memory -> Icons.Default.Psychology
+    Route.Skills -> Icons.AutoMirrored.Filled.MenuBook
+    Route.Tasks -> Icons.Default.Schedule
+    Route.Activity -> Icons.Default.Timeline
+    Route.Integrations -> Icons.Default.Extension
+    Route.Avatars -> Icons.Default.Face
+    Route.Providers -> Icons.Default.Key
+    Route.PasswordManagers -> Icons.Default.Shield
+    Route.WebSearch -> Icons.Default.Language
+    Route.Credentials -> Icons.Default.Lock
+    Route.Logins -> Icons.AutoMirrored.Filled.Login
+    Route.JudgeModel -> Icons.Default.Balance
+    Route.VisionModel -> Icons.Default.Visibility
+    Route.Coding -> Icons.Default.Code
+    Route.Users -> Icons.Default.Group
+    Route.MessageGateways, is Route.MessageGateway -> Icons.AutoMirrored.Filled.Message
+    Route.EventRelay -> Icons.Default.Webhook
+    Route.Settings -> Icons.Default.Settings
+    Route.General -> Icons.Default.Tune
+    Route.Account -> Icons.Default.Person
+    Route.NewChat -> Icons.Default.Add
+    Route.NewGroup -> Icons.Default.GroupAdd
+    is Route.AgentChat, is Route.GroupChat -> Icons.AutoMirrored.Filled.Message
 }
 
 @Composable
 fun ConnectionStatus(model: AppModel) {
     val (status, color) = when {
-        model.streamStatus.isNotEmpty() -> model.streamStatus to MaterialTheme.colorScheme.error
+        model.liveStatus.isNotEmpty() -> model.liveStatus to MaterialTheme.colorScheme.error
         model.loading -> "Syncing…" to MaterialTheme.colorScheme.onSurfaceVariant
         else -> "Connected" to Color(0xFF16A34A)
     }
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(top = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -501,7 +505,7 @@ fun WelcomeView(model: AppModel) {
                     Button(onClick = { model.createAgent() }) {
                         Text("Create an Agent")
                     }
-                    Button(onClick = { model.showingSettings = true }) {
+                    Button(onClick = { model.navigate(Route.General) }) {
                         Text("Server Settings")
                     }
                 }
@@ -520,7 +524,8 @@ fun ErrorBanner(
         model.taskDraft == null &&
         model.mcpDraft == null &&
         model.skillDraft == null &&
-        !model.showingSettings
+        model.groupDraft == null &&
+        model.route != Route.General
 
     AnimatedVisibility(
         visible = model.errorText.isNotEmpty() && noSheetOpen,

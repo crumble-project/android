@@ -2,8 +2,66 @@
 
 ## Unreleased
 
+- The bot form shows the portrait with a pencil, and the avatar editor opens in a dialog instead of filling the form, as on the web.
+- Pin the bot's `6.0.0` contract as a local export and bump the generator to `1.1.0`, adding closed objects with declared properties, nullable named schemas and `allOf` parts, and `*/*` binary responses.
+- Sign in with account email and password. The server token is gone; the app stores the returned session.
+- Send provider keys as `value` and MCP tokens as `{ value }`, and show learned changes in the activity feed.
+- Approve or decline held actions, answer coding job questions, and approve or decline bot requests from the chat. Pending cards refresh every five seconds.
+- Fix the "List is empty." error when opening a chat with no messages.
+- Draw bots with Open Bot Avatar, using the avatar stored on the server, and edit avatars in the bot editor: colors, gallery, JSON import, and a generation prompt.
+- Fix saving a bot from the app removing its web, coding, desktop, and create-bots tools.
+- Fix saving a bot from the app replacing its skills and shared skills. The editor no longer submits either list.
+- Require the password when the server URL changes, so a saved session is never sent to another server.
+- Add Sign out to Settings. It unregisters notifications, ends the session on the server, and removes the session, email, and cached chats from the device.
+- Keep a draft, its attachments, and its reply target per bot across navigation. Only signing out or changing server clears them.
+- Sending a draft restored after a failed send retries with the same request ID, so a message the server already received never goes out twice. A row whose send fails after you navigate now shows Failed.
+- Load pages during unrelated saves: a read keeps only the records being changed and fetches again when a change finished while it ran.
+- Keep a form open when its record is still saving, and say so, instead of closing it and losing the edit.
+- Failed bot deletes restore unsaved profile edits, failed task and MCP saves keep the record in place, and failed bot saves keep changes confirmed in the meantime.
+- Drop late bot approvals and attachment images from a previous session.
+- Offer `@` mentions to every enabled bot when the bot can message others, like the website.
+- Add Web search, Coding, Bot desktop, and Create bots toggles for new and existing bots, a per-bot web search provider, and a desktop job provider and model. Coding and desktop show only when the server offers them or the bot already has them.
+- Draw `show` cards in bot chats: stats, tables, and charts with tap-to-read values. Show desktop screenshots and emoji reactions there too.
+- Tapping the bot's name in the chat opens its details: profile, desktop preview, and automations with on/off switches. Edit bot moved there.
+- Show "Working…" and the working avatar for every bot in the list, not only the open one. The list checks each bot's status every five seconds while it is open.
+- Attach images from a panel that opens under the composer, as in Google Messages. Other file types can't be picked for now.
+- Start new bots with memory, web search, and messaging, like the website, and remove the Schedule tasks and Code mode toggles, which every bot has anyway.
+- Build bot avatars from the `open-bot-avatar-kt` `0.1.0` tag with a Gradle source dependency instead of a submodule.
+- Follow Google Messages and Android Settings: Home is a conversation list with search and an account button at the top right, the Account page leads to Memory, Automations, Activity, and Settings, and chats have Back, a details menu, and a pill composer. Settings lists every section in grouped rows, General replaces the settings dialog, and pages use the system's card colors, tracking, and rounded fields.
+- Replace New bot on Home with New chat, which starts a chat with a bot, creates a bot, or picks bots for a group chat. Home lists group chats after the bots, with no section of their own.
+- Use the Crumble icon for the app, with a themed icon, instead of the default Android one.
+- Carry the grouped look to every page: Memory, Skills, Automations, Activity, Integrations, Credentials, Logins, the connection pages, Avatars, jobs, change history, the bot editor, bot details, the group form, and the command palette.
 - Replace the local glossary with a link to the canonical glossary in the spec repository.
 - Preserve admitted task execution fields for navigation and reject non-admitted or incomplete starts instead of reporting success.
+- Edit a bot proposal before approving it. The sheet stays open with your edits until the server confirms, and fields the editor doesn't show are kept.
+- Show coding and desktop jobs in the chat, with a job list and a job panel: live status, model and cost, step history with results, earlier activity, job questions, and a transcript download.
+- Show the pages a reply cites as source chips after it.
+- Fix the Activity row that read "Change Change"; changes now say who did what, such as "Kev's review changed a skill · Triage".
+- Add group chats: list, create, edit, and delete them from the sidebar, and chat with up to six bots at once. Includes live member status, stop, earlier messages, attachments, replies, `@` mentions, reactions, and sources. Sends and record changes apply at once and recover on failure.
+- Title group replies "Bot in Group", keep them quiet only while that group is on screen, and open the group from the notification.
+- Rework the Skills page: per-bot skills through the skill endpoints, search, owner filters, pinning, confirmed deletes, and a used-by picker in the skill form.
+- Install shared skills from GitHub, view them read-only, make editable copies, check for updates, and review an update's diff before applying it. These stay pending until the server confirms.
+- Select skills to update, delete, assign to bots, or remove from bots in bulk. Failures stay selected and each one is reported.
+- Show where each memory came from and how old it is, mark search matches, default new memories to the filtered owner, and report a failed owner's memories in its own group.
+- Add a change history to Memory and Skills, and diffs with revert to Activity. Reverts apply at once and roll back on failure.
+- Add the Avatars page: idle, working, and sleeping previews, and saving a definition to a chosen bot.
+- Add script tasks to the task form, with a command, timeout, and result notifications, for bots with coding jobs on a server with workspaces.
+- Run tasks on events: add and delete event sources in the new Event sources tab, shown once with their webhook address, and pick one in the task form. Source changes stay pending until the relay confirms.
+- Add a Runs tab that merges prompt and script runs, with script output, exit code, and duration.
+- Show task status and next run, pause and resume tasks, sort tasks by status, and hide prompt tasks that already ran. Running a script task now opens its bot's chat.
+- Add the Credentials and Logins pages: per-bot lists with search, waiting requests, edit, delete, and a 90-day use history. Plain values apply at once and roll back on failure; password manager references and 1Password items stay pending until Crumble has read them.
+- Answer `request_credential` and `request_login` in the chat with request cards that settle as saved or declined.
+- Add the Password managers page: connect 1Password or Bitwarden with a token, replace it, and disconnect. Secrets can be read from a connected manager instead of being stored in Crumble.
+- Add the Providers page: search, status, API keys from a value or a password manager, sign out, copyable commands for externally signed-in providers, and account sign-in with auth links, device codes, and prompts. Sign-in keeps running on the server when hidden. "Provider Settings…" in a failed chat now opens this page, and the bot editor links to its credentials.
+- Keep typed secrets in memory only, redacted from `toString`, and drop them after saving or when leaving the screen.
+- Add the Coding page: GitHub Apps (create, install, check, sign in as you, client secret, bots, remove), machine accounts (add, token, bots, signing key, remove), and workspace settings for admins. GitHub's pages open inside the app, and nothing reads as done until the server confirms.
+- Add the Message gateways pages: status, token, default bot, aliases, owner, direct messages, and channels. Save and Reset work on a draft that survives refreshes and failed saves.
+- Add the Event relay page: relay address, status, token, and event sources.
+- Add the Web search, Judge model, and Vision model pages, with plugin keys on the pages that need them. Choices apply at once and roll back on failure.
+- Add search, delete confirmation, connection errors, password manager tokens, and an OAuth app to Integrations.
+- Create an account from Settings, with an optional invite link or code. It reads as done only once the server confirms; if connecting fails after that, the form switches to sign-in.
+- Add the Users page for admins: change roles, remove accounts after a confirmation, create and revoke one-time invite links, and open or close sign-up. Changes apply at once and roll back on failure.
+- List workspaces still on an older image on the Coding page.
 
 - Pin the bot's `1.0.0` contract as a checksum-verified local export with committed source provenance.
 - Generate Kotlin HTTP operations and serializable wire types with repository-owned generator `1.0.0` and a pinned transport template.
@@ -14,3 +72,39 @@
 - Verify committed generated output byte-for-byte in public CI. Add explicit local/release update commands and a scheduled, self-checking update PR workflow.
 
 The bootstrap pin must switch to the immutable `contract-v1.0.0` release after bot publishes it, before merging the consumer update.
+- Add the bot desktop: a live preview with machine status and wake in Jobs, a full viewer from there or from a desktop job, and Take control and Hand back with live updates from the server. Control reads as yours only once the server confirms, and leaving hands it back. Touch gestures click and scroll, and a key row and text field type on the desktop. Rotating no longer restarts the app.
+- Remove the provider key form from Settings; the Providers page replaces it. Also remove the unused compact chat action.
+- Clear the typed password and invite code when Settings closes, and drop typed credentials when a notification leaves their page for the selected bot's chat.
+- Stop waiting for an MCP sign-in when you come back from the browser without finishing it, so the row and the other Sign In buttons work again. Finishing in the browser later still signs in.
+- Warn in Settings when the server URL is http and the host isn't local or private.
+- Exclude stored credentials from device backups and transfers.
+- Remove a deleted bot's cached chat from the device, and clear GitHub's web sign-in when the session changes. GitHub's pages have no file access.
+- Keep the password field out of the keyboard's suggestions, and mark copied invite links as sensitive.
+- Open on Home: a greeting, today's date, and every bot with its live status. Home is in the drawer, and a chat no longer opens by itself at launch.
+- Search chats, pages, settings, and themes from the drawer or Home.
+- Add Notifications to Settings: turn bot replies and their sound on or off for this device, with a link to Android's settings when notifications are blocked.
+- Pick a System, Light, or Dark theme in Settings. It applies at once, saves to your account like the website, and goes back if the save fails.
+- Show the connected server's address in Settings, with a copy button.
+- Activity filters by kind and bot, loads older pages with "Show older activity", groups rows by day, and shows readable sentences and previews instead of raw JSON.
+- Pick when a task runs with a friendly recurrence picker, date, time, and time zone pickers, and a next-run preview. Cron schedules read as worded text, and a custom cron stays available.
+- Ask before deleting a task.
+- Fix the previous server's activity staying on the page after signing out.
+- Keep drafts, open forms, the current page, and running saves when Android recreates the screen, such as on a dark mode or font size change.
+- New bots start on the first set-up provider. The editor lists only set-up providers plus the bot's current one, and needs a provider and model before saving, like the website.
+- Remove the per-bot permitted list and the Use shared memory switch, which the server ignores, and stop sending those fields.
+- Label event, script, credential, and bot request messages as the website does instead of "You", and hide job messages from the chat.
+- Only open an MCP sign-in page that is a web address.
+- Refuse an oversized attachment without reading it all, and read picked files off the main thread. Images over 32 MB are refused rather than re-encoded.
+- Show GitHub-managed credentials without Edit or Delete.
+- Send the device's time zone with bot chat messages, so bots know the owner's local time.
+- End the previous session on the server when connecting replaces it.
+- Mark the copied event source webhook address as sensitive, and keep the invite code out of keyboard suggestions.
+- Say so when a sign-in comes back after its request was lost, instead of doing nothing.
+- Stay on the open page after reconnecting from Settings instead of jumping to a chat.
+- Drop job lists that arrive after a job question's session has changed.
+- Links in bot replies open in the browser: Markdown links, bare URLs, and `<url>` autolinks. Only web links can be tapped.
+- Show Markdown tables and strikethrough in bot replies.
+- Keep bot and group text drafts across an app restart, encrypted and scoped to the server and account. Signing out or changing server deletes them. Attachments and reply targets are not saved.
+- The chat's credential request opens the same sheet as the Credentials page, where you can edit the hosts the bot proposed, read the value from a password manager, and see the warning to check them.
+- Add a Reasoning field to the bot editor. It follows the chosen model: a level the model doesn't take saves as the nearest one it does, and the field hides for models that don't reason.
+- Collapse automation, event, script, credential, bot request, and other bots' messages into notice rows, like the website. Tap one to read it.

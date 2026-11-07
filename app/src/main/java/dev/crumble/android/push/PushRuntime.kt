@@ -15,6 +15,7 @@ import com.google.firebase.FirebaseApp
 import dev.crumble.android.model.ActivityEvent
 import dev.crumble.android.model.AndroidReplyNotifier
 import dev.crumble.android.model.NotificationContext
+import dev.crumble.android.model.NotificationSettings
 import dev.crumble.android.model.ReplyNotifier
 import dev.crumble.android.model.Route
 import dev.crumble.android.network.APIClient
@@ -22,17 +23,24 @@ import dev.crumble.android.storage.AndroidKeyStoreCredentials
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** Process-wide receiver state; registration and duplicate tracking survive process death. */
 class PushRuntime private constructor(private val context: Context) : ReplyNotifier {
     val store = PushStateStore(AndroidKeyStoreCredentials(context, synchronousWrites = true))
-    private val notifier = AndroidReplyNotifier(context) { store.read().current?.identity() }
+    private val settings = NotificationSettings(AndroidKeyStoreCredentials(context))
+    private val notifier = AndroidReplyNotifier(
+        context,
+        connectionIdentity = { store.read().current?.identity() },
+        sound = { settings.sound },
+    )
     private val delivery = PushDelivery(store)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val presenceMutex = Mutex()
@@ -47,6 +55,7 @@ class PushRuntime private constructor(private val context: Context) : ReplyNotif
     }
 
     fun configure(api: APIClient) {
+        if (api.token.isEmpty()) return
         val previous = store.read().current
         if (previous != null && (previous.url != api.baseURL || previous.bearer != api.token)) {
             NotificationManagerCompat.from(context).cancelAll()
@@ -56,7 +65,28 @@ class PushRuntime private constructor(private val context: Context) : ReplyNotif
         if (FirebaseApp.getApps(context).isEmpty()) store.clearRemoteDelivery()
     }
 
-    fun notificationsEnabled(): Boolean {
+    /** Runs while the session still works, because unregistering needs it. */
+    suspend fun signedOut(api: APIClient) {
+        withContext(Dispatchers.IO) {
+            try {
+                api.unregisterPushDevice(installationId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Sign-out goes ahead when the server can't be reached.
+            }
+        }
+        store.forget(api.baseURL, api.token)
+        NotificationManagerCompat.from(context).cancelAll()
+    }
+
+    /** Whether this device should get replies: the owner wants them and Android lets them show. */
+    fun notificationsEnabled(): Boolean = settings.replies && notificationsAllowed()
+
+    val repliesWanted: Boolean
+        get() = settings.replies
+
+    fun notificationsAllowed(): Boolean {
         val channel = context.getSystemService(NotificationManager::class.java)
             .getNotificationChannel(AndroidReplyNotifier.CHANNEL_ID)
         return NotificationManagerCompat.from(context).areNotificationsEnabled() &&
@@ -120,6 +150,14 @@ class PushRuntime private constructor(private val context: Context) : ReplyNotif
             intent.getStringExtra(AndroidReplyNotifier.EXTRA_SERVER_ID),
             intent.getStringExtra(AndroidReplyNotifier.EXTRA_CONNECTION_ID),
             intent.getStringExtra(AndroidReplyNotifier.EXTRA_AGENT_ID),
+        )
+    }
+
+    fun groupFromIntent(intent: Intent): String? {
+        return store.agentForTap(
+            intent.getStringExtra(AndroidReplyNotifier.EXTRA_SERVER_ID),
+            intent.getStringExtra(AndroidReplyNotifier.EXTRA_CONNECTION_ID),
+            intent.getStringExtra(AndroidReplyNotifier.EXTRA_GROUP_ID),
         )
     }
 

@@ -8,6 +8,7 @@ import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -54,9 +55,34 @@ object AttachmentLimits {
     const val COUNT = 8
     const val IMAGE_BYTES = 5 * 1024 * 1024
     const val TEXT_BYTES = 512 * 1024
+
+    /** Larger images need re-encoding, but past this one would take too much of the app's memory to hold. */
+    const val IMAGE_SOURCE_BYTES = 32 * 1024 * 1024
     val IMAGE_TYPES: Set<String> = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
     const val IMAGE_SIDE = 2048
 }
+
+/**
+ * The website's picker, as MIME types: providers report code files under application types, video/mp2t for
+ * `.ts`, or octet-stream. `loadAttachment` turns away whatever isn't really text.
+ */
+val ATTACHMENT_PICKER_TYPES = arrayOf(
+    "image/*",
+    "text/*",
+    "application/json",
+    "application/xml",
+    "application/javascript",
+    "application/x-javascript",
+    "application/typescript",
+    "application/x-sh",
+    "application/x-shellscript",
+    "application/yaml",
+    "application/x-yaml",
+    "application/toml",
+    "application/x-ruby",
+    "video/mp2t",
+    "application/octet-stream",
+)
 
 class AttachmentError(message: String) : Exception(message)
 
@@ -106,27 +132,62 @@ fun loadAttachment(
     jpegReencoder = jpegReencoder,
 )
 
+/** Null when the stream holds more than `limit`, so a huge file never reaches memory. */
+private fun InputStream.readUpTo(limit: Int): ByteArray? {
+    val out = ByteArrayOutputStream()
+    val buffer = ByteArray(8192)
+    while (true) {
+        val count = read(buffer)
+        if (count < 0) return out.toByteArray()
+        if (out.size() + count > limit) return null
+        out.write(buffer, 0, count)
+    }
+}
+
+/** Refuses what can't be attached before reading it; a provider's declared size may be missing or wrong. */
+internal fun readAttachment(
+    name: String,
+    mimeTypeHint: String?,
+    declaredSize: Long?,
+    jpegReencoder: (ByteArray) -> ByteArray? = ::defaultJpegReencode,
+    open: () -> InputStream?,
+): PendingAttachment {
+    val ext = name.substringAfterLast('.', "").lowercase()
+    val mime = resolveMimeType(ext, mimeTypeHint)
+    val (limit, tooLarge) = when {
+        isImageMime(mime, ext) -> AttachmentLimits.IMAGE_SOURCE_BYTES to "$name is larger than 32 MB."
+        isTextMime(mime, ext) -> AttachmentLimits.TEXT_BYTES to "$name is larger than 512 KB."
+        else -> throw AttachmentError("$name can't be attached. Attach images or text files.")
+    }
+    if (declaredSize != null && declaredSize > limit) throw AttachmentError(tooLarge)
+    val bytes = try {
+        val stream = open() ?: throw AttachmentError("$name couldn't be read.")
+        stream.use { it.readUpTo(limit) } ?: throw AttachmentError(tooLarge)
+    } catch (_: OutOfMemoryError) {
+        throw AttachmentError("$name couldn't be read.")
+    }
+    return loadAttachment(name = name, mimeTypeHint = mimeTypeHint, data = bytes, jpegReencoder = jpegReencoder)
+}
+
 fun loadAttachment(
     resolver: ContentResolver,
     uri: Uri,
 ): PendingAttachment {
-    val name = queryDisplayName(resolver, uri) ?: uri.lastPathSegment?.substringAfterLast('/') ?: "attachment"
-    val mime = resolver.getType(uri)
-    val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
-        ?: throw AttachmentError("$name couldn't be read.")
-    return loadAttachment(name = name, mimeTypeHint = mime, data = bytes)
+    val (displayName, size) = queryOpenable(resolver, uri)
+    val name = displayName ?: uri.lastPathSegment?.substringAfterLast('/') ?: "attachment"
+    return readAttachment(name, resolver.getType(uri), size) { resolver.openInputStream(uri) }
 }
 
-private fun queryDisplayName(resolver: ContentResolver, uri: Uri): String? {
+private fun queryOpenable(resolver: ContentResolver, uri: Uri): Pair<String?, Long?> {
     return try {
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (idx >= 0) cursor.getString(idx) else null
-            } else null
-        }
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val name = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME).takeIf { it >= 0 }?.let(cursor::getString)
+            val size = cursor.getColumnIndex(OpenableColumns.SIZE).takeIf { it >= 0 && !cursor.isNull(it) }?.let(cursor::getLong)
+            name to size
+        } ?: (null to null)
     } catch (_: Exception) {
-        null
+        null to null
     }
 }
 
@@ -148,7 +209,7 @@ private fun resolveMimeType(ext: String, hint: String?): String {
         "json" -> "application/json"
         "xml" -> "text/xml"
         "yaml", "yml" -> "text/yaml"
-        "kt", "kts", "java", "swift", "py", "js", "ts", "tsx", "jsx", "go", "rs", "c", "cpp", "h", "sh", "sql", "toml" -> "text/plain"
+        "kt", "kts", "java", "swift", "py", "js", "ts", "tsx", "jsx", "go", "rs", "rb", "c", "cpp", "h", "sh", "sql", "toml" -> "text/plain"
         else -> {
             val fromSystem = try {
                 MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
@@ -168,7 +229,7 @@ private fun isTextMime(mime: String, ext: String): Boolean {
     if (mime.startsWith("text/") || mime == "application/json" || mime == "application/xml") return true
     return ext in setOf(
         "txt", "md", "markdown", "json", "xml", "yaml", "yml", "csv", "log", "html", "htm", "css",
-        "kt", "kts", "java", "swift", "py", "js", "ts", "tsx", "jsx", "go", "rs", "c", "cpp", "h", "sh", "sql", "toml",
+        "kt", "kts", "java", "swift", "py", "js", "ts", "tsx", "jsx", "go", "rs", "rb", "c", "cpp", "h", "sh", "sql", "toml",
     )
 }
 

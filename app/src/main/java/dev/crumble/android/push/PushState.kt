@@ -60,6 +60,17 @@ class PushStateStore(private val credentials: CredentialStore) {
         true
     }
 
+    /** Drops a signed-out session, whose bearer can never unregister again. */
+    fun forget(url: String, bearer: String) = synchronized(lock) {
+        val state = read()
+        val gone = { connection: PushConnection -> connection.url == url.trimEnd('/') && connection.bearer == bearer }
+        write(state.copy(
+            current = state.current?.takeUnless(gone),
+            retired = state.retired.filterNot(gone),
+            revision = state.revision + 1,
+        ))
+    }
+
     fun updateToken(token: String): Boolean = synchronized(lock) {
         val state = read()
         if (token.isBlank() || state.token == token) return false

@@ -5,14 +5,53 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.crumble.android.BuildConfig
+import dev.crumble.android.generated.BotAvatarDefinition
+import dev.crumble.android.generated.LearnedChange
+import dev.crumble.android.generated.MemorySource
+import dev.crumble.android.generated.ScriptRun
+import dev.crumble.android.generated.SkillPackage
+import dev.crumble.android.generated.BotRequest
+import dev.crumble.android.generated.Credential
+import dev.crumble.android.generated.CredentialRequest
+import dev.crumble.android.generated.Credentials
+import dev.crumble.android.generated.Login
+import dev.crumble.android.generated.LoginRequest
+import dev.crumble.android.generated.Logins
+import dev.crumble.android.generated.PasswordManager
+import dev.crumble.android.generated.Provider
+import dev.crumble.android.generated.ProviderLoginSession
+import dev.crumble.android.generated.Capabilities
+import dev.crumble.android.generated.GitHubAccount
+import dev.crumble.android.generated.GitHubApp
+import dev.crumble.android.generated.JudgeModel
+import dev.crumble.android.generated.JudgeModelJudgeModel
+import dev.crumble.android.generated.PluginSetting
+import dev.crumble.android.generated.PluginSettings
+import dev.crumble.android.generated.SecretStatus
+import dev.crumble.android.generated.AdminUser
+import dev.crumble.android.generated.Invite
+import dev.crumble.android.generated.ListOutdatedWorkspacesResponseWorkspacesItem
+import dev.crumble.android.generated.OptionalField
+import dev.crumble.android.generated.ServerSettings
+import dev.crumble.android.generated.UpdateServerSettingsRequest
+import dev.crumble.android.generated.VisionModel
+import dev.crumble.android.generated.VisionModelVisionModel
+import dev.crumble.android.generated.CodingJob
+import dev.crumble.android.generated.GroupChat
+import dev.crumble.android.generated.HeldAction
 import dev.crumble.android.network.APIClient
 import dev.crumble.android.network.APIError
+import dev.crumble.android.network.CHANGES_PAGE
+import dev.crumble.android.network.HttpTransport
+import dev.crumble.android.network.UrlConnectionTransport
+import dev.crumble.android.network.domain
+import dev.crumble.android.network.edited
 import dev.crumble.android.network.friendlyError
 import dev.crumble.android.network.oauthResult
 import dev.crumble.android.storage.CredentialStore
 import dev.crumble.android.storage.InMemoryCredentialStore
 import dev.crumble.android.ui.BotState
-import dev.crumble.android.ui.agentAvatarSeed
+import dev.crumble.android.ui.placeholderAvatar
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneId
@@ -26,31 +65,96 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.encodeToJsonElement
+
+/** The website's sidebar pages, reached from the account menu. Everything else lives under Settings. */
+val WORKSPACE_PAGES: List<Route> get() = listOf(Route.Memory, Route.Tasks, Route.Activity)
+
+/** The website's settings sections, grouped the way Android's Settings groups its rows. */
+val SETTINGS_GROUPS: List<List<Route>> get() = listOf(
+    listOf(Route.General),
+    listOf(Route.Providers, Route.JudgeModel, Route.VisionModel, Route.WebSearch),
+    listOf(Route.Credentials, Route.Logins, Route.PasswordManagers),
+    listOf(Route.Integrations, Route.Coding, Route.MessageGateways, Route.EventRelay),
+    listOf(Route.Skills, Route.Avatars, Route.Users),
+)
+
+val SETTINGS_PAGES: List<Route> get() = SETTINGS_GROUPS.flatten()
 
 sealed class Route {
     data class AgentChat(val id: String) : Route()
+    data class GroupChat(val id: String) : Route()
     data object Memory : Route()
     data object Skills : Route()
     data object Tasks : Route()
     data object Activity : Route()
     data object Integrations : Route()
+    data object Avatars : Route()
+    data object Providers : Route()
+    data object PasswordManagers : Route()
+    data object Credentials : Route()
+    data object Logins : Route()
+    data object WebSearch : Route()
+    data object JudgeModel : Route()
+    data object VisionModel : Route()
+    data object Coding : Route()
+    data object Users : Route()
+    data object MessageGateways : Route()
+    data class MessageGateway(val id: String) : Route()
+    data object EventRelay : Route()
+    data object Settings : Route()
+    data object General : Route()
+    data object Account : Route()
+    data object NewChat : Route()
+    data object NewGroup : Route()
+
+    /** Where Back leads. Null is Home. */
+    val parent: Route?
+        get() = when {
+            this in SETTINGS_PAGES -> Settings
+            this in WORKSPACE_PAGES || this == Settings -> Account
+            this is MessageGateway -> MessageGateways
+            this == NewGroup -> NewChat
+            else -> null
+        }
 
     val title: String
         get() = when (this) {
             is AgentChat -> "Chat"
+            is GroupChat -> "Group chat"
             Memory -> "Memory"
             Skills -> "Skills"
-            Tasks -> "Tasks"
+            Tasks -> "Automations"
             Activity -> "Activity"
             Integrations -> "Integrations"
+            Avatars -> "Avatars"
+            Providers -> "Providers"
+            PasswordManagers -> "Password managers"
+            Credentials -> "Credentials"
+            Logins -> "Logins"
+            WebSearch -> "Web search"
+            JudgeModel -> "Judge model"
+            VisionModel -> "Vision model"
+            Coding -> "Coding"
+            Users -> "Users"
+            MessageGateways -> "Message gateways"
+            is MessageGateway -> "Message gateway"
+            EventRelay -> "Event relay"
+            Settings -> "Settings"
+            General -> "General"
+            Account -> "Account"
+            NewChat -> "New chat"
+            NewGroup -> "New group chat"
         }
 }
 
@@ -61,32 +165,32 @@ data class AgentDraft(
     var name: String = "",
     var description: String = "",
     var enabled: Boolean = true,
-    var provider: String = "melious",
+    var provider: String = "",
     var model: String = "",
     var instructions: String = "You are a thoughtful, capable personal assistant.",
-    var avatar: String = "bot:${newRequestID()}",
-    var avatarChoices: List<String> = emptyList(),
+    var avatar: BotAvatarDefinition? = null,
     var thinking: String = "off",
     var temperature: String = "",
     var maxOutput: String = "",
     var toolsMemory: Boolean = true,
     var toolsDelegate: Boolean = false,
-    var toolsSchedule: Boolean = false,
-    var toolsCodemode: Boolean = false,
-    var sharedMemory: Boolean = false,
-    var delegates: Set<String> = emptySet(),
     var mcpServers: Set<String> = emptySet(),
     var skills: List<Skill> = emptyList(),
     var sharedSkills: Set<String> = emptySet(),
+    /** The bot request this draft edits; saving approves the request with the edits. */
+    val botRequestID: String? = null,
+    /** Tools the proposal asks for beyond the toggles every draft has. */
+    var otherTools: Set<String> = emptySet(),
+    /** Null follows the account's default. */
+    var webSearchProvider: String? = null,
+    /** Empty follows the bot's own provider and model. */
+    var desktopProvider: String = "",
+    var desktopModel: String = "",
+    /** What the bot had when the editor opened; a granted tool stays visible when the server stops offering it. */
+    val initialTools: Set<String> = emptySet(),
 ) {
-    /** Offers new bots to pick from, keeping the current one first. */
-    fun withShuffledAvatars(): AgentDraft {
-        val choices = mutableListOf(agentAvatarSeed(Agent(id = agentID, avatar = avatar)))
-        while (choices.size < 7) {
-            choices.add(newRequestID())
-        }
-        return copy(avatarChoices = choices)
-    }
+    val chosenDesktopModel: ModelChoice?
+        get() = desktopModel.trim().nilIfEmpty?.takeIf { desktopProvider.isNotEmpty() }?.let { ModelChoice(desktopProvider, it) }
 }
 
 data class MemoryDraft(
@@ -104,6 +208,16 @@ data class SkillDraft(
     var agentID: String? = null,
     var name: String = "",
     var instructions: String = "",
+    /** Bots that use a shared skill. */
+    var usedBy: Set<String> = emptySet(),
+)
+
+/** The Avatars page: a definition being tried, and the bot it saves to, if any. */
+data class AvatarPage(
+    val botID: String = "",
+    val value: BotAvatarDefinition = placeholderAvatar("crumble"),
+    val saving: Boolean = false,
+    val saved: Boolean = false,
 )
 
 data class TaskDraft(
@@ -112,7 +226,15 @@ data class TaskDraft(
     var agentID: String,
     var name: String = "",
     var prompt: String = "",
+    var kind: String = "prompt",
+    var command: String = "",
+    var timeoutSeconds: String = "600",
+    var notify: Boolean = true,
+    var onEvent: Boolean = false,
+    var eventSourceID: String = "",
     var repeats: Boolean = false,
+    /** The owner chose Custom, so a cron that happens to fit a preset stays in the raw field. */
+    var customCron: Boolean = false,
     var cron: String = "0 9 * * *",
     var runDate: Instant = Instant.now().plusSeconds(3600).truncatedTo(ChronoUnit.MINUTES),
     var timezone: String = ZoneId.systemDefault().id,
@@ -126,8 +248,12 @@ data class MCPDraft(
     var agentID: String? = null,
     var name: String = "",
     var url: String = "",
-    var token: String = "",
+    var token: SecretDraft = SecretDraft(),
     var enabled: Boolean = true,
+    var clientID: String = "",
+    var clientSecret: SecretDraft = SecretDraft(),
+    /** A changed password manager reference is read before anything is saved, so the sheet waits for it. */
+    var saving: Boolean = false,
 )
 
 private fun defaultAppScope(): CoroutineScope {
@@ -141,6 +267,30 @@ private fun defaultAppScope(): CoroutineScope {
     return CoroutineScope(SupervisorJob() + dispatcher)
 }
 
+private const val DECISION_POLL_MS = 5_000L
+private const val BOT_STATUS_POLL_MS = 5_000L
+private const val PROVIDER_LOGIN_POLL_MS = 1_000L
+private const val JOB_REFRESH_MS = 3_000L
+private const val IDLE_JOB_REFRESH_MS = 15_000L
+private const val DESKTOP_STATUS_MS = 10_000L
+private const val DESKTOP_HAND_BACK_ATTEMPTS = 3
+private const val JOB_PAGE_SIZE = 100
+private const val JOB_TRANSCRIPT_PAGE_SIZE = 200
+private const val GROUP_PAGE_SIZE = 100
+private const val RECENT_CHAT_PREFIX = "recent-chat:"
+private const val COMPOSER_DRAFT_PREFIX = "composer-draft:"
+private const val DRAFT_SAVE_DELAY_MS = 500L
+private const val THEME_KEY = "theme"
+private val DRAFT_TOOLS = setOf("memory", "delegate")
+private const val STILL_SAVING = "That change is still saving. Try again in a moment."
+private const val BOT_RECORD = "agent:"
+private const val GROUP_RECORD = "group:"
+private const val MEMORY_RECORD = "memory:"
+private const val SCHEDULE_RECORD = "schedule:"
+private const val MCP_RECORD = "mcp:"
+private const val SKILL_RECORD = "skill:"
+private const val BOT_SKILL_RECORD = "agent-skill:"
+
 /**
  * The app's state and the actions that change it. Network work runs in coroutines on the model's
  * scope; results from a replaced connection or a previous agent are dropped.
@@ -153,14 +303,55 @@ class AppModel(
     private val scope: CoroutineScope = defaultAppScope(),
     environment: Map<String, String> = emptyMap(),
     loadCredentials: Boolean = client == null,
+    private val transport: HttpTransport = UrlConnectionTransport,
+    private val onSignOut: suspend (APIClient) -> Unit = {},
+    private val onSessionReset: () -> Unit = {},
+    private val onNotificationsChanged: () -> Unit = {},
 ) {
     var serverURL by mutableStateOf("http://127.0.0.1:7337")
     var token by mutableStateOf("")
+    var email by mutableStateOf("")
+    var heldActions by mutableStateOf<List<HeldAction>>(emptyList())
+    var codingJobs by mutableStateOf<List<CodingJob>>(emptyList())
+    var botRequests by mutableStateOf<List<BotRequest>>(emptyList())
+    var decisionsLoaded by mutableStateOf(false)
+    var decisionsFailed by mutableStateOf(false)
+    var decidingIDs by mutableStateOf<Set<String>>(emptySet())
+    var decisionErrors by mutableStateOf<Map<String, String>>(emptyMap())
+    private var decisionsJob: Job? = null
+    private var decisionsKey = ""
+    var jobs by mutableStateOf<List<JobSummary>>(emptyList())
+    var jobsLoaded by mutableStateOf(false)
+    var jobsFailed by mutableStateOf(false)
+    var showingJobs by mutableStateOf(false)
+    var showingBotDetails by mutableStateOf(false)
+    /** Bots the last status check found running; the selected bot's stream is fresher while it is open. */
+    var workingBots by mutableStateOf<Set<String>>(emptySet())
+    var jobPanel by mutableStateOf<JobPanel?>(null)
+    private var jobsFollow: Job? = null
+    private var chatJobsLoad: Job? = null
+    private var chatJobsKey = ""
+    private var jobPanelVersion = 0
+    var botDesktop by mutableStateOf<BotDesktop?>(null)
+        private set
+    var desktopPreview by mutableStateOf<DesktopPreview?>(null)
+        private set
+    private var desktopAPI: APIClient? = null
+    private var desktopFollow: Job? = null
+    private var desktopTake: Job? = null
+    private var desktopVersion = 0
+    private var desktopPreviewPoll: Job? = null
+    private var desktopPreviewVersion = 0
+    private var desktopPreviewLink = 0
+    var password by mutableStateOf("")
     var client: APIClient? by mutableStateOf(client)
         private set
     private var generation = 0
+    var signingOut by mutableStateOf(false)
+        private set
 
     var agents by mutableStateOf<List<Agent>>(emptyList())
+    /** Null is home, the bot overview. */
     var route by mutableStateOf<Route?>(null)
     var selectedAgentID by mutableStateOf("")
         private set
@@ -168,13 +359,15 @@ class AppModel(
     private var awaitingInitialSnapshot = false
     private val recentChats = mutableMapOf<String, ChatSnapshot>()
 
-    private fun cacheKey(id: String): String {
+    /** Names the server and account, so what one session stored never reaches another. */
+    private fun sessionDigest(): String {
         val api = client
         val identity = "${api?.baseURL}\n${api?.token}"
-        val digest = MessageDigest.getInstance("SHA-256")
+        return MessageDigest.getInstance("SHA-256")
             .digest(identity.toByteArray()).joinToString("") { "%02x".format(it) }
-        return "recent-chat:$digest:$id"
     }
+
+    private fun cacheKey(id: String) = "$RECENT_CHAT_PREFIX${sessionDigest()}:$id"
 
     private fun cachedChat(id: String): ChatSnapshot? {
         val key = cacheKey(id)
@@ -183,13 +376,19 @@ class AppModel(
         }.getOrNull()?.also { recentChats[key] = it }
     }
 
+    private fun forgetCachedChat(id: String) {
+        val key = cacheKey(id)
+        recentChats.remove(key)
+        credentials.delete(key)
+    }
+
     /** Keep only recent confirmed rows; uploads and transient run state are never persisted here. */
     private fun cacheRecentChat() {
         if (selectedAgentID.isEmpty()) return
         val confirmed = messages.filter { it.deliveryState == MessageDeliveryState.confirmed }
         val tail = confirmed.takeLast(5)
         // Keep an entry intact so the history cursor cannot skip another row from that entry.
-        val boundary = tail.first().entryId
+        val boundary = tail.firstOrNull()?.entryId
         val retained = if (boundary == null) tail else confirmed.dropWhile { it.entryId != boundary }
         val cached = ChatSnapshot(
             agentId = selectedAgentID,
@@ -210,14 +409,62 @@ class AppModel(
     var loadingOlder by mutableStateOf(false)
     var expanded by mutableStateOf<Set<String>>(emptySet())
 
-    var draft by mutableStateOf("")
+    private var composerText by mutableStateOf("")
+
+    /** The selected bot's text. Assigning it saves it, so nothing that changes the selection may write it. */
+    var draft: String
+        get() = composerText
+        set(value) {
+            if (value == composerText) return
+            composerText = value
+            saveDraft(botDraft(selectedAgentID), value)
+        }
     var attachments by mutableStateOf<List<PendingAttachment>>(emptyList())
     var replyTo by mutableStateOf<Message?>(null)
-    var sending by mutableStateOf(false)
-    private var draftRequestID = ""
-    private var failedDraft = ""
-    private var failedReplyTo = ""
-    private var failedAttachments = emptyList<UUID>()
+
+    /** The other bots' composers; the selected bot's lives in `draft`, `attachments`, and `replyTo`. */
+    private val parkedComposers = mutableMapOf<String, ChatComposer>()
+
+    /** Text waiting to reach the store, by key; empty means delete. Attachments and reply targets are never stored. */
+    private val unsavedDrafts = mutableMapOf<String, String>()
+    private var draftSave: Job? = null
+
+    private fun botDraft(id: String) = composerDraftKey("bot", id)
+
+    private fun groupDraftKey(id: String) = composerDraftKey("group", id)
+
+    private fun composerDraftKey(kind: String, id: String): String? =
+        if (id.isEmpty() || client?.token.isNullOrEmpty()) null else "$COMPOSER_DRAFT_PREFIX${sessionDigest()}:$kind:$id"
+
+    // Encrypting on every keystroke would slow typing, so the store sees the text once it settles.
+    private fun saveDraft(key: String?, text: String) {
+        unsavedDrafts[key ?: return] = text
+        draftSave?.cancel()
+        draftSave = scope.launch {
+            delay(DRAFT_SAVE_DELAY_MS)
+            saveDrafts()
+        }
+    }
+
+    /** Runs when the app leaves the screen too, because the system may end the process without warning. */
+    fun saveDrafts() {
+        draftSave?.cancel()
+        for ((key, text) in unsavedDrafts) {
+            runCatching { if (text.isEmpty()) credentials.delete(key) else credentials.write(key, text) }
+        }
+        unsavedDrafts.clear()
+    }
+
+    private fun savedDraft(key: String?): String {
+        if (key == null) return ""
+        return unsavedDrafts[key] ?: runCatching { credentials.read(key) }.getOrNull().orEmpty()
+    }
+
+    private fun forgetDrafts() {
+        draftSave?.cancel()
+        unsavedDrafts.clear()
+        credentials.deletePrefixed(COMPOSER_DRAFT_PREFIX)
+    }
 
     private data class PendingSend(
         val content: String,
@@ -235,6 +482,21 @@ class AppModel(
     private val pendingSends = mutableMapOf<String, MutableMap<String, PendingSend>>()
     private val pendingPreviews = mutableMapOf<String, PendingPreview>()
 
+    var groupChats by mutableStateOf<List<GroupChat>>(emptyList())
+    var groupsFailed by mutableStateOf(false)
+    var groupConversation by mutableStateOf<GroupConversation?>(null)
+        private set
+    var groupDraft by mutableStateOf<GroupDraft?>(null)
+
+    /** Drafts and unconfirmed messages stay with their group while the owner is elsewhere. */
+    var groupComposers by mutableStateOf<Map<String, ChatComposer>>(emptyMap())
+        private set
+    var groupOutgoing by mutableStateOf<Map<String, List<Message>>>(emptyMap())
+        private set
+    private val groupSends = mutableMapOf<String, PendingSend>()
+    private var groupStream: Job? = null
+    private var groupVersion = 0
+
     /** Sent image bytes, keyed by "entryId/index"; they never change once sent. */
     var attachmentBytes by mutableStateOf<Map<String, ByteArray>>(emptyMap())
         private set
@@ -244,6 +506,12 @@ class AppModel(
         private set
     var mutationRevision = 0
         private set
+
+    /** What each pending mutation changes, as "kind:id"; a read keeps these records as they are here. */
+    private val activeRecords = mutableMapOf<String, Set<String>>()
+
+    /** The revision each record's last mutation settled at, so a read can tell it started too early. */
+    private val settledRecords = mutableMapOf<String, Int>()
     var loading by mutableStateOf(false)
     var errorText by mutableStateOf("")
     var notice by mutableStateOf("")
@@ -256,27 +524,144 @@ class AppModel(
     var agentMemories by mutableStateOf<Map<String, List<Memory>>>(emptyMap())
     private var memoryLoadVersion = 0
     var sharedMemories by mutableStateOf<List<Memory>>(emptyList())
+    /** Why an owner's memories didn't load, by bot ID, or SKILLS_SHARED for shared memory. */
+    var memoryErrors by mutableStateOf<Map<String, String>>(emptyMap())
+    /** Null shows every owner; otherwise SKILLS_SHARED or a bot's ID. */
+    var memoryScope by mutableStateOf<String?>(null)
     var sharedSkills by mutableStateOf<List<SharedSkill>>(emptyList())
+    var agentSkills by mutableStateOf<Map<String, List<SkillPackage>>>(emptyMap())
+    var agentSkillErrors by mutableStateOf<Map<String, String>>(emptyMap())
+    var selectedSkills by mutableStateOf<Set<String>>(emptySet())
+    var bulkReport by mutableStateOf<List<BulkMessage>>(emptyList())
+    var checkingSkillUpdates by mutableStateOf(false)
+        private set
+    var skillCheckFailures by mutableStateOf<List<String>>(emptyList())
+    var skillInstall by mutableStateOf<SkillInstallForm?>(null)
+    private var skillBrowseVersion = 0
+    var installedSkill by mutableStateOf<InstalledSkillView?>(null)
+    var skillUpdate by mutableStateOf<SkillUpdateView?>(null)
+    var changes by mutableStateOf<List<LearnedChange>>(emptyList())
+    var showingChanges by mutableStateOf(false)
+    var changesLoading by mutableStateOf(false)
+        private set
+    var changesHasMore by mutableStateOf(false)
+        private set
+    var changesError by mutableStateOf("")
+    private var changesVersion = 0
+    var avatarPage by mutableStateOf(AvatarPage())
     var schedules by mutableStateOf<List<Schedule>>(emptyList())
+    var schedulesLoaded by mutableStateOf(false)
+    var schedulesError by mutableStateOf("")
     var executions by mutableStateOf<List<Execution>>(emptyList())
-    var activities by mutableStateOf<List<ActivityRecord>>(emptyList())
+    var scriptRuns by mutableStateOf<Map<String, List<ScriptRun>>>(emptyMap())
+    var taskRunsLoading by mutableStateOf(false)
+    var taskRunsError by mutableStateOf("")
+    private var taskRunsVersion = 0
+    var taskTab by mutableStateOf(TaskTab.Tasks)
+        private set
+    var capabilities by mutableStateOf<Capabilities?>(null)
+    var eventSources by mutableStateOf<List<EventSource>>(emptyList())
+    var eventSourcesLoaded by mutableStateOf(false)
+    var eventSourcesError by mutableStateOf("")
+    private var eventSourcesVersion = 0
+    var deletingEventSources by mutableStateOf<Set<String>>(emptySet())
+    var eventSourceErrors by mutableStateOf<Map<String, String>>(emptyMap())
+    var activityFeed by mutableStateOf(ActivityFeedState())
+    val activities: List<ActivityRecord>
+        get() = activityFeed.items
+    private var activityLoadVersion = 0
     var mcpServers by mutableStateOf<List<MCPServer>>(emptyList())
     var providers by mutableStateOf<List<ProviderStatus>>(emptyList())
     var models by mutableStateOf<List<ModelSummary>>(emptyList())
+    var desktopModels by mutableStateOf<List<ModelSummary>>(emptyList())
 
     var agentDraft by mutableStateOf<AgentDraft?>(null)
     var memoryDraft by mutableStateOf<MemoryDraft?>(null)
     var taskDraft by mutableStateOf<TaskDraft?>(null)
+    var eventSourceDraft by mutableStateOf<EventSourceDraft?>(null)
     var mcpDraft by mutableStateOf<MCPDraft?>(null)
     var skillDraft by mutableStateOf<SkillDraft?>(null)
-    var showingSettings by mutableStateOf(false)
+    var showingPalette by mutableStateOf(false)
+    var theme by mutableStateOf(ThemeChoice.of(credentials.read(THEME_KEY)) ?: ThemeChoice.System)
+        private set
+    private var accountTheme = theme
+    private var themeSaving = false
+    private var themeChanges = 0
+    private val notificationSettings = NotificationSettings(credentials)
+    var replyNotifications by mutableStateOf(notificationSettings.replies)
+        private set
+    var notificationSound by mutableStateOf(notificationSettings.sound)
+        private set
+    /** Android's own verdict, reported by the activity. */
+    var notificationsAllowed by mutableStateOf(true)
+    var botCredentials by mutableStateOf<Map<String, Credentials>>(emptyMap())
+    var botLogins by mutableStateOf<Map<String, Logins>>(emptyMap())
+    var credentialLoadErrors by mutableStateOf<Map<String, String>>(emptyMap())
+    var loginLoadErrors by mutableStateOf<Map<String, String>>(emptyMap())
+    var credentialScope by mutableStateOf(SKILLS_ALL)
+    var loginScope by mutableStateOf(SKILLS_ALL)
+    var credentialForm by mutableStateOf<CredentialForm?>(null)
+    var loginForm by mutableStateOf<LoginForm?>(null)
+    var secretUses by mutableStateOf<SecretUsesView?>(null)
+    var freshSecretRequests by mutableStateOf<Set<String>>(emptySet())
+    var passwordManagers by mutableStateOf<List<PasswordManager>>(emptyList())
+    var passwordManagersLoaded by mutableStateOf(false)
+    var passwordManagersError by mutableStateOf("")
+    var tokenForm by mutableStateOf<ManagerTokenForm?>(null)
+    var providerAccounts by mutableStateOf<List<Provider>>(emptyList())
+    var providerKeyForm by mutableStateOf<ProviderKeyForm?>(null)
+    var providerLogin by mutableStateOf<ProviderLoginView?>(null)
+
+    /** How one kind of bot-owned secret is read, stored, and changed; credentials and logins behave alike. */
+    private class SecretOps<D>(
+        val kind: String,
+        val read: suspend (APIClient, String) -> D,
+        val delete: suspend (APIClient, String, String) -> Unit,
+        val decline: suspend (APIClient, String, String) -> Unit,
+        val withoutItem: (D, String) -> D,
+        val withoutRequest: (D, String) -> D,
+        val restored: (D, D, String) -> D,
+        val lists: () -> Map<String, D>,
+        val store: (Map<String, D>) -> Unit,
+        val failures: (Map<String, String>) -> Unit,
+    )
+
+    private val credentialOps = SecretOps(
+        kind = "credential",
+        read = { api, id -> api.credentials(id) },
+        delete = { api, id, name -> api.deleteCredential(id, name) },
+        decline = { api, id, name -> api.declineCredential(id, name) },
+        withoutItem = { list, name -> list.copy(credentials = list.credentials.filterNot { it.name == name }) },
+        withoutRequest = { list, name -> list.copy(requests = list.requests.filterNot { it.name == name }) },
+        restored = { list, before, name -> list.restored(before, name) },
+        lists = { botCredentials },
+        store = { botCredentials = it },
+        failures = { credentialLoadErrors = it },
+    )
+
+    private val loginOps = SecretOps(
+        kind = "login",
+        read = { api, id -> api.logins(id) },
+        delete = { api, id, name -> api.deleteLogin(id, name) },
+        decline = { api, id, name -> api.declineLogin(id, name) },
+        withoutItem = { list, name -> list.copy(logins = list.logins.filterNot { it.name == name }) },
+        withoutRequest = { list, name -> list.copy(requests = list.requests.filterNot { it.name == name }) },
+        restored = { list, before, name -> list.restored(before, name) },
+        lists = { botLogins },
+        store = { botLogins = it },
+        failures = { loginLoadErrors = it },
+    )
+
+    private val secretRevisions = mutableMapOf<String, Int>()
+    private var providerLoginJob: Job? = null
+    private var providerLoginReads = 0
 
     /** The MCP server whose sign-in flow is currently active. */
     var signingIn by mutableStateOf<String?>(null)
+    // Outlives the spinner: the owner can glance at the app and still finish in the browser.
+    private var browserSignIn: String? = null
     var confirmingDelete by mutableStateOf(false)
 
-    var provider by mutableStateOf("melious")
-    var providerKey by mutableStateOf("")
 
     var appActive: Boolean = true
 
@@ -286,6 +671,7 @@ class AppModel(
             if (!savedUrl.isNullOrEmpty()) serverURL = savedUrl
             val savedToken = credentials.read("server-token")
             if (savedToken != null) token = savedToken
+            credentials.read("account-email")?.let { email = it }
         }
         val envUrl = environment["CRUMBLE_URL"]?.trim()
         if (!envUrl.isNullOrEmpty()) {
@@ -300,13 +686,45 @@ class AppModel(
         }
     }
 
+    /** The live stream the sidebar reports: the open group chat's, or else the bot chat's. */
+    val liveStatus: String
+        get() = groupConversation?.streamStatus ?: streamStatus
+
     val selectedAgent: Agent?
         get() = agents.firstOrNull { it.id == selectedAgentID }
 
     fun botState(agent: Agent): BotState {
         if (!agent.enabled) return BotState.sleeping
-        if (agent.id == selectedAgentID && snapshot?.isRunning == true) return BotState.working
-        return BotState.idle
+        return if (isWorking(agent.id)) BotState.working else BotState.idle
+    }
+
+    /** No server event announces a turn, so bots without an open stream come from `refreshBotStatuses`. */
+    fun isWorking(agentID: String): Boolean {
+        val live = snapshot?.takeIf { agentID == selectedAgentID && route !is Route.GroupChat }
+        return live?.isRunning ?: (agentID in workingBots)
+    }
+
+    /** Reads every bot's status. A failed read keeps what was known rather than calling the bot idle. */
+    suspend fun refreshBotStatuses() {
+        val api = client ?: return
+        val gen = generation
+        val ids = agents.filter { it.enabled && !it.id.startsWith("pending:") }.map { it.id }
+        val results = coroutineScope {
+            ids.map { id -> async { id to attempt { api.chat(id, limit = 1) } } }.awaitAll()
+        }
+        if (generation != gen) return
+        val running = results.mapNotNull { (id, result) -> result.getOrNull()?.let { id to it.isRunning } }.toMap()
+        val known = agents.mapTo(HashSet()) { it.id }
+        workingBots = (workingBots.filterTo(HashSet()) { running[it] != false } + running.filterValues { it }.keys)
+            .filterTo(HashSet()) { it in known }
+    }
+
+    /** Keeps statuses fresh for as long as the caller shows the bot list. */
+    suspend fun followBotStatuses() {
+        while (currentCoroutineContext().isActive) {
+            if (appActive) refreshBotStatuses()
+            delay(BOT_STATUS_POLL_MS)
+        }
     }
 
     // MARK: Requests
@@ -347,6 +765,9 @@ class AppModel(
         key: String,
         update: () -> Unit,
         rollback: () -> Unit,
+        fail: (String) -> Unit = { errorText = it },
+        touches: Set<String> = emptySet(),
+        onBusy: () -> Unit = { errorText = STILL_SAVING },
         work: suspend (APIClient) -> (() -> Unit)?,
     ) {
         val currentClient = client
@@ -354,8 +775,12 @@ class AppModel(
             errorText = "Connect to your server in Settings."
             return
         }
-        if (pendingMutations.contains(key)) return
+        if (pendingMutations.contains(key)) {
+            onBusy()
+            return
+        }
         pendingMutations = pendingMutations + key
+        activeRecords[key] = touches + key
         val gen = generation
         mutationRevision += 1
         update()
@@ -366,21 +791,43 @@ class AppModel(
             try {
                 val confirm = work(currentClient)
                 if (generation != gen) return@launch
-                pendingMutations = pendingMutations - key
-                mutationRevision += 1
+                settleMutation(key)
                 finishRequest()
                 confirm?.invoke()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
                 if (generation != gen) return@launch
-                pendingMutations = pendingMutations - key
-                mutationRevision += 1
+                settleMutation(key)
                 finishRequest()
                 rollback()
-                errorText = friendlyError(e)
+                fail(friendlyError(e))
             }
         }
+    }
+
+    private fun settleMutation(key: String) {
+        pendingMutations = pendingMutations - key
+        mutationRevision += 1
+        activeRecords.remove(key).orEmpty().forEach { settledRecords[it] = mutationRevision }
+    }
+
+    /** Whether a read from `revision` may predate a change that finished, so it must fetch again. */
+    private fun settledSince(revision: Int, vararg kinds: String): Boolean =
+        settledRecords.any { (record, at) -> at > revision && kinds.any(record::startsWith) }
+
+    /** The server's list, with records that have a mutation on its way kept as they are here. */
+    private fun <T> withLocalChanges(loaded: List<T>, local: List<T>, kind: String, idOf: (T) -> String): List<T> {
+        val changing = activeRecords.values.flatten().filter { it.startsWith(kind) }.map { it.removePrefix(kind) }.toSet()
+        if (changing.isEmpty()) return loaded
+        val mine = local.associateBy(idOf)
+        val known = loaded.mapTo(HashSet(), idOf)
+        return loaded.mapNotNull { if (idOf(it) in changing) mine[idOf(it)] else it } +
+            local.filter { idOf(it) in changing && idOf(it) !in known }
+    }
+
+    private fun applyBots(loaded: List<Agent>) {
+        agents = withLocalChanges(loaded, agents, BOT_RECORD, Agent::id)
     }
 
     fun showNotice(text: String) {
@@ -394,48 +841,89 @@ class AppModel(
     // MARK: Agents and chat
 
     fun refresh() {
+        loadAccount()
+        loadGroupChats()
+        loadBotList()
+    }
+
+    private fun loadBotList() {
         val revision = mutationRevision
         request { api ->
-            val loadedAgents = api.agents()
+            val loaded = api.agents()
             return@request {
-                if (mutationRevision == revision && pendingMutations.isEmpty()) {
-                    agents = loadedAgents
+                if (settledSince(revision, BOT_RECORD)) {
+                    loadBotList()
+                } else {
+                    applyBots(loaded)
                     var chosen = selectedAgentID
-                    if (loadedAgents.none { it.id == chosen }) {
-                        chosen = loadedAgents.firstOrNull()?.id ?: ""
+                    if (agents.none { it.id == chosen }) {
+                        chosen = agents.firstOrNull { !it.id.startsWith("pending:") }?.id ?: ""
                     }
-                    if (chosen.isEmpty()) {
+                    val inConversation = route is Route.AgentChat || route is Route.GroupChat
+                    if (chosen.isEmpty() || (!inConversation && chosen != selectedAgentID)) {
                         cancelStream()
-                        selectedAgentID = ""
+                        switchComposer(chosen)
+                        selectedAgentID = chosen
                         snapshot = null
                         messages = emptyList()
-                    } else {
+                    } else if (route is Route.AgentChat) {
                         selectAgent(chosen)
                     }
+                    // A reconnect emptied the open page, and its reads may need the bots that just arrived.
+                    route?.takeUnless { inConversation }?.let(::openPanel)
                 }
             }
         }
     }
 
     fun navigate(to: Route?) {
-        if (to == null) return
         when (to) {
+            null -> openHome()
             is Route.AgentChat -> {
                 if (to.id != selectedAgentID || route != to) {
                     selectAgent(to.id)
                 }
             }
+            is Route.GroupChat -> if (route != to) openGroupChat(to.id)
             else -> openPanel(to)
         }
     }
 
+    /** Parks what the owner is writing to the selected bot and picks up what they left with `id`. */
+    private fun switchComposer(id: String) {
+        if (id == selectedAgentID) return
+        val current = ChatComposer(draft, attachments, replyTo)
+        if (current != ChatComposer()) parkedComposers[selectedAgentID] = current
+        val next = parkedComposers.remove(id) ?: ChatComposer(draft = savedDraft(botDraft(id)))
+        composerText = next.draft
+        attachments = next.attachments
+        replyTo = next.replyTo
+    }
+
     /** Opens the bot's one continuous chat and follows its event stream. */
     fun selectAgent(id: String) {
-        cancelStream()
+        if (route != Route.AgentChat(id)) clearSecretDrafts()
+        if (id != selectedAgentID) showingBotDetails = false
+        closeGroupChat()
+        stopChat()
+        // A refresh reselects the same bot, which must not take the desktop away from its owner.
+        if (botDesktop?.agentID != id) closeBotDesktop()
         selectionVersion += 1
         val version = selectionVersion
+        switchComposer(id)
         selectedAgentID = id
         route = Route.AgentChat(id)
+        heldActions = emptyList()
+        codingJobs = emptyList()
+        botRequests = emptyList()
+        decisionsLoaded = false
+        decisionsFailed = false
+        decisionErrors = emptyMap()
+        freshSecretRequests = emptySet()
+        jobs = emptyList()
+        jobsLoaded = false
+        jobsFailed = false
+        if (agentDraft?.botRequestID != null) agentDraft = null
         val cached = cachedChat(id)
         snapshot = cached?.copy(messages = null)
         messages = cached?.messages.orEmpty() + pendingMessages[id].orEmpty()
@@ -443,14 +931,6 @@ class AppModel(
         oldestEntryID = cached?.oldestEntryId ?: ""
         awaitingInitialSnapshot = true
         loadingOlder = false
-        replyTo = null
-        draft = ""
-        attachments = emptyList()
-        failedDraft = ""
-        failedReplyTo = ""
-        failedAttachments = emptyList()
-        sending = false
-        draftRequestID = ""
         // A stream begins with a fresh snapshot. Reopening a cached chat needs no extra GET.
         if (cached != null) {
             client?.let { api -> streamJob = scope.launch { streamChat(api, id, version) } }
@@ -472,6 +952,11 @@ class AppModel(
         val incomingMessages = incoming.messages ?: emptyList()
         val acknowledged = incomingMessages.mapNotNull { it.requestId }.toSet()
         if (acknowledged.isNotEmpty()) {
+            // A send that only looked failed arrived after all, so its restored draft must not go out again.
+            val restored = pendingMessages[selectedAgentID].orEmpty()
+                .filter { it.deliveryState == MessageDeliveryState.failed && it.requestId in acknowledged }
+                .mapNotNull { pendingSends[selectedAgentID]?.get(it.requestId) }
+            if (restored.any(::composerHolds)) clearComposer()
             pendingMessages[selectedAgentID]?.removeAll { acknowledged.contains(it.requestId ?: "") }
             for (reqId in acknowledged) {
                 pendingSends[selectedAgentID]?.remove(reqId)
@@ -496,12 +981,526 @@ class AppModel(
         messages = confirmed + local
         snapshot = incoming.copy(messages = null)
         cacheRecentChat()
+        followDecisions()
+        refreshChatJobs()
     }
 
     fun cancelStream() {
+        stopChat()
+        closeBotDesktop()
+    }
+
+    private fun stopChat() {
+        snapshot?.let { workingBots = if (it.isRunning) workingBots + selectedAgentID else workingBots - selectedAgentID }
         streamJob?.cancel()
         streamJob = null
         streamStatus = ""
+        decisionsJob?.cancel()
+        decisionsKey = ""
+        closeJobs()
+    }
+
+    private fun hasPendingDecision(): Boolean =
+        messages.any { message ->
+            message.heldAction?.let { ref -> heldActions.any { it.id == ref.id && it.status == "pending" } } == true ||
+                message.jobQuestion?.let { ref -> codingJobs.any { it.question?.id == ref.id } } == true ||
+                message.botRequest?.let { ref -> botRequests.any { it.id == ref.id && it.status == "pending" } } == true ||
+                message.credentialRequest?.let { ref -> botCredentials[selectedAgentID]?.requests?.any { ref.answers(it.name, it.requestedAt) } } == true ||
+                message.loginRequest?.let { ref -> botLogins[selectedAgentID]?.requests?.any { ref.answers(it.name, it.requestedAt) } } == true
+        }
+
+    private fun secretRefs() = messages.flatMap {
+        listOfNotNull(it.credentialRequest?.let(::credentialReadKey), it.loginRequest?.let(::loginReadKey))
+    }
+
+    private suspend fun loadDecisions(api: APIClient, agentID: String) {
+        try {
+            val held = if (messages.any { it.heldAction != null }) api.heldActions(agentID) else emptyList()
+            val jobs = if (messages.any { it.jobQuestion != null }) api.codingJobs(agentID) else emptyList()
+            val requests = if (messages.any { it.botRequest != null }) api.botRequests(agentID) else emptyList()
+            val asked = secretRefs().toSet()
+            val credentialMark = secretMark("credential", agentID)
+            val loginMark = secretMark("login", agentID)
+            val credentialList = if (messages.any { it.credentialRequest != null }) api.credentials(agentID) else null
+            val loginList = if (messages.any { it.loginRequest != null }) api.logins(agentID) else null
+            if (selectedAgentID != agentID) return
+            heldActions = held
+            codingJobs = jobs
+            botRequests = requests
+            if (credentialList != null && secretSettled("credential", agentID, credentialMark)) botCredentials = botCredentials + (agentID to credentialList)
+            if (loginList != null && secretSettled("login", agentID, loginMark)) botLogins = botLogins + (agentID to loginList)
+            freshSecretRequests = asked
+            val editing = agentDraft?.botRequestID
+            if (editing != null && requests.none { it.id == editing && it.status == "pending" }) agentDraft = null
+            decisionsLoaded = true
+            decisionsFailed = false
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            if (selectedAgentID == agentID) decisionsFailed = true
+        }
+    }
+
+    // Another client, a stopped job, or a restart can settle a decision, so keep reading while one waits.
+    private fun followDecisions() {
+        val refs = messages.flatMap { listOfNotNull(it.heldAction?.id, it.jobQuestion?.id, it.botRequest?.id) } + secretRefs()
+        val key = selectedAgentID + "\n" + refs.joinToString("\n")
+        val api = client
+        if (refs.isEmpty() || key == decisionsKey || api == null) return
+        val agentID = selectedAgentID
+        decisionsKey = key
+        decisionsJob?.cancel()
+        decisionsJob = scope.launch {
+            do {
+                loadDecisions(api, agentID)
+                if (decisionsFailed || hasPendingDecision()) delay(DECISION_POLL_MS)
+            } while (isActive && (decisionsFailed || hasPendingDecision()))
+        }
+    }
+
+    private fun decide(id: String, work: suspend (APIClient, String) -> (() -> Unit)?) {
+        val api = client ?: return
+        if (id in decidingIDs) return
+        val agentID = selectedAgentID
+        val gen = generation
+        decidingIDs = decidingIDs + id
+        decisionErrors = decisionErrors - id
+        scope.launch {
+            try {
+                val confirm = work(api, agentID)
+                if (generation == gen) confirm?.invoke()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (generation == gen) decisionErrors = decisionErrors + (id to friendlyError(e))
+            } finally {
+                decidingIDs = decidingIDs - id
+            }
+            if (generation == gen) loadDecisions(api, agentID)
+        }
+    }
+
+    fun decideHeldAction(id: String, approve: Boolean, reason: String = "") = decide(id) { api, agentID ->
+        if (approve) api.approveHeldAction(agentID, id) else api.declineHeldAction(agentID, id, reason.trim())
+        null
+    }
+
+    fun answerJobQuestion(job: String, questionID: String, text: String) {
+        val gen = generation
+        decide(questionID) { api, agentID ->
+            api.answerCodingJob(agentID, job, questionID, text)
+            if (jobPanel != null) loadJobs(api, agentID, gen)
+            null
+        }
+    }
+
+    fun decideBotRequest(id: String, approve: Boolean) = decide(id) { api, agentID ->
+        if (approve) {
+            val created = api.approveBotRequest(agentID, id)
+            return@decide { addCreatedBot(created) }
+        }
+        api.declineBotRequest(agentID, id)
+        null
+    }
+
+    private fun addCreatedBot(created: Agent) {
+        if (agents.none { it.id == created.id }) agents = agents + created
+    }
+
+    /** Opens the bot editor on a pending request's proposal; its save button approves the edits. */
+    fun openBotRequestEditor(id: String) {
+        val request = botRequests.firstOrNull { it.id == id && it.status == "pending" } ?: return
+        val proposal = request.proposal
+        val tools = proposal.tools.orEmpty()
+        val draft = AgentDraft(
+            isNew = true,
+            agentID = "",
+            name = proposal.name,
+            description = proposal.description.orEmpty(),
+            enabled = proposal.enabled ?: true,
+            provider = proposal.provider.orEmpty(),
+            model = proposal.model.orEmpty(),
+            instructions = proposal.instructions.orEmpty(),
+            avatar = proposal.avatar.domain(),
+            thinking = proposal.inference?.thinkingLevel ?: "off",
+            temperature = proposal.inference?.temperature?.toString().orEmpty(),
+            maxOutput = proposal.inference?.maxOutputTokens?.toString().orEmpty(),
+            toolsMemory = "memory" in tools,
+            toolsDelegate = "delegate" in tools,
+            mcpServers = proposal.mcpServers.orEmpty().toSet(),
+            skills = proposal.skills.orEmpty().map { Skill(name = it.name, instructions = it.instructions) },
+            sharedSkills = proposal.sharedSkills.orEmpty().toSet(),
+            botRequestID = id,
+            otherTools = tools.toSet() - DRAFT_TOOLS,
+            webSearchProvider = proposal.webSearchProvider,
+            desktopProvider = proposal.desktopModel?.provider.orEmpty(),
+            desktopModel = proposal.desktopModel?.model.orEmpty(),
+            initialTools = tools.toSet(),
+        )
+        errorText = ""
+        decisionErrors = decisionErrors - id
+        agentDraft = draft
+        loadEditorData(draft.provider)
+    }
+
+    private fun approveEditedBotRequest(id: String, draft: AgentDraft, input: Agent) {
+        val request = botRequests.firstOrNull { it.id == id } ?: return
+        decide(id) { api, agentID ->
+            val created = api.approveBotRequest(agentID, id, request.proposal.edited(input))
+            return@decide {
+                addCreatedBot(created)
+                if (agentDraft?.id == draft.id) agentDraft = null
+            }
+        }
+    }
+
+    // MARK: Jobs
+
+    private suspend fun loadJobs(api: APIClient, agentID: String, gen: Int = generation) {
+        fun current() = generation == gen && selectedAgentID == agentID
+        try {
+            val loaded = coroutineScope {
+                val coding = async { api.jobs(agentID, JobKind.coding) }
+                val desktop = async { api.jobs(agentID, JobKind.desktop) }
+                coding.await() + desktop.await()
+            }
+            if (!current()) return
+            jobs = loaded
+            jobsLoaded = true
+            jobsFailed = false
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            if (current()) jobsFailed = true
+        }
+    }
+
+    // A job card's status only changes when a job message arrives; the panel follows progress itself.
+    private fun refreshChatJobs() {
+        val api = client ?: return
+        val count = messages.count { jobOf(it) != null || isJobOrigin(it.origin?.kind) }
+        val key = "$selectedAgentID\n$count"
+        if (messages.none { jobOf(it) != null } || key == chatJobsKey) return
+        val agentID = selectedAgentID
+        chatJobsKey = key
+        chatJobsLoad?.cancel()
+        chatJobsLoad = scope.launch { loadJobs(api, agentID) }
+    }
+
+    private suspend fun loadJobHistory(api: APIClient, agentID: String, job: JobRef, version: Int) {
+        try {
+            val page = api.jobHistory(agentID, job, before = null, limit = JOB_PAGE_SIZE)
+            val panel = jobPanel?.takeIf { jobPanelVersion == version } ?: return
+            jobPanel = panel.copy(
+                messages = mergeJobPages(panel.messages, page.messages.orEmpty()),
+                hasMore = if (panel.loaded) panel.hasMore else page.hasMore == true,
+                oldestEntryID = if (panel.loaded) panel.oldestEntryID else page.oldestEntryId,
+                loaded = true,
+                failed = false,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            jobPanel = jobPanel?.takeIf { jobPanelVersion == version }?.copy(failed = true) ?: jobPanel
+        }
+    }
+
+    private fun followJobs() {
+        val api = client ?: return
+        val agentID = selectedAgentID
+        jobsFollow?.cancel()
+        jobsFollow = scope.launch {
+            var seenStatus: String? = null
+            while (isActive) {
+                loadJobs(api, agentID)
+                val panel = jobPanel
+                val status = panel?.let { open -> jobs.firstOrNull { it.ref == open.job }?.status }
+                if (panel != null && (!panel.loaded || panel.failed || jobWorking(status) || status != seenStatus)) {
+                    loadJobHistory(api, agentID, panel.job, jobPanelVersion)
+                }
+                seenStatus = status
+                val watched = if (panel != null) jobWorking(status) else jobs.any { jobWorking(it.status) }
+                delay(if (watched) JOB_REFRESH_MS else IDLE_JOB_REFRESH_MS)
+            }
+        }
+    }
+
+    fun openBotDetails() {
+        showingBotDetails = true
+        schedulesError = ""
+        loadSchedules()
+        loadEventSources()
+    }
+
+    fun openJobList() {
+        showingJobs = true
+        followJobs()
+    }
+
+    fun closeJobList() {
+        showingJobs = false
+        if (jobPanel == null) jobsFollow?.cancel()
+    }
+
+    fun openJob(job: JobRef) {
+        jobPanelVersion += 1
+        jobPanel = JobPanel(job.copy(status = null))
+        followJobs()
+    }
+
+    fun closeJob() {
+        jobPanelVersion += 1
+        jobPanel = null
+        if (!showingJobs) jobsFollow?.cancel()
+    }
+
+    fun retryJobHistory() = followJobs()
+
+    private fun closeJobs() {
+        jobsFollow?.cancel()
+        chatJobsLoad?.cancel()
+        chatJobsKey = ""
+        jobPanelVersion += 1
+        jobPanel = null
+        showingJobs = false
+    }
+
+    fun loadEarlierJobActivity() {
+        val panel = jobPanel ?: return
+        val api = client ?: return
+        val before = panel.oldestEntryID ?: return
+        if (panel.loadingEarlier) return
+        val agentID = selectedAgentID
+        val version = jobPanelVersion
+        jobPanel = panel.copy(loadingEarlier = true)
+        scope.launch {
+            try {
+                val page = api.jobHistory(agentID, panel.job, before, JOB_PAGE_SIZE)
+                val current = jobPanel?.takeIf { jobPanelVersion == version } ?: return@launch
+                val known = current.messages.map { it.id }.toSet()
+                jobPanel = current.copy(
+                    messages = page.messages.orEmpty().filterNot { it.id in known } + current.messages,
+                    hasMore = page.hasMore == true,
+                    oldestEntryID = page.oldestEntryId,
+                    loadingEarlier = false,
+                    failed = false,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                jobPanel = jobPanel?.takeIf { jobPanelVersion == version }?.copy(loadingEarlier = false, failed = true) ?: jobPanel
+            }
+        }
+    }
+
+    /** Reads every page of the open job's transcript, then hands its Markdown to `write`. */
+    fun downloadJobTranscript(write: suspend (String) -> Unit) {
+        val panel = jobPanel ?: return
+        val api = client ?: return
+        if (panel.downloading) return
+        val agentID = selectedAgentID
+        val version = jobPanelVersion
+        jobPanel = panel.copy(downloading = true, downloadFailed = false)
+        scope.launch {
+            val failed = try {
+                val pages = mutableListOf<List<Message>>()
+                var before: String? = null
+                do {
+                    val page = api.jobHistory(agentID, panel.job, before, JOB_TRANSCRIPT_PAGE_SIZE)
+                    pages.add(page.messages.orEmpty())
+                    before = page.oldestEntryId.takeIf { page.hasMore == true }
+                } while (before != null)
+                write(jobMarkdown(panel.job, pages.asReversed().flatten()))
+                false
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                true
+            }
+            jobPanel = jobPanel?.takeIf { jobPanelVersion == version }?.copy(downloading = false, downloadFailed = failed) ?: jobPanel
+        }
+    }
+
+    fun openBotDesktop(agentID: String = selectedAgentID) {
+        val api = client ?: return
+        if (agentID.isEmpty() || botDesktop?.agentID == agentID) return
+        closeBotDesktop()
+        desktopVersion += 1
+        val version = desktopVersion
+        desktopAPI = api
+        botDesktop = BotDesktop(agentID)
+        desktopFollow = scope.launch { followDesktopControl(api, agentID, version) }
+        reconnectDesktopViewer()
+        syncDesktopPreview()
+    }
+
+    fun reconnectDesktopViewer() {
+        val desktop = botDesktop ?: return
+        val api = desktopAPI ?: return
+        if (desktop.viewer.connecting) return
+        val version = desktopVersion
+        fun finish(link: DesktopLink) {
+            if (version == desktopVersion) botDesktop = botDesktop?.copy(viewer = link)
+        }
+        finish(DesktopLink(connecting = true))
+        scope.launch {
+            try {
+                finish(DesktopLink(api.desktopViewerURL(api.createDesktopViewer(desktop.agentID))))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                finish(DesktopLink(error = friendlyError(e)))
+            }
+        }
+    }
+
+    /** Taking control pauses the bot's desktop job, so it reads as done only once the server confirms. */
+    fun setDesktopHolder(holder: String) {
+        val desktop = botDesktop ?: return
+        val api = desktopAPI ?: return
+        if (desktop.control == null || desktop.taking != null) return
+        val version = desktopVersion
+        botDesktop = desktop.copy(taking = holder, takeError = "")
+        desktopTake = scope.launch {
+            try {
+                val control = api.setDesktopHolder(desktop.agentID, holder)
+                if (version == desktopVersion) {
+                    botDesktop = botDesktop?.let { it.copy(control = newerControl(it.control, control), taking = null) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                if (version == desktopVersion) botDesktop = botDesktop?.copy(taking = null, takeError = friendlyError(e))
+            }
+        }
+    }
+
+    /** The viewer's connection ended or its page failed; the link is spent. */
+    fun desktopViewerLost(url: String) {
+        botDesktop?.takeIf { it.viewer.url == url }?.let { botDesktop = it.copy(viewer = DesktopLink(error = DESKTOP_UNAVAILABLE)) }
+        desktopPreview?.takeIf { it.viewer.url == url }?.let { desktopPreview = it.copy(viewer = DesktopLink(error = DESKTOP_UNAVAILABLE)) }
+    }
+
+    /** Leaving hands control back so the bot's job can continue. `leaving` must outlive the screen. */
+    fun closeBotDesktop(leaving: CoroutineScope = scope) {
+        val desktop = botDesktop ?: return
+        val api = desktopAPI
+        desktopVersion += 1
+        botDesktop = null
+        desktopAPI = null
+        desktopFollow?.cancel()
+        desktopFollow = null
+        val take = desktopTake
+        desktopTake = null
+        if (api != null && (desktop.owner || desktop.taking == DESKTOP_OWNER)) {
+            leaving.launch {
+                // A take still in flight must land first, or it would leave the owner holding a closed desktop.
+                take?.join()
+                handBackDesktop(api, desktop.agentID)
+            }
+        }
+        syncDesktopPreview()
+    }
+
+    private suspend fun handBackDesktop(api: APIClient, agentID: String) {
+        repeat(DESKTOP_HAND_BACK_ATTEMPTS) { attempt ->
+            try {
+                api.setDesktopHolder(agentID, DESKTOP_BOT)
+                return
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                if (attempt < DESKTOP_HAND_BACK_ATTEMPTS - 1) delay(1_000L shl attempt)
+            }
+        }
+        errorText = DESKTOP_HAND_BACK_FAILED
+    }
+
+    private suspend fun followDesktopControl(api: APIClient, agentID: String, version: Int) {
+        var backoffMs = 500L
+        while (scope.isActive) {
+            try {
+                api.desktopEvents(agentID) { control ->
+                    if (version != desktopVersion) return@desktopEvents
+                    backoffMs = 500L
+                    botDesktop = botDesktop?.let { it.copy(control = newerControl(it.control, control)) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                if (e is APIError && e.statusCode == 401) {
+                    if (version == desktopVersion) botDesktop = botDesktop?.copy(takeError = friendlyError(e))
+                    return
+                }
+            }
+            delay(backoffMs)
+            backoffMs = minOf(backoffMs * 2, 8_000L)
+        }
+    }
+
+    /** Machine state has no live event, so the preview polls it while it is on screen. */
+    fun watchDesktopPreview(agentID: String) {
+        val api = client ?: return
+        if (desktopPreview?.agentID == agentID) return
+        stopDesktopPreview()
+        val version = desktopPreviewVersion
+        desktopPreview = DesktopPreview(agentID)
+        desktopPreviewPoll = scope.launch {
+            while (isActive) {
+                val running = try {
+                    api.desktopRunning(agentID)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    desktopPreview?.running ?: false
+                }
+                if (version != desktopPreviewVersion) return@launch
+                desktopPreview = desktopPreview?.copy(running = running)
+                syncDesktopPreview()
+                delay(DESKTOP_STATUS_MS)
+            }
+        }
+    }
+
+    fun stopDesktopPreview() {
+        desktopPreviewVersion += 1
+        desktopPreviewLink += 1
+        desktopPreviewPoll?.cancel()
+        desktopPreviewPoll = null
+        desktopPreview = null
+    }
+
+    fun wakeDesktop() {
+        desktopPreview = desktopPreview?.copy(asked = true)
+        syncDesktopPreview()
+    }
+
+    /** Until asked, the link only watches: it neither boots the machine nor keeps it awake. */
+    private fun syncDesktopPreview() {
+        val preview = desktopPreview ?: return
+        val api = client ?: return
+        if (!preview.awake || botDesktop != null) {
+            if (!preview.viewer.idle) {
+                desktopPreviewLink += 1
+                desktopPreview = preview.copy(viewer = DesktopLink())
+            }
+            return
+        }
+        if (!preview.viewer.idle) return
+        val version = desktopPreviewLink
+        fun finish(link: DesktopLink) {
+            if (version == desktopPreviewLink) desktopPreview = desktopPreview?.copy(viewer = link)
+        }
+        finish(DesktopLink(connecting = true))
+        scope.launch {
+            try {
+                finish(DesktopLink(api.desktopViewerURL(api.createDesktopViewer(preview.agentID, passive = !preview.asked))))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                finish(DesktopLink(error = friendlyError(e)))
+            }
+        }
     }
 
     private suspend fun streamChat(api: APIClient, id: String, version: Int) {
@@ -550,6 +1549,8 @@ class AppModel(
                 }
                 delay(backoffMs)
                 backoffMs = minOf(backoffMs * 2, 8_000L)
+                // Groups may have changed while the stream was down.
+                if (generation == gen) loadGroupChats()
             }
         }
     }
@@ -592,21 +1593,22 @@ class AppModel(
     }
 
     fun sendMessage() {
-        val currentClient = client ?: return
-        if (snapshot == null) return
+        if (client == null || snapshot == null) return
         val content = draft.trim()
         val files = attachments
         if (content.isEmpty() && files.isEmpty()) return
         val id = selectedAgentID
         val reply = replyTo?.entryId ?: ""
-        draftRequestID = newRequestID()
-        val requestID = draftRequestID
-        failedDraft = content
-        failedReplyTo = reply
-        failedAttachments = files.map { it.id }
-        sending = true
-        draft = ""
-        attachments = emptyList()
+        val failed = pendingMessages[id].orEmpty().firstOrNull { message ->
+            val record = pendingSends[id]?.get(message.requestId)
+            message.deliveryState == MessageDeliveryState.failed && record != null && composerHolds(record) &&
+                (reply.isEmpty() || reply == record.replyTo)
+        }
+        if (failed != null) {
+            redeliver(failed, restoreDraft = true)
+            return
+        }
+        val requestID = newRequestID()
         val optimistic = Message(
             id = "local:$requestID",
             role = "user",
@@ -625,12 +1627,10 @@ class AppModel(
             requestId = requestID,
             deliveryState = MessageDeliveryState.sending,
         )
+        clearComposer()
         pendingMessages.getOrPut(id) { mutableListOf() }.add(optimistic)
-        pendingSends.getOrPut(id) { mutableMapOf() }[requestID] = PendingSend(
-            content = content,
-            replyTo = reply,
-            attachments = files,
-        )
+        val record = PendingSend(content = content, replyTo = reply, attachments = files)
+        pendingSends.getOrPut(id) { mutableMapOf() }[requestID] = record
         val previewText = content.nilIfEmpty ?: files.firstOrNull()?.let { "Attachment: ${it.name}" } ?: ""
         pendingPreviews[id] = PendingPreview(requestID = requestID, text = previewText)
         val agentIndex = agents.indexOfFirst { it.id == id }
@@ -639,91 +1639,50 @@ class AppModel(
             updated[agentIndex] = updated[agentIndex].copy(lastMessage = previewText)
             agents = updated
         }
-        if (selectedAgentID == id) {
-            messages = messages + optimistic
-        }
-        replyTo = null
-        val gen = generation
-        val version = selectionVersion
-        scope.launch {
-            try {
-                currentClient.sendChatMessage(
-                    agentID = id,
-                    content = content,
-                    requestID = requestID,
-                    replyTo = reply,
-                    attachments = files.map { it.outgoing },
-                )
-                if (generation != gen) return@launch
-                if (pendingPreviews[id]?.requestID == requestID) {
-                    pendingPreviews.remove(id)
-                }
-                if (selectionVersion == version && selectedAgentID == id) {
-                    sending = false
-                    draftRequestID = ""
-                    failedDraft = ""
-                    failedReplyTo = ""
-                    failedAttachments = emptyList()
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                if (generation != gen) return@launch
-                if (selectionVersion == version && selectedAgentID == id) {
-                    sending = false
-                }
-                val list = pendingMessages[id]
-                if (list == null || list.none { it.requestId == requestID }) return@launch
-                if (selectionVersion == version && selectedAgentID == id) {
-                    errorText = "Message was not confirmed: ${friendlyError(e)}"
-                }
-                val idx = list.indexOfFirst { it.requestId == requestID }
-                if (idx >= 0) {
-                    list[idx] = list[idx].copy(deliveryState = MessageDeliveryState.failed)
-                    if (pendingPreviews[id]?.requestID == requestID) {
-                        pendingPreviews.remove(id)
-                    }
-                    if (selectionVersion == version && selectedAgentID == id) {
-                        messages = messages.map { msg ->
-                            if (msg.requestId == requestID) msg.copy(deliveryState = MessageDeliveryState.failed) else msg
-                        }
-                    }
-                }
-                if (selectionVersion == version && selectedAgentID == id) {
-                    if (draft.isEmpty() && attachments.isEmpty()) {
-                        draft = content
-                        attachments = files
-                    }
-                }
-            }
-        }
+        messages = messages + optimistic
+        deliverMessage(id, requestID, record, restoreDraft = true)
     }
 
     /** Re-sends a failed optimistic row with its original idempotency key and attachments. */
-    fun retryMessage(message: Message) {
-        val currentClient = client ?: return
-        val requestID = message.requestId ?: return
-        if (message.deliveryState != MessageDeliveryState.failed) return
-        val record = pendingSends[selectedAgentID]?.get(requestID) ?: return
-        val list = pendingMessages[selectedAgentID] ?: return
-        val idx = list.indexOfFirst { it.requestId == requestID }
-        if (idx < 0) return
+    fun retryMessage(message: Message) = redeliver(message, restoreDraft = false)
 
-        list[idx] = list[idx].copy(deliveryState = MessageDeliveryState.sending)
-        messages = messages.map { msg ->
-            if (msg.requestId == requestID) msg.copy(deliveryState = MessageDeliveryState.sending) else msg
-        }
-        if (draft == record.content && attachments.map { it.id } == record.attachments.map { it.id }) {
-            draft = ""
-            attachments = emptyList()
-        }
-        sending = true
+    private fun redeliver(message: Message, restoreDraft: Boolean) {
+        val requestID = message.requestId ?: return
+        if (client == null || message.deliveryState != MessageDeliveryState.failed) return
         val id = selectedAgentID
+        val record = pendingSends[id]?.get(requestID) ?: return
+        if (!markMessage(id, requestID, MessageDeliveryState.sending)) return
+        if (composerHolds(record)) clearComposer()
+        deliverMessage(id, requestID, record, restoreDraft)
+    }
+
+    private fun composerHolds(record: PendingSend) =
+        draft.trim() == record.content && attachments.map { it.id } == record.attachments.map { it.id }
+
+    private fun clearComposer() {
+        draft = ""
+        attachments = emptyList()
+        replyTo = null
+    }
+
+    /** Sets a row's state wherever it is shown; false once a snapshot has already confirmed it. */
+    private fun markMessage(id: String, requestID: String, state: MessageDeliveryState): Boolean {
+        val list = pendingMessages[id] ?: return false
+        val index = list.indexOfFirst { it.requestId == requestID }
+        if (index < 0) return false
+        list[index] = list[index].copy(deliveryState = state)
+        if (selectedAgentID == id) {
+            messages = messages.map { if (it.requestId == requestID) it.copy(deliveryState = state) else it }
+        }
+        return true
+    }
+
+    private fun deliverMessage(id: String, requestID: String, record: PendingSend, restoreDraft: Boolean) {
+        val api = client ?: return
         val gen = generation
-        val version = selectionVersion
         scope.launch {
             try {
-                currentClient.sendChatMessage(
+                api.sendChatMessage(
                     agentID = id,
                     content = record.content,
                     requestID = requestID,
@@ -731,37 +1690,30 @@ class AppModel(
                     attachments = record.attachments.map { it.outgoing },
                 )
                 if (generation != gen) return@launch
-                if (pendingPreviews[id]?.requestID == requestID) {
-                    pendingPreviews.remove(id)
-                }
-                if (selectionVersion == version && selectedAgentID == id) {
-                    sending = false
-                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                if (generation != gen) return@launch
-                if (selectionVersion == version && selectedAgentID == id) {
-                    sending = false
-                }
-                val currentList = pendingMessages[id]
-                if (currentList == null || currentList.none { it.requestId == requestID }) return@launch
-                if (selectionVersion == version && selectedAgentID == id) {
-                    errorText = "Message was not confirmed: ${friendlyError(e)}"
-                }
-                val failIdx = currentList.indexOfFirst { it.requestId == requestID }
-                if (failIdx >= 0) {
-                    currentList[failIdx] = currentList[failIdx].copy(deliveryState = MessageDeliveryState.failed)
-                    if (pendingPreviews[id]?.requestID == requestID) {
-                        pendingPreviews.remove(id)
-                    }
-                    if (selectionVersion == version && selectedAgentID == id) {
-                        messages = messages.map { msg ->
-                            if (msg.requestId == requestID) msg.copy(deliveryState = MessageDeliveryState.failed) else msg
-                        }
-                    }
-                }
+                if (generation != gen || !markMessage(id, requestID, MessageDeliveryState.failed)) return@launch
+                if (selectedAgentID == id) errorText = "Message was not confirmed: ${friendlyError(e)}"
+                if (restoreDraft) restoreComposer(id, record)
             }
+            if (pendingPreviews[id]?.requestID == requestID) pendingPreviews.remove(id)
+        }
+    }
+
+    /** Text the owner wrote since sending is never overwritten; the failed row still holds the message. */
+    private fun restoreComposer(id: String, record: PendingSend) {
+        if (selectedAgentID == id) {
+            if (draft.isEmpty() && attachments.isEmpty()) {
+                draft = record.content
+                attachments = record.attachments
+            }
+            return
+        }
+        val parked = parkedComposers[id] ?: ChatComposer()
+        if (parked.draft.isEmpty() && parked.attachments.isEmpty()) {
+            parkedComposers[id] = parked.copy(draft = record.content, attachments = record.attachments)
+            saveDraft(botDraft(id), record.content)
         }
     }
 
@@ -794,9 +1746,10 @@ class AppModel(
         val currentClient = client ?: return
         if (entryID.startsWith("local:")) return
         val agent = selectedAgentID
+        val gen = generation
         try {
             val bytes = currentClient.attachment(agent, entryID = entryID, index = index)
-            if (bytes.isNotEmpty()) {
+            if (bytes.isNotEmpty() && generation == gen) {
                 attachmentBytes = attachmentBytes + (key to bytes)
             }
         } catch (_: Throwable) {
@@ -808,10 +1761,8 @@ class AppModel(
         pendingSends.clear()
         pendingPreviews.clear()
         messages = emptyList()
-        draftRequestID = ""
-        failedDraft = ""
-        failedReplyTo = ""
-        failedAttachments = emptyList()
+        parkedComposers.clear()
+        clearComposer()
     }
 
     fun abortChat() {
@@ -820,6 +1771,7 @@ class AppModel(
             key = "abort:$id",
             update = { showNotice("Stopping…") },
             rollback = {},
+            onBusy = {},
             work = { api ->
                 api.abortChat(id)
                 null
@@ -827,15 +1779,380 @@ class AppModel(
         )
     }
 
-    fun compactChat() {
-        val id = selectedAgentID
+    // MARK: Group chats
+
+    /** Reads the sidebar's list. A failure keeps the rows already shown. */
+    fun loadGroupChats() {
+        val api = client ?: return
+        val gen = generation
+        val revision = mutationRevision
+        scope.launch {
+            try {
+                val loaded = api.groupChats()
+                if (generation != gen) return@launch
+                groupsFailed = false
+                if (settledSince(revision, GROUP_RECORD)) loadGroupChats()
+                else groupChats = withLocalChanges(loaded, groupChats, GROUP_RECORD, GroupChat::id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                if (generation == gen) groupsFailed = true
+            }
+        }
+    }
+
+    /** Opens a group chat and follows its event stream. */
+    fun openGroupChat(id: String) {
+        if (id.startsWith("pending:")) return
+        closeGroupChat()
+        clearSecretDrafts()
+        route = Route.GroupChat(id)
+        if (id !in groupComposers) {
+            savedDraft(groupDraftKey(id)).nilIfEmpty?.let { groupComposers = groupComposers + (id to ChatComposer(draft = it)) }
+        }
+        val api = client ?: return
+        val version = groupVersion
+        groupConversation = GroupConversation(id)
+        groupStream = scope.launch {
+            try {
+                val snapshot = api.groupSnapshot(id)
+                if (groupVersion == version) applyGroupSnapshot(snapshot)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (groupVersion != version) return@launch
+                if (e is APIError && e.statusCode == 404) return@launch groupGone(id)
+                updateConversation(id) { it.copy(loadError = friendlyError(e)) }
+            }
+            followGroupChat(api, id, version)
+        }
+    }
+
+    private fun closeGroupChat() {
+        groupStream?.cancel()
+        groupStream = null
+        groupVersion += 1
+        groupConversation = null
+    }
+
+    private fun updateConversation(id: String, change: (GroupConversation) -> GroupConversation) {
+        groupConversation = groupConversation?.let { if (it.groupID == id) change(it) else it }
+    }
+
+    private suspend fun followGroupChat(api: APIClient, id: String, version: Int) {
+        var backoffMs = 500L
+        while (scope.isActive) {
+            try {
+                api.groupChatEvents(id) { snapshot ->
+                    if (groupVersion != version || client !== api) return@groupChatEvents
+                    applyGroupSnapshot(snapshot)
+                    backoffMs = 500L
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                if (groupVersion != version) return
+                if (e is APIError && e.statusCode == 404) return groupGone(id)
+                if (e is APIError && e.statusCode == 401) {
+                    errorText = friendlyError(e)
+                    updateConversation(id) { it.copy(streamStatus = "Disconnected") }
+                    return
+                }
+                updateConversation(id) { it.copy(streamStatus = "Reconnecting…") }
+            }
+            delay(backoffMs)
+            backoffMs = minOf(backoffMs * 2, 8_000L)
+        }
+    }
+
+    private fun applyGroupSnapshot(incoming: GroupSnapshot) {
+        val id = incoming.groupChat.id
+        val acknowledged = incoming.messages.mapNotNull { it.requestId }.toSet()
+        val waiting = groupOutgoing[id].orEmpty()
+        if (waiting.any { it.requestId in acknowledged }) {
+            groupOutgoing = groupOutgoing + (id to waiting.filterNot { it.requestId in acknowledged })
+            acknowledged.forEach { groupSends.remove(it) }
+        }
+        val editing = "group:$id" in pendingMutations
+        updateConversation(id) { current ->
+            val merged = current.merging(incoming)
+            if (editing) merged.copy(group = current.group) else merged
+        }
+        if (!editing) writeGroup(incoming.groupChat, adding = true)
+    }
+
+    private fun writeGroup(group: GroupChat, adding: Boolean = false) {
+        if (groupChats.any { it.id == group.id }) {
+            if (group !in groupChats) groupChats = groupChats.map { if (it.id == group.id) group else it }
+        } else if (adding) {
+            groupChats = groupChats + group
+        }
+        updateConversation(group.id) { it.copy(group = group) }
+    }
+
+    /** Another client deleted the group: its stream answers 404, and the chat is no longer anywhere. */
+    private fun groupGone(id: String) {
+        dropGroup(id)
+        if (route == Route.GroupChat(id)) leaveGroupChat()
+    }
+
+    private fun dropGroup(id: String) {
+        groupChats = groupChats.filterNot { it.id == id }
+        groupComposers = groupComposers - id
+        saveDraft(groupDraftKey(id), "")
+        groupOutgoing[id].orEmpty().forEach { message -> groupSends.remove(message.requestId) }
+        groupOutgoing = groupOutgoing - id
+        if (groupDraft?.groupID == id) groupDraft = null
+    }
+
+    private fun leaveGroupChat() {
+        closeGroupChat()
+        val next = agents.firstOrNull { it.id == selectedAgentID } ?: agents.firstOrNull()
+        if (next != null) selectAgent(next.id) else route = null
+    }
+
+    private fun resetGroupChats() {
+        closeGroupChat()
+        if (route is Route.GroupChat) route = null
+        groupChats = emptyList()
+        groupsFailed = false
+        groupComposers = emptyMap()
+        groupOutgoing = emptyMap()
+        groupSends.clear()
+        groupDraft = null
+    }
+
+    fun groupComposer(id: String): ChatComposer = groupComposers[id] ?: ChatComposer()
+
+    fun updateGroupComposer(id: String, change: (ChatComposer) -> ChatComposer) {
+        val current = groupComposer(id)
+        val next = change(current)
+        groupComposers = groupComposers + (id to next)
+        if (next.draft != current.draft) saveDraft(groupDraftKey(id), next.draft)
+    }
+
+    fun addGroupAttachment(id: String, attachment: PendingAttachment) {
+        if (groupComposer(id).attachments.size >= AttachmentLimits.COUNT) {
+            errorText = "A message can carry up to ${AttachmentLimits.COUNT} files."
+            return
+        }
+        updateGroupComposer(id) { it.copy(attachments = it.attachments + attachment) }
+    }
+
+    /** Shows the message at once; it stays until a snapshot confirms it by request ID. */
+    fun sendGroupMessage() {
+        val conversation = groupConversation?.takeIf { it.group != null } ?: return
+        val id = conversation.groupID
+        val composer = groupComposer(id)
+        val content = composer.draft.trim()
+        if (content.isEmpty() && composer.attachments.isEmpty()) return
+        val requestID = newRequestID()
+        val reply = composer.replyTo
+        groupSends[requestID] = PendingSend(content, reply?.entryId.orEmpty(), composer.attachments)
+        val optimistic = Message(
+            id = "local:$requestID",
+            role = "user",
+            content = JsonPrimitive(content),
+            replyTo = reply?.entryId,
+            replyPreview = reply?.text?.nilIfEmpty,
+            timestamp = System.currentTimeMillis(),
+            attachments = composer.attachments.map {
+                AttachmentInfo(it.name, it.mimeType, it.data.size, if (it.isImage) "image" else "file")
+            },
+            requestId = requestID,
+            deliveryState = MessageDeliveryState.sending,
+        )
+        groupOutgoing = groupOutgoing + (id to groupOutgoing[id].orEmpty() + optimistic)
+        updateGroupComposer(id) { ChatComposer() }
+        deliverGroupMessage(id, requestID)
+    }
+
+    /** Re-sends a failed row with its original request ID, so the server can tell it is the same message. */
+    fun retryGroupMessage(message: Message) {
+        val requestID = message.requestId ?: return
+        val id = groupConversation?.groupID ?: return
+        if (message.deliveryState == MessageDeliveryState.failed) deliverGroupMessage(id, requestID)
+    }
+
+    private fun markGroupMessage(id: String, requestID: String, state: MessageDeliveryState) {
+        groupOutgoing = groupOutgoing + (id to groupOutgoing[id].orEmpty().map {
+            if (it.requestId == requestID) it.copy(deliveryState = state) else it
+        })
+    }
+
+    private fun deliverGroupMessage(id: String, requestID: String) {
+        val api = client ?: return
+        val record = groupSends[requestID] ?: return
+        val gen = generation
+        markGroupMessage(id, requestID, MessageDeliveryState.sending)
+        updateConversation(id) { it.copy(sendError = null) }
+        scope.launch {
+            try {
+                api.sendGroupMessage(id, record.content, requestID, record.replyTo, record.attachments.map { it.outgoing })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // A snapshot may already show the message, or the group may be gone.
+                if (generation != gen || groupOutgoing[id].orEmpty().none { it.requestId == requestID }) return@launch
+                markGroupMessage(id, requestID, MessageDeliveryState.failed)
+                updateConversation(id) { it.copy(sendError = "Message was not confirmed: ${friendlyError(e)}") }
+            }
+        }
+    }
+
+    /** The server reports the stopped turn in the transcript, so success needs no local change. */
+    fun stopGroupChat() {
+        val id = groupConversation?.groupID ?: return
         optimisticMutation(
-            key = "compact:$id",
-            update = { showNotice("Summarizing older context…") },
+            key = "group-stop:$id",
+            update = { showNotice("Stopping…") },
             rollback = {},
+            onBusy = {},
             work = { api ->
-                api.compactChat(id)
+                api.stopGroupChat(id)
                 null
+            },
+        )
+    }
+
+    fun loadEarlierGroupMessages() {
+        val conversation = groupConversation ?: return
+        val api = client ?: return
+        val before = conversation.oldestEntryID
+        if (before == null || conversation.loadingOlder || !conversation.hasMore) return
+        val id = conversation.groupID
+        val version = groupVersion
+        updateConversation(id) { it.copy(loadingOlder = true) }
+        scope.launch {
+            try {
+                val page = api.groupHistory(id, before, GROUP_PAGE_SIZE)
+                if (groupVersion == version) updateConversation(id) { it.adding(page) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (groupVersion != version) return@launch
+                updateConversation(id) { it.copy(loadingOlder = false) }
+                errorText = friendlyError(e)
+            }
+        }
+    }
+
+    fun groupAttachmentImageBytes(message: Message, index: Int): ByteArray? {
+        val entryID = message.entryId
+        if (!entryID.isNullOrEmpty()) return attachmentBytes["$entryID/$index"]
+        val file = groupSends[message.requestId]?.attachments?.getOrNull(index)
+        return file?.takeIf { it.isImage }?.data
+    }
+
+    // Group entry IDs embed the group's ID, so they cannot collide with a bot's in `attachmentBytes`.
+    suspend fun loadGroupAttachmentImage(entryID: String, index: Int) {
+        val key = "$entryID/$index"
+        val api = client ?: return
+        val id = groupConversation?.groupID ?: return
+        if (attachmentBytes.containsKey(key)) return
+        val gen = generation
+        try {
+            val bytes = api.groupAttachment(id, entryID, index)
+            if (bytes.isNotEmpty() && generation == gen) attachmentBytes = attachmentBytes + (key to bytes)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+    }
+
+    fun openNewGroup(memberIDs: List<String>) {
+        errorText = ""
+        groupDraft = GroupDraft(memberIDs = memberIDs)
+    }
+
+    /** Opens the form at once, then moves it to the server's version unless the owner already edited it. */
+    fun openGroupEditor(id: String) {
+        val group = groupChats.firstOrNull { it.id == id } ?: groupConversation?.group?.takeIf { it.id == id } ?: return
+        val draft = GroupDraft(groupID = id, name = group.name, memberIDs = group.memberIds)
+        errorText = ""
+        groupDraft = draft
+        val api = client ?: return
+        val gen = generation
+        scope.launch {
+            try {
+                val latest = api.groupChat(id)
+                if (generation != gen || "group:$id" in pendingMutations) return@launch
+                writeGroup(latest)
+                if (groupDraft == draft) groupDraft = draft.copy(name = latest.name, memberIDs = latest.memberIds)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun toggleGroupMember(botID: String, on: Boolean) {
+        val draft = groupDraft ?: return
+        val full = draft.memberIDs.size >= MAX_GROUP_MEMBERS
+        if (on && (full || botID in draft.memberIDs)) return
+        groupDraft = draft.copy(memberIDs = if (on) draft.memberIDs + botID else draft.memberIDs - botID)
+    }
+
+    fun saveGroup() {
+        val draft = groupDraft ?: return
+        val name = draft.name.trim()
+        if (!isValidGroup(name, draft.memberIDs)) return
+        val isNew = draft.groupID.isEmpty()
+        val id = if (isNew) "pending:${newRequestID()}" else draft.groupID
+        val previous = groupChats.firstOrNull { it.id == id }
+        val provisional = GroupChat(id, name, draft.memberIDs, previous?.createdAt.orEmpty(), previous?.updatedAt.orEmpty())
+        val originalRoute = route
+        optimisticMutation(
+            key = "group:$id",
+            update = {
+                writeGroup(provisional, adding = true)
+                groupDraft = null
+            },
+            rollback = {
+                if (previous != null) writeGroup(previous) else groupChats = groupChats.filterNot { it.id == id }
+                if (groupDraft == null && route == originalRoute) groupDraft = draft
+            },
+            work = { api ->
+                val saved = if (isNew) api.createGroupChat(name, draft.memberIDs) else api.updateGroupChat(id, name, draft.memberIDs)
+                return@optimisticMutation {
+                    if (isNew) {
+                        groupChats = upserted(groupChats, id, saved) { it.id }
+                        if (route == originalRoute && groupDraft == null) openGroupChat(saved.id)
+                    } else {
+                        writeGroup(saved)
+                    }
+                }
+            },
+        )
+    }
+
+    fun deleteGroup(id: String) {
+        val index = groupChats.indexOfFirst { it.id == id }
+        if (index < 0 || id.startsWith("pending:")) return
+        val removed = groupChats[index]
+        val draft = groupDraft
+        val wasOpen = route == Route.GroupChat(id)
+        var routeAfterDeletion = route
+        optimisticMutation(
+            key = "group:$id",
+            update = {
+                groupChats = groupChats.filterNot { it.id == id }
+                groupDraft = null
+                if (wasOpen) leaveGroupChat()
+                routeAfterDeletion = route
+            },
+            rollback = {
+                val list = groupChats.toMutableList()
+                list.add(minOf(index, list.size), removed)
+                groupChats = list
+                if (route == routeAfterDeletion) {
+                    if (wasOpen) openGroupChat(id)
+                    if (groupDraft == null) groupDraft = draft
+                }
+            },
+            work = { api ->
+                api.deleteGroupChat(id)
+                return@optimisticMutation { dropGroup(id) }
             },
         )
     }
@@ -843,7 +2160,14 @@ class AppModel(
     // MARK: Agent profile
 
     fun createAgent() {
-        val draft = AgentDraft(isNew = true, agentID = "").withShuffledAvatars()
+        val draft = AgentDraft(
+            isNew = true,
+            agentID = "",
+            avatar = placeholderAvatar(newRequestID()),
+            provider = firstConfiguredProvider(),
+            toolsDelegate = true,
+            otherTools = setOf("web"),
+        )
         agentDraft = draft
         loadEditorData(draft.provider)
     }
@@ -861,26 +2185,38 @@ class AppModel(
             model = agent.model ?: "",
             provider = agent.provider ?: "",
             enabled = agent.enabled,
-            avatar = "bot:${agentAvatarSeed(agent)}",
+            avatar = agent.avatar,
             thinking = agent.inference?.thinkingLevel ?: "off",
             temperature = agent.inference?.temperature?.toString() ?: "",
             maxOutput = agent.inference?.maxOutputTokens?.toString() ?: "",
             toolsMemory = tools.contains("memory"),
             toolsDelegate = tools.contains("delegate"),
-            toolsSchedule = tools.contains("schedule"),
-            toolsCodemode = tools.contains("codemode"),
             skills = agent.skills ?: emptyList(),
             sharedSkills = (agent.sharedSkills ?: emptyList()).toSet(),
-            sharedMemory = agent.sharedMemory ?: false,
-            delegates = (agent.delegates ?: emptyList()).toSet(),
             mcpServers = (agent.mcpServers ?: emptyList()).toSet(),
-        ).withShuffledAvatars()
+            otherTools = tools.toSet() - DRAFT_TOOLS,
+            webSearchProvider = agent.webSearchProvider,
+            desktopProvider = agent.desktopModel?.provider.orEmpty(),
+            desktopModel = agent.desktopModel?.model.orEmpty(),
+            initialTools = tools.toSet(),
+        )
         agentDraft = draft
         loadEditorData(draft.provider)
     }
 
+    private fun firstConfiguredProvider() = providers.firstOrNull { it.configured }?.provider.orEmpty()
+
     private fun loadEditorData(provider: String) {
         models = emptyList()
+        desktopModels = emptyList()
+        loadEditorLists()
+        loadProviders()
+        loadCapabilities()
+        loadModels(provider)
+        agentDraft?.desktopProvider?.nilIfEmpty?.let(::loadDesktopModels)
+    }
+
+    private fun loadEditorLists() {
         val revision = mutationRevision
         request { api ->
             coroutineScope {
@@ -889,25 +2225,35 @@ class AppModel(
                 val loadedServers = serversDeferred.await()
                 val loadedSkills = skillsDeferred.await()
                 return@coroutineScope {
-                    if (mutationRevision == revision && pendingMutations.isEmpty()) {
-                        mcpServers = loadedServers
-                        sharedSkills = loadedSkills
+                    if (settledSince(revision, MCP_RECORD, SKILL_RECORD)) {
+                        loadEditorLists()
+                    } else {
+                        mcpServers = withLocalChanges(loadedServers, mcpServers, MCP_RECORD, MCPServer::id)
+                        sharedSkills = withLocalChanges(loadedSkills, sharedSkills, SKILL_RECORD, SharedSkill::id)
                     }
                 }
             }
         }
-        loadProviders()
-        loadModels(provider)
     }
 
     fun loadProviders() {
         request { api ->
-            val loaded = api.providers()
-            return@request { providers = loaded }
+            val mark = secretMark("provider", "")
+            val loaded = api.providerAccounts()
+            return@request {
+                providers = loaded.map { it.domain() }
+                if (secretSettled("provider", "", mark)) providerAccounts = loaded
+                val chosen = firstConfiguredProvider()
+                if (agentDraft?.provider?.isEmpty() == true && chosen.isNotEmpty()) {
+                    agentDraft = agentDraft?.copy(provider = chosen)
+                    loadModels(chosen)
+                }
+            }
         }
     }
 
     fun loadModels(providerName: String) {
+        if (providerName.isEmpty()) return
         request { api ->
             val loaded = api.models(provider = providerName)
             return@request {
@@ -927,16 +2273,32 @@ class AppModel(
         loadModels(newProvider)
     }
 
-    val providerChoices: List<String>
-        get() {
-            val ordered = providers.filter { it.configured }.map { it.provider } +
-                providers.filter { !it.configured }.map { it.provider }
-            val current = agentDraft?.provider ?: ""
-            return if (ordered.contains(current) || current.isEmpty()) ordered else listOf(current) + ordered
-        }
+    private fun loadDesktopModels(provider: String) {
+        confirmed(
+            start = {},
+            work = { api -> api.models(provider = provider) },
+            finish = { result ->
+                result.onSuccess { if (agentDraft?.desktopProvider == provider) desktopModels = it }
+            },
+        )
+    }
+
+    fun changeEditorDesktopProvider(provider: String) {
+        agentDraft = agentDraft?.copy(desktopProvider = provider, desktopModel = "")
+        desktopModels = emptyList()
+        if (provider.isNotEmpty()) loadDesktopModels(provider)
+    }
+
+    /** The levels the editor's model takes. The picked level stays in the draft, so changing back restores it. */
+    val editorLevels: List<String>
+        get() = levelsOf(models.firstOrNull { it.id == agentDraft?.model?.trim() })
+
+    val editorLevel: String
+        get() = clampLevel(agentDraft?.thinking?.ifEmpty { "off" } ?: "off", editorLevels)
 
     val modelHint: String
         get() {
+            if (providers.none { it.configured }) return "No provider is set up yet. Add one in Settings."
             val p = providers.firstOrNull { it.provider == agentDraft?.provider }
             if (p != null && !p.configured) {
                 return "Add an API key for this provider in Settings to load its models."
@@ -951,11 +2313,15 @@ class AppModel(
             errorText = "Give your agent a name."
             return
         }
+        val chosenModel = draft.model.trim()
+        if (draft.provider.isEmpty() || chosenModel.isEmpty()) {
+            errorText = "Choose a provider and model."
+            return
+        }
         val tools = mutableListOf<String>()
         if (draft.toolsMemory) tools.add("memory")
         if (draft.toolsDelegate) tools.add("delegate")
-        if (draft.toolsSchedule) tools.add("schedule")
-        if (draft.toolsCodemode) tools.add("codemode")
+        tools.addAll(draft.otherTools)
         if (draft.skills.any { it.name.trim().isEmpty() || it.instructions.trim().isEmpty() }) {
             errorText = "Each skill needs a name and instructions."
             return
@@ -979,11 +2345,10 @@ class AppModel(
             maxOutputVal = v
         }
         val inference = Inference(
-            thinkingLevel = draft.thinking.ifEmpty { "off" },
+            thinkingLevel = editorLevel,
             temperature = temperatureVal,
             maxOutputTokens = maxOutputVal,
         )
-        val delegates = draft.delegates.sorted()
         val servers = draft.mcpServers.sorted()
         val shared = draft.sharedSkills.filter { id ->
             sharedSkills.any { it.id == id && !it.isDefault }
@@ -995,20 +2360,34 @@ class AppModel(
             instructions = draft.instructions.nilIfEmpty,
             avatar = draft.avatar,
             enabled = draft.enabled,
-            provider = draft.provider.nilIfEmpty,
-            model = draft.model.nilIfEmpty,
+            provider = draft.provider,
+            model = chosenModel,
             tools = tools,
-            delegates = delegates,
             skills = draft.skills,
             sharedSkills = shared,
-            sharedMemory = draft.sharedMemory,
             mcpServers = servers,
             inference = inference,
+            webSearchProvider = draft.webSearchProvider,
+            desktopModel = draft.chosenDesktopModel,
         )
+        draft.botRequestID?.let { requestID ->
+            errorText = ""
+            approveEditedBotRequest(requestID, draft, input.copy(sharedSkills = draft.sharedSkills.sorted()))
+            return
+        }
         val isNew = draft.isNew
         val id = if (isNew) "pending:${newRequestID()}" else draft.agentID
         val old = agents.firstOrNull { it.id == id }
-        val provisional = input.copy(id = id, lastMessage = old?.lastMessage)
+        // The editor only shows skills, and the server treats a submitted list as a full replacement.
+        val provisional = input.copy(
+            id = id,
+            lastMessage = old?.lastMessage,
+            skills = old?.skills ?: input.skills,
+            sharedSkills = old?.sharedSkills ?: input.sharedSkills,
+            // The server derives these and ignores what clients send.
+            delegates = old?.delegates,
+            sharedMemory = old?.sharedMemory,
+        )
         val originalRoute = route
 
         optimisticMutation(
@@ -1025,7 +2404,7 @@ class AppModel(
             rollback = {
                 val idx = agents.indexOfFirst { it.id == id }
                 agents = if (old != null && idx >= 0) {
-                    agents.toMutableList().also { it[idx] = old }
+                    agents.toMutableList().also { it[idx] = it[idx].undoingEdit(provisional, old) }
                 } else {
                     agents.filterNot { it.id == id }
                 }
@@ -1042,16 +2421,15 @@ class AppModel(
                         "description" to JsonPrimitive(draft.description),
                         "instructions" to JsonPrimitive(draft.instructions),
                         "provider" to JsonPrimitive(draft.provider),
-                        "model" to JsonPrimitive(draft.model),
-                        "avatar" to JsonPrimitive(draft.avatar),
+                        "model" to JsonPrimitive(chosenModel),
+                        "avatar" to CrumblePatchJson.encodeToJsonElement(draft.avatar ?: placeholderAvatar(id)),
                         "enabled" to JsonPrimitive(draft.enabled),
                         "tools" to JsonArray(tools.map { JsonPrimitive(it) }),
-                        "skills" to CrumbleJson.encodeToJsonElement(ListSerializer(Skill.serializer()), draft.skills),
-                        "sharedSkills" to JsonArray(shared.map { JsonPrimitive(it) }),
-                        "sharedMemory" to JsonPrimitive(draft.sharedMemory),
                         "mcpServers" to JsonArray(servers.map { JsonPrimitive(it) }),
-                        "delegates" to JsonArray(delegates.map { JsonPrimitive(it) }),
                         "inference" to CrumbleJson.encodeToJsonElement(Inference.serializer(), inference),
+                        "webSearchProvider" to JsonPrimitive(input.webSearchProvider),
+                        // Null clears it; an absent key would keep the old model.
+                        "desktopModel" to CrumblePatchJson.encodeToJsonElement(input.desktopModel),
                     )
                     api.updateAgent(id, patch = patch)
                 }
@@ -1059,9 +2437,7 @@ class AppModel(
                     val idx = agents.indexOfFirst { it.id == id }
                     if (idx >= 0) {
                         val lastMsg = agents[idx].lastMessage
-                        val updated = agents.toMutableList()
-                        updated[idx] = saved.copy(lastMessage = saved.lastMessage ?: lastMsg)
-                        agents = updated
+                        agents = upserted(agents, id, saved.copy(lastMessage = saved.lastMessage ?: lastMsg)) { it.id }
                     }
                     if (isNew && route == originalRoute && agentDraft == null) {
                         selectAgent(saved.id)
@@ -1096,7 +2472,7 @@ class AppModel(
                 return@optimisticMutation {
                     val idx = agents.indexOfFirst { it.id == temporaryID }
                     if (idx >= 0) {
-                        agents = agents.toMutableList().also { it[idx] = created }
+                        agents = upserted(agents, temporaryID, created) { it.id }
                     }
                     if (route == originalRoute && agentDraft == null) {
                         selectAgent(created.id)
@@ -1115,6 +2491,8 @@ class AppModel(
         val removed = agents[index]
         val memories = agentMemories[id]
         val wasSelected = selectedAgentID == id
+        val originalDraft = agentDraft
+        val originalRoute = route
         var routeAfterDeletion = route
         optimisticMutation(
             key = "agent:$id",
@@ -1125,6 +2503,7 @@ class AppModel(
                 if (wasSelected) {
                     cancelStream()
                     selectionVersion += 1
+                    switchComposer("")
                     selectedAgentID = ""
                     snapshot = null
                     messages = emptyList()
@@ -1145,98 +2524,283 @@ class AppModel(
                 if (wasSelected && route == routeAfterDeletion) {
                     selectAgent(id)
                 }
+                if (agentDraft == null && route == originalRoute) {
+                    agentDraft = originalDraft
+                }
             },
             work = { api ->
                 api.deleteAgent(id)
-                null
+                return@optimisticMutation {
+                    forgetCachedChat(id)
+                    parkedComposers.remove(id)
+                    saveDraft(botDraft(id), "")
+                }
             },
         )
     }
 
     // MARK: Workspace panels
 
-    fun openPanel(panel: Route) {
-        route = panel
+    private fun openHome() {
+        leaveRoute()
+        route = null
+    }
+
+    private fun leaveRoute() {
+        if (route == Route.General) closeSettings()
+        closeGroupChat()
+        clearSecretDrafts()
         memoryDraft = null
         taskDraft = null
         mcpDraft = null
         skillDraft = null
+        gatewayForm = null
+    }
+
+    fun openPanel(panel: Route) {
+        leaveRoute()
+        if (panel == Route.Activity && route != panel) activityFeed = ActivityFeedState()
+        route = panel
         when (panel) {
-            Route.Memory -> {
-                memoryLoadVersion += 1
-                val version = memoryLoadVersion
-                val mutationVersion = mutationRevision
-                request { api ->
-                    coroutineScope {
-                        val bots = api.agents()
-                        val sharedDeferred = async { api.memories(null) }
-                        val personalPairs = bots.map { bot ->
-                            async { bot.id to api.memories(bot.id) }
-                        }.awaitAll()
-                        val personal = personalPairs.toMap()
-                        val sharedItems = sharedDeferred.await()
-                        return@coroutineScope {
-                            if (memoryLoadVersion == version && mutationRevision == mutationVersion && pendingMutations.isEmpty()) {
-                                agents = bots
-                                sharedMemories = sharedItems
-                                agentMemories = personal
-                            }
-                        }
-                    }
-                }
-            }
-            Route.Skills -> {
-                val mutationVersion = mutationRevision
-                request { api ->
-                    coroutineScope {
-                        val botsDeferred = async { api.agents() }
-                        val skillsDeferred = async { api.sharedSkills() }
-                        val loadedBots = botsDeferred.await()
-                        val loadedSkills = skillsDeferred.await()
-                        return@coroutineScope {
-                            if (mutationRevision == mutationVersion && pendingMutations.isEmpty()) {
-                                agents = loadedBots
-                                sharedSkills = loadedSkills
-                            }
-                        }
-                    }
-                }
-            }
+            Route.Memory -> loadMemories()
+            Route.Skills -> loadSkills()
             Route.Tasks -> {
-                val mutationVersion = mutationRevision
-                request { api ->
-                    val items = api.schedules()
-                    return@request {
-                        if (mutationRevision == mutationVersion && pendingMutations.isEmpty()) {
-                            schedules = items
-                        }
-                    }
-                }
+                loadSchedules()
+                loadCapabilities()
+                loadEventSources()
             }
-            Route.Activity -> {
-                request { api ->
-                    val feed = api.activityFeed()
-                    return@request { activities = feed.activities }
-                }
+            Route.Activity -> loadActivity()
+            Route.Providers -> {
+                loadProviders()
+                loadPasswordManagers()
             }
+            Route.PasswordManagers -> loadPasswordManagers()
+            Route.WebSearch -> {
+                loadWebSearch()
+                loadPluginSettings()
+                loadPasswordManagers()
+            }
+            Route.JudgeModel -> loadJudgeModel()
+            Route.VisionModel -> loadVisionModel()
+            Route.Coding -> loadCoding()
+            Route.Users -> loadUsers()
+            Route.MessageGateways -> loadGateways()
+            is Route.MessageGateway -> {
+                seedGatewayForm()
+                loadGateways()
+                loadAgentsForPanel()
+                loadPluginSettings()
+                loadPasswordManagers()
+            }
+            Route.EventRelay -> {
+                loadRelay()
+                loadEventSources()
+                loadPluginSettings()
+                loadPasswordManagers()
+            }
+            Route.Credentials -> {
+                loadSecretLists(credentialOps)
+                loadPasswordManagers()
+            }
+            Route.Logins -> {
+                loadSecretLists(loginOps)
+                loadPasswordManagers()
+            }
+            Route.Avatars -> loadAgentsForPanel()
+            Route.Settings, Route.General, Route.Account, Route.NewChat, Route.NewGroup -> Unit
             Route.Integrations -> {
-                val mutationVersion = mutationRevision
-                request { api ->
-                    coroutineScope {
-                        val botsDeferred = async { api.agents() }
-                        val serversDeferred = async { api.mcpServers() }
-                        val loadedBots = botsDeferred.await()
-                        val loadedServers = serversDeferred.await()
-                        return@coroutineScope {
-                            if (mutationRevision == mutationVersion && pendingMutations.isEmpty()) {
-                                agents = loadedBots
-                                mcpServers = loadedServers
-                            }
-                        }
+                loadPasswordManagers()
+                loadIntegrations()
+            }
+            is Route.AgentChat, is Route.GroupChat -> Unit
+        }
+    }
+
+    private suspend fun <T> attempt(work: suspend () -> T): Result<T> = try {
+        Result.success(work())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
+
+    private fun loadSchedules() {
+        val revision = mutationRevision
+        request { api ->
+            val items = try {
+                api.schedules()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                schedulesError = friendlyError(e)
+                throw e
+            }
+            return@request {
+                if (settledSince(revision, SCHEDULE_RECORD)) {
+                    loadSchedules()
+                } else {
+                    schedules = withLocalChanges(items, schedules, SCHEDULE_RECORD, Schedule::id)
+                    schedulesLoaded = true
+                    schedulesError = ""
+                    if (taskTab == TaskTab.Runs) loadTaskRuns()
+                }
+            }
+        }
+    }
+
+    private fun loadIntegrations() {
+        val revision = mutationRevision
+        request { api ->
+            coroutineScope {
+                val botsDeferred = async { api.agents() }
+                val serversDeferred = async { api.mcpServers() }
+                val loadedBots = botsDeferred.await()
+                val loadedServers = serversDeferred.await()
+                return@coroutineScope {
+                    if (settledSince(revision, BOT_RECORD, MCP_RECORD)) {
+                        loadIntegrations()
+                    } else {
+                        applyBots(loadedBots)
+                        mcpServers = withLocalChanges(loadedServers, mcpServers, MCP_RECORD, MCPServer::id)
                     }
                 }
             }
-            is Route.AgentChat -> Unit
+        }
+    }
+
+    fun filterActivity(kind: String? = activityFeed.kind, botID: String? = activityFeed.botID) {
+        if (kind == activityFeed.kind && botID == activityFeed.botID) return
+        activityFeed = ActivityFeedState(kind = kind, botID = botID)
+        loadActivity()
+    }
+
+    private fun loadActivity(keepOlder: Boolean = false) {
+        val api = client
+        if (api == null) {
+            errorText = "Connect to your server in Settings."
+            return
+        }
+        activityLoadVersion += 1
+        val version = activityLoadVersion
+        val gen = generation
+        val asked = activityFeed
+        activityFeed = asked.copy(loading = true, loadingOlder = false, error = "", olderError = "")
+        fun current() = version == activityLoadVersion && generation == gen
+        scope.launch {
+            try {
+                val page = api.activityFeed(asked.kind, asked.botID, limit = ACTIVITY_PAGE_SIZE)
+                if (current()) activityFeed = activityFeed.withFirstPage(page, keepOlder)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (current()) activityFeed = activityFeed.copy(loading = false, error = friendlyError(e))
+            }
+        }
+    }
+
+    /** Fetches the next page; a failure keeps what is loaded and lets the owner try again. */
+    fun loadOlderActivity() {
+        val api = client ?: return
+        val feed = activityFeed
+        val cursor = feed.nextCursor ?: return
+        if (feed.loading || feed.loadingOlder) return
+        activityLoadVersion += 1
+        val version = activityLoadVersion
+        val gen = generation
+        activityFeed = feed.copy(loadingOlder = true, olderError = "")
+        fun current() = version == activityLoadVersion && generation == gen
+        scope.launch {
+            try {
+                val page = api.activityFeed(feed.kind, feed.botID, cursor, ACTIVITY_PAGE_SIZE)
+                if (current()) activityFeed = activityFeed.withOlderPage(page)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (current()) activityFeed = activityFeed.copy(loadingOlder = false, olderError = friendlyError(e))
+            }
+        }
+    }
+
+    private fun loadMemories() {
+        memoryLoadVersion += 1
+        val version = memoryLoadVersion
+        val mutationVersion = mutationRevision
+        request { api ->
+            coroutineScope {
+                val bots = api.agents()
+                val sharedDeferred = async { attempt { api.memories(null) } }
+                val personal = bots.map { bot -> async { bot.id to attempt { api.memories(bot.id) } } }.awaitAll()
+                val sharedItems = sharedDeferred.await()
+                return@coroutineScope {
+                    if (memoryLoadVersion == version && settledSince(mutationVersion, BOT_RECORD, MEMORY_RECORD)) {
+                        loadMemories()
+                    } else if (memoryLoadVersion == version) {
+                        applyBots(bots)
+                        sharedItems.onSuccess { sharedMemories = withLocalChanges(it, sharedMemories, MEMORY_RECORD, Memory::id) }
+                        agentMemories = personal.mapNotNull { (id, result) ->
+                            val local = agentMemories[id]
+                            val merged = result.getOrNull()?.let { withLocalChanges(it, local.orEmpty(), MEMORY_RECORD, Memory::id) }
+                            (merged ?: local)?.let { id to it }
+                        }.toMap()
+                        memoryErrors = (personal + (SKILLS_SHARED to sharedItems))
+                            .mapNotNull { (id, result) -> result.exceptionOrNull()?.let { id to friendlyError(it) } }
+                            .toMap()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun loadSkills() {
+        val mutationVersion = mutationRevision
+        request { api ->
+            coroutineScope {
+                val skillsDeferred = async { api.sharedSkills() }
+                val loadedBots = api.agents()
+                val personal = loadedBots.map { bot -> async { bot.id to attempt { api.botSkills(bot.id) } } }.awaitAll()
+                val loadedSkills = skillsDeferred.await()
+                return@coroutineScope {
+                    if (settledSince(mutationVersion, BOT_RECORD, SKILL_RECORD, BOT_SKILL_RECORD)) {
+                        loadSkills()
+                    } else {
+                        applyBots(loadedBots)
+                        sharedSkills = withLocalChanges(loadedSkills, sharedSkills, SKILL_RECORD, SharedSkill::id)
+                        agentSkills = personal.mapNotNull { (id, result) ->
+                            val local = agentSkills[id]
+                            val merged = result.getOrNull()?.let { withLocalChanges(it, local.orEmpty(), BOT_SKILL_RECORD, SkillPackage::id) }
+                            (merged ?: local)?.let { id to it }
+                        }.toMap()
+                        agentSkillErrors = personal
+                            .mapNotNull { (id, result) -> result.exceptionOrNull()?.let { id to friendlyError(it) } }
+                            .toMap()
+                    }
+                }
+            }
+        }
+    }
+
+    /** Refetches what the current page shows, keeping open forms. */
+    private fun reloadPage() {
+        when (route) {
+            Route.Memory -> loadMemories()
+            Route.Skills -> loadSkills()
+            Route.Activity -> loadActivity(keepOlder = true)
+            else -> Unit
+        }
+    }
+
+    /** For work another system decides: `finish` gets the answer, and nothing reads as done before it. */
+    private fun <T> confirmed(start: () -> Unit, work: suspend (APIClient) -> T, finish: (Result<T>) -> Unit) {
+        val api = client
+        if (api == null) {
+            errorText = "Connect to your server in Settings."
+            return
+        }
+        val gen = generation
+        start()
+        scope.launch {
+            val result = attempt { work(api) }
+            if (generation == gen) finish(result)
         }
     }
 
@@ -1257,14 +2821,15 @@ class AppModel(
         }
         val isNew = form.memoryID.isEmpty()
         val provisionalID = if (isNew) "pending-memory-${newRequestID()}" else form.memoryID
-        val provisional = Memory(id = provisionalID, content = content, createdAt = null)
         val currentList = if (agent == null) sharedMemories else agentMemories[agent].orEmpty()
         val old = currentList.firstOrNull { it.id == form.memoryID }
-        memoryDraft = null
+        val provisional = old?.copy(content = content)
+            ?: Memory(id = provisionalID, content = content, agentId = agent, source = MemorySource(kind = "owner"), updatedAt = Instant.now().toString())
 
         optimisticMutation(
             key = "memory:$provisionalID",
             update = {
+                memoryDraft = null
                 if (agent == null) {
                     val idx = sharedMemories.indexOfFirst { it.id == provisionalID || it.id == form.memoryID }
                     sharedMemories = if (idx >= 0) {
@@ -1280,15 +2845,7 @@ class AppModel(
                 }
             },
             rollback = {
-                if (agent == null) {
-                    val items = sharedMemories.filterNot { it.id == provisionalID }.toMutableList()
-                    if (old != null) items.add(old)
-                    sharedMemories = items
-                } else {
-                    val items = agentMemories[agent].orEmpty().filterNot { it.id == provisionalID }.toMutableList()
-                    if (old != null) items.add(old)
-                    agentMemories = agentMemories + (agent to items)
-                }
+                setMemories(agent, recordRestored(memoriesOf(agent), currentList, provisionalID) { it.id })
                 if (route == Route.Memory && memoryDraft == null) {
                     memoryDraft = form
                 }
@@ -1301,21 +2858,24 @@ class AppModel(
                 }
                 return@optimisticMutation {
                     if (agent == null) {
-                        val idx = sharedMemories.indexOfFirst { it.id == provisionalID }
-                        if (idx >= 0) {
-                            sharedMemories = sharedMemories.toMutableList().also { it[idx] = saved }
+                        if (sharedMemories.any { it.id == provisionalID }) {
+                            sharedMemories = upserted(sharedMemories, provisionalID, saved) { it.id }
                         }
                     } else {
-                        val items = agentMemories[agent]?.toMutableList()
-                        val idx = items?.indexOfFirst { it.id == provisionalID } ?: -1
-                        if (items != null && idx >= 0) {
-                            items[idx] = saved
-                            agentMemories = agentMemories + (agent to items)
+                        val items = agentMemories[agent].orEmpty()
+                        if (items.any { it.id == provisionalID }) {
+                            agentMemories = agentMemories + (agent to upserted(items, provisionalID, saved) { it.id })
                         }
                     }
                 }
             },
         )
+    }
+
+    private fun memoriesOf(owner: String?) = if (owner == null) sharedMemories else agentMemories[owner].orEmpty()
+
+    private fun setMemories(owner: String?, items: List<Memory>) {
+        if (owner == null) sharedMemories = items else agentMemories = agentMemories + (owner to items)
     }
 
     fun deleteMemory(id: String, agentID: String? = null) {
@@ -1364,7 +2924,14 @@ class AppModel(
                 agentID = schedule.agentId,
                 name = schedule.name,
                 prompt = schedule.prompt,
+                kind = schedule.kind,
+                command = schedule.command.orEmpty(),
+                timeoutSeconds = schedule.timeoutSeconds.toString(),
+                notify = schedule.notify,
+                onEvent = schedule.eventSourceId != null,
+                eventSourceID = schedule.eventSourceId.orEmpty(),
                 repeats = !schedule.cron.isNullOrEmpty(),
+                customCron = !schedule.cron.isNullOrEmpty() && recurrenceOf(schedule.cron) == null,
                 cron = if (!schedule.cron.isNullOrEmpty()) schedule.cron else form.cron,
                 timezone = schedule.timezone ?: ZoneId.systemDefault().id,
                 enabled = schedule.enabled,
@@ -1386,43 +2953,69 @@ class AppModel(
         val name = form.name.trim()
         val prompt = form.prompt.trim()
         val timezone = form.timezone.trim()
-        val cron = if (form.repeats) form.cron.trim() else ""
-        val runAt = if (form.repeats) "" else form.runDate.toIso8601SecondString()
+        val isScript = form.kind == "script"
+        val cron = if (!form.onEvent && form.repeats) form.cron.trim() else ""
+        val runAt = if (!form.onEvent && !form.repeats) form.runDate.toIso8601SecondString() else ""
+        val sourceID = if (form.onEvent) form.eventSourceID else ""
         if (form.agentID.isEmpty()) {
             errorText = "Choose which bot runs this task."
             return
         }
-        val validationError = validateTask(name = name, prompt = prompt, cron = cron, runAt = runAt, timezone = timezone)
+        val validationError = validateTask(
+            name = name,
+            prompt = prompt,
+            cron = cron,
+            runAt = runAt,
+            timezone = timezone,
+            kind = form.kind,
+            command = form.command,
+            timeoutSeconds = form.timeoutSeconds,
+            onEvent = form.onEvent,
+            eventSourceID = sourceID,
+        )
         if (validationError != null) {
             errorText = validationError
             return
         }
+        val timeoutSeconds = if (isScript) form.timeoutSeconds.trim().toLong() else 600L
         val payload = LinkedHashMap<String, JsonElement>().apply {
             put("agentId", JsonPrimitive(form.agentID))
             put("name", JsonPrimitive(name))
-            put("prompt", JsonPrimitive(prompt))
+            put("kind", JsonPrimitive(form.kind))
+            put("prompt", JsonPrimitive(if (isScript) "" else prompt))
+            put("command", if (isScript) JsonPrimitive(form.command) else JsonNull)
+            put("timeoutSeconds", JsonPrimitive(timeoutSeconds))
+            put("notify", JsonPrimitive(form.notify))
             put("timezone", JsonPrimitive(timezone))
             put("enabled", JsonPrimitive(form.enabled))
         }
         val isNew = form.scheduleID.isEmpty()
         val provisionalID = if (isNew) "pending-schedule-${newRequestID()}" else form.scheduleID
+        val old = schedules.firstOrNull { it.id == form.scheduleID }
         val provisional = Schedule(
             id = provisionalID,
             agentId = form.agentID,
             name = name,
-            cron = if (form.repeats) cron else null,
-            prompt = prompt,
+            cron = cron.ifEmpty { null },
+            prompt = if (isScript) "" else prompt,
             timezone = timezone,
-            runAt = if (form.repeats) null else runAt,
+            runAt = runAt.ifEmpty { null },
             enabled = form.enabled,
-            createdByAgentId = null,
+            createdByAgentId = old?.createdByAgentId,
+            kind = form.kind,
+            command = if (isScript) form.command else null,
+            timeoutSeconds = timeoutSeconds,
+            notify = form.notify,
+            eventSourceId = sourceID.ifEmpty { null },
+            // Without a next run a one-off reads as finished and leaves the list before it is saved.
+            nextRunAt = runAt.ifEmpty { old?.nextRunAt.takeIf { cron.isNotEmpty() } },
         )
-        val old = schedules.firstOrNull { it.id == form.scheduleID }
-        taskDraft = null
+        val original = schedules
 
         optimisticMutation(
             key = "schedule:$provisionalID",
             update = {
+                taskDraft = null
                 val idx = schedules.indexOfFirst { it.id == provisionalID || it.id == form.scheduleID }
                 schedules = if (idx >= 0) {
                     schedules.toMutableList().also { it[idx] = provisional }
@@ -1431,48 +3024,189 @@ class AppModel(
                 }
             },
             rollback = {
-                val list = schedules.filterNot { it.id == provisionalID }.toMutableList()
-                if (old != null) list.add(old)
-                schedules = list
+                schedules = recordRestored(schedules, original, provisionalID) { it.id }
                 if (route == Route.Tasks && taskDraft == null) {
                     taskDraft = form
                 }
             },
             work = { api ->
+                val trigger = mapOf("cron" to cron, "runAt" to runAt, "eventSourceId" to sourceID)
                 val saved = if (isNew) {
-                    if (form.repeats) {
-                        payload["cron"] = JsonPrimitive(cron)
-                    } else {
-                        payload["runAt"] = JsonPrimitive(runAt)
-                    }
+                    trigger.filterValues { it.isNotEmpty() }.forEach { (key, value) -> payload[key] = JsonPrimitive(value) }
                     api.createSchedule(payload)
                 } else {
-                    payload["cron"] = if (cron.isEmpty()) JsonNull else JsonPrimitive(cron)
-                    payload["runAt"] = if (form.repeats) JsonNull else JsonPrimitive(runAt)
+                    trigger.forEach { (key, value) -> payload[key] = if (value.isEmpty()) JsonNull else JsonPrimitive(value) }
                     api.updateSchedule(form.scheduleID, patch = payload)
                 }
                 return@optimisticMutation {
-                    val idx = schedules.indexOfFirst { it.id == provisionalID }
-                    if (idx >= 0) {
-                        schedules = schedules.toMutableList().also { it[idx] = saved }
+                    if (schedules.any { it.id == provisionalID }) {
+                        schedules = upserted(schedules, provisionalID, saved) { it.id }
                     }
                 }
             },
         )
     }
 
+    /** Picks the bot for the open form; a bot without coding jobs can't keep a script. */
+    fun pickTaskBot(agentID: String) {
+        val form = taskDraft ?: return
+        val canScript = canRunScripts(capabilities, agents.firstOrNull { it.id == agentID })
+        taskDraft = form.copy(agentID = agentID, kind = if (canScript) form.kind else "prompt")
+    }
+
+    fun toggleSchedule(id: String) {
+        val old = schedules.firstOrNull { it.id == id } ?: return
+        fun replace(schedule: Schedule) {
+            schedules = schedules.map { if (it.id == id) schedule else it }
+        }
+        val enabled = !old.enabled
+        optimisticMutation(
+            key = "schedule:$id",
+            update = { replace(old.copy(enabled = enabled)) },
+            rollback = { replace(old) },
+            work = { api ->
+                val saved = api.updateSchedule(id, patch = mapOf("enabled" to JsonPrimitive(enabled)))
+                return@optimisticMutation { replace(saved) }
+            },
+        )
+    }
+
+    fun schedulePending(id: String): Boolean = id.startsWith("pending-") || pendingMutations.contains("schedule:$id")
+
+    fun selectTaskTab(tab: TaskTab) {
+        taskTab = tab
+        when (tab) {
+            TaskTab.Tasks -> Unit
+            TaskTab.Runs -> loadTaskRuns()
+            TaskTab.EventSources -> loadEventSources()
+        }
+    }
+
+    private fun loadCapabilities() {
+        confirmed(
+            start = {},
+            work = { api -> api.capabilities() },
+            finish = { result -> result.onSuccess { capabilities = it } },
+        )
+    }
+
+    private fun loadTaskRuns() {
+        taskRunsVersion += 1
+        val version = taskRunsVersion
+        val scripts = schedules.filter { it.kind == "script" && !it.id.startsWith("pending-") }
+        confirmed(
+            start = { taskRunsLoading = true },
+            work = { api ->
+                coroutineScope {
+                    val history = async { attempt { api.executions() } }
+                    val runs = scripts.map { script -> async { script.id to attempt { api.scriptRuns(script.id) } } }.awaitAll()
+                    history.await() to runs
+                }
+            },
+            finish = { result ->
+                if (version == taskRunsVersion) {
+                    taskRunsLoading = false
+                    result
+                        .onSuccess { (history, runs) ->
+                            history.onSuccess { executions = it }
+                            scriptRuns = runs.mapNotNull { (id, loaded) ->
+                                (loaded.getOrNull() ?: scriptRuns[id])?.let { id to it }
+                            }.toMap()
+                            taskRunsError = history.exceptionOrNull()?.let { friendlyError(it) }
+                                ?: if (runs.any { it.second.isFailure }) "Some script runs could not be loaded." else ""
+                        }
+                        .onFailure { taskRunsError = friendlyError(it) }
+                }
+            },
+        )
+    }
+
+    private fun loadEventSources() {
+        eventSourcesVersion += 1
+        val version = eventSourcesVersion
+        confirmed(
+            start = {},
+            work = { api -> api.eventSources() },
+            finish = { result ->
+                if (version == eventSourcesVersion) {
+                    result
+                        .onSuccess {
+                            eventSources = it
+                            eventSourcesLoaded = true
+                            eventSourcesError = ""
+                        }
+                        .onFailure { eventSourcesError = friendlyError(it) }
+                }
+            },
+        )
+    }
+
+    fun openEventSourceForm() {
+        eventSourceDraft = EventSourceDraft()
+    }
+
+    /** The relay decides, and its address is shown once, so a pending sheet can't be dismissed. */
+    fun closeEventSourceForm() {
+        if (eventSourceDraft?.saving != true) eventSourceDraft = null
+    }
+
+    /** The relay creates the source, so it joins the list only once the server confirms. */
+    fun saveEventSource() {
+        val form = eventSourceDraft ?: return
+        val name = form.name.trim()
+        if (name.isEmpty() || form.saving) return
+        confirmed(
+            start = { eventSourceDraft = form.copy(saving = true, error = "") },
+            work = { api -> api.createEventSource(name) },
+            finish = { result ->
+                result
+                    .onSuccess { created ->
+                        eventSourceDraft = eventSourceDraft?.copy(saving = false, created = created)
+                        eventSources = eventSources.filterNot { it.id == created.id } +
+                            EventSource(created.id, created.name, created.createdAt, created.usedBy)
+                        loadEventSources()
+                    }
+                    .onFailure { eventSourceDraft = eventSourceDraft?.copy(saving = false, error = friendlyError(it)) }
+            },
+        )
+    }
+
+    /** The relay removes the address, so the row stays pending until the server confirms. */
+    fun deleteEventSource(id: String) {
+        if (deletingEventSources.contains(id)) return
+        confirmed(
+            start = {
+                deletingEventSources = deletingEventSources + id
+                eventSourceErrors = eventSourceErrors - id
+            },
+            work = { api -> api.deleteEventSource(id) },
+            finish = { result ->
+                deletingEventSources = deletingEventSources - id
+                result
+                    .onSuccess {
+                        eventSources = eventSources.filterNot { it.id == id }
+                        loadEventSources()
+                    }
+                    .onFailure { eventSourceErrors = eventSourceErrors + (id to friendlyError(it)) }
+            },
+        )
+    }
+
     fun runSchedule(id: String) {
         val routeAtStart = route
+        val owner = schedules.firstOrNull { it.id == id }?.agentId
         showNotice("Starting task…")
         optimisticMutation(
             key = "schedule-run:$id",
+            onBusy = {},
             update = {},
             rollback = { showNotice("Task could not be started") },
             work = { api ->
                 val execution = api.runSchedule(id)
                 return@optimisticMutation {
                     showNotice("Task started")
-                    val agent = execution.agentId
+                    // A script run's admission names only the run, not the bot.
+                    val agent = execution.agentId ?: owner
                     if (route == routeAtStart && routeAtStart == Route.Tasks && !agent.isNullOrEmpty()) {
                         selectAgent(agent)
                     }
@@ -1510,6 +3244,9 @@ class AppModel(
                 name = server.name,
                 url = server.url,
                 enabled = server.enabled,
+                token = secretDraft(server.token),
+                clientID = server.oauthClientId.orEmpty(),
+                clientSecret = secretDraft(server.oauthClientSecret),
             )
         }
         mcpDraft = form
@@ -1533,11 +3270,14 @@ class AppModel(
             put("name", JsonPrimitive(name))
             put("url", JsonPrimitive(rawURL))
             put("enabled", JsonPrimitive(form.enabled))
-            if (form.token.isNotEmpty()) put("token", JsonPrimitive(form.token))
+            form.token.takeIf { it.changed }?.input?.let { put("token", it.json()) }
         }
         val isNew = form.serverID.isEmpty()
         val provisionalID = if (isNew) "pending-mcp-${newRequestID()}" else form.serverID
         val old = mcpServers.firstOrNull { it.id == form.serverID }
+        payload.putAll(form.oauthFields(old))
+        val tokenChanged = form.token.changed
+        val waits = form.readsPasswordManager
         var provisional = MCPServer(
             id = provisionalID,
             name = name,
@@ -1545,17 +3285,22 @@ class AppModel(
             enabled = form.enabled,
             agentId = form.agentID,
             authenticated = false,
-            auth = if (form.token.isEmpty()) "none" else "token",
+            auth = if (tokenChanged && !waits) "token" else "none",
+            oauthClientId = form.clientID.trim().nilIfEmpty,
+            token = old?.token,
+            oauthClientSecret = old?.oauthClientSecret,
         )
-        if (old != null && form.token.isEmpty() && old.url == rawURL) {
+        if (old != null && (!tokenChanged || waits) && old.url == rawURL) {
             provisional = provisional.copy(authenticated = old.authenticated, auth = old.auth)
         }
         val owner = form.agentID
-        mcpDraft = null
+        val original = mcpServers
 
         optimisticMutation(
             key = "mcp:$provisionalID",
+            touches = if (isNew && owner != null) setOf("$BOT_RECORD$owner") else emptySet(),
             update = {
+                mcpDraft = if (waits) form.copy(saving = true) else null
                 val idx = mcpServers.indexOfFirst { it.id == provisionalID || it.id == form.serverID }
                 mcpServers = if (idx >= 0) {
                     mcpServers.toMutableList().also { it[idx] = provisional }
@@ -1574,9 +3319,7 @@ class AppModel(
                 }
             },
             rollback = {
-                val list = mcpServers.filterNot { it.id == provisionalID }.toMutableList()
-                if (old != null) list.add(old)
-                mcpServers = list
+                mcpServers = recordRestored(mcpServers, original, provisionalID) { it.id }
                 if (isNew && owner != null) {
                     val agentIdx = agents.indexOfFirst { it.id == owner }
                     if (agentIdx >= 0) {
@@ -1586,7 +3329,7 @@ class AppModel(
                         }
                     }
                 }
-                if (route == Route.Integrations && mcpDraft == null) {
+                if (route == Route.Integrations && (mcpDraft == null || mcpDraft?.id == form.id)) {
                     mcpDraft = form
                 }
             },
@@ -1595,9 +3338,9 @@ class AppModel(
                     if (owner != null) payload["agentId"] = JsonPrimitive(owner)
                     val saved = api.createMCPServer(payload)
                     return@optimisticMutation {
-                        val idx = mcpServers.indexOfFirst { it.id == provisionalID }
-                        if (idx >= 0) {
-                            mcpServers = mcpServers.toMutableList().also { it[idx] = saved }
+                        if (mcpDraft?.id == form.id) mcpDraft = null
+                        if (mcpServers.any { it.id == provisionalID }) {
+                            mcpServers = upserted(mcpServers, provisionalID, saved) { it.id }
                         }
                         if (owner != null) {
                             val agentIdx = agents.indexOfFirst { it.id == owner }
@@ -1614,6 +3357,7 @@ class AppModel(
                 }
                 val saved = api.updateMCPServer(form.serverID, patch = payload)
                 return@optimisticMutation {
+                    if (mcpDraft?.id == form.id) mcpDraft = null
                     val idx = mcpServers.indexOfFirst { it.id == provisionalID }
                     if (idx >= 0) {
                         mcpServers = mcpServers.toMutableList().also { it[idx] = saved }
@@ -1633,13 +3377,18 @@ class AppModel(
         val api = client ?: return
         errorText = ""
         signingIn = id
+        browserSignIn = null
         val genAtStart = generation
         scope.launch {
             try {
                 val start = api.startMCPSignIn(id, redirectURI = oauthRedirectURI)
                 if (generation != genAtStart) return@launch
                 val address = start.authorizationUrl
-                if (!address.isNullOrEmpty()) {
+                if (!address.isNullOrEmpty() && !isWebLink(address)) {
+                    signingIn = null
+                    errorText = "This server's sign-in page isn't a web address."
+                } else if (!address.isNullOrEmpty()) {
+                    browserSignIn = id
                     openBrowser(address)
                 } else if (start.authorized == true) {
                     val idx = mcpServers.indexOfFirst { it.id == id }
@@ -1658,15 +3407,27 @@ class AppModel(
             } catch (e: Throwable) {
                 if (generation != genAtStart) return@launch
                 signingIn = null
+                browserSignIn = null
                 errorText = friendlyError(e)
             }
         }
     }
 
+    /** A browser never reports being abandoned. Coming back without its callback ends the wait. */
+    fun browserReturned() {
+        if (signingIn == browserSignIn) signingIn = null
+    }
+
     /** Completes an in-flight OAuth sign-in when the system redirects back to `dev.crumble.android:/oauth/callback`. */
     fun handleOAuthCallback(callbackUri: String) {
-        val id = signingIn ?: return
-        val api = client ?: return
+        val id = browserSignIn
+        val api = client
+        if (id == null || api == null) {
+            errorText = "That sign-in was interrupted. Try again."
+            return
+        }
+        browserSignIn = null
+        signingIn = id
         val genAtStart = generation
         scope.launch {
             try {
@@ -1729,6 +3490,7 @@ class AppModel(
         }
         optimisticMutation(
             key = "mcp:$id",
+            touches = affectedAgents.map { "$BOT_RECORD${it.first}" }.toSet(),
             update = {
                 mcpServers = mcpServers.filterNot { it.id == id }
                 agents = agents.map { agent ->
@@ -1764,12 +3526,24 @@ class AppModel(
         var form = SkillDraft(skillID = id, agentID = agentID)
         if (agentID == null) {
             val skill = sharedSkills.firstOrNull { it.id == id }
-            if (skill != null) form = form.copy(name = skill.name, instructions = skill.instructions)
+            if (skill != null) form = form.copy(name = skill.name, instructions = skill.instructions, usedBy = botsUsing(agents, id))
         } else {
-            val skill = agents.firstOrNull { it.id == agentID }?.skills.orEmpty().firstOrNull { it.id == id }
+            val skill = agentSkills[agentID].orEmpty().firstOrNull { it.id == id }
             if (skill != null) form = form.copy(name = skill.name, instructions = skill.instructions)
         }
         skillDraft = form
+    }
+
+    /** Keeps the bot's inline skills current: saving the bot replaces its skills with that list. */
+    private fun setAgentSkills(agentID: String, skills: List<SkillPackage>) {
+        agentSkills = agentSkills + (agentID to skills)
+        agents = agents.map { agent -> if (agent.id == agentID) agent.copy(skills = skills.map { it.asInline() }) else agent }
+    }
+
+    private fun setSharedSkillsOf(agentID: String, change: (List<String>) -> List<String>) {
+        agents = agents.map { agent ->
+            if (agent.id == agentID) agent.copy(sharedSkills = change(agent.sharedSkills.orEmpty())) else agent
+        }
     }
 
     fun saveSkill() {
@@ -1786,24 +3560,31 @@ class AppModel(
             return
         }
         val provisionalID = if (isNew) "pending-skill-${newRequestID()}" else form.skillID
-        val provisional = SharedSkill(id = provisionalID, name = name, instructions = instructions, source = null, path = null)
-        val old = sharedSkills.firstOrNull { it.id == form.skillID }
-        skillDraft = null
+        val oldSkills = sharedSkills
+        val old = oldSkills.firstOrNull { it.id == form.skillID }
+        val provisional = old?.copy(name = name, instructions = instructions) ?: SharedSkill(id = provisionalID, name = name, instructions = instructions, source = "shared")
+        val using = botsUsing(agents, form.skillID)
+        val added = form.usedBy - using
+        val dropped = using - form.usedBy
+        fun assign(id: String) {
+            for (bot in added) setSharedSkillsOf(bot) { (it + id).distinct().sorted() }
+            for (bot in dropped) setSharedSkillsOf(bot) { it - id }
+        }
+        fun unassign(id: String, bots: Set<String>) {
+            for (bot in bots) setSharedSkillsOf(bot) { if (bot in added) it - id else (it + id).distinct().sorted() }
+        }
 
         optimisticMutation(
             key = "skill:$provisionalID",
+            touches = (added + dropped).map { "$BOT_RECORD$it" }.toSet(),
             update = {
-                val idx = sharedSkills.indexOfFirst { it.id == provisionalID || it.id == form.skillID }
-                sharedSkills = if (idx >= 0) {
-                    sharedSkills.toMutableList().also { it[idx] = provisional }
-                } else {
-                    sharedSkills + provisional
-                }
+                skillDraft = null
+                sharedSkills = upserted(sharedSkills, provisionalID, provisional) { it.id }
+                assign(provisionalID)
             },
             rollback = {
-                val list = sharedSkills.filterNot { it.id == provisionalID }.toMutableList()
-                if (old != null) list.add(old)
-                sharedSkills = list
+                sharedSkills = recordRestored(sharedSkills, oldSkills, provisionalID) { it.id }
+                unassign(provisionalID, added + dropped)
                 if (route == Route.Skills && skillDraft == null) {
                     skillDraft = form
                 }
@@ -1814,11 +3595,19 @@ class AppModel(
                 } else {
                     api.updateSharedSkill(form.skillID, name = name, instructions = instructions)
                 }
+                val failed = coroutineScope {
+                    (added + dropped).map { bot ->
+                        async { bot to attempt { api.assignSkill(saved.id, bot, bot in added) } }
+                    }.awaitAll().filter { (_, result) -> result.isFailure }
+                }
                 return@optimisticMutation {
-                    val idx = sharedSkills.indexOfFirst { it.id == provisionalID }
-                    if (idx >= 0) {
-                        sharedSkills = sharedSkills.toMutableList().also { it[idx] = saved }
+                    sharedSkills = upserted(sharedSkills, provisionalID, provisional.copy(id = saved.id, name = saved.name, instructions = saved.instructions)) { it.id }
+                    if (isNew) {
+                        for (bot in added) setSharedSkillsOf(bot) { ids -> ids.map { if (it == provisionalID) saved.id else it } }
                     }
+                    // The skill saved, so a failed assignment rolls back alone and retrying won't duplicate it.
+                    unassign(saved.id, failed.map { it.first }.toSet())
+                    failed.firstOrNull()?.second?.exceptionOrNull()?.let { errorText = friendlyError(it) }
                 }
             },
         )
@@ -1826,50 +3615,58 @@ class AppModel(
 
     private fun saveAgentSkill(form: SkillDraft, name: String, instructions: String, isNew: Boolean) {
         val agentID = form.agentID ?: return
-        val oldSkills = agents.firstOrNull { it.id == agentID }?.skills.orEmpty()
         if (agents.none { it.id == agentID }) return
-        val skillID = if (isNew) UUID.randomUUID().toString() else form.skillID
-        val updatedSkill = Skill(
-            id = skillID,
-            name = name,
-            instructions = instructions,
-        )
-        val updatedSkills = if (isNew) oldSkills + updatedSkill else oldSkills.map { if (it.id == form.skillID) updatedSkill else it }
-        skillDraft = null
+        val provisionalID = if (isNew) "pending-skill-${newRequestID()}" else form.skillID
+        val original = agentSkills[agentID].orEmpty()
+        val provisional = provisionalSkill(provisionalID, agentID, name, instructions, original.firstOrNull { it.id == form.skillID })
         optimisticMutation(
-            key = "agent-skills:$agentID",
-            update = { agents = agents.map { if (it.id == agentID) it.copy(skills = updatedSkills) else it } },
+            key = "agent-skill:$provisionalID",
+            touches = setOf("$BOT_RECORD$agentID"),
+            update = {
+                skillDraft = null
+                setAgentSkills(agentID, upserted(agentSkills[agentID].orEmpty(), provisionalID, provisional) { it.id })
+            },
             rollback = {
-                agents = agents.map { if (it.id == agentID) it.copy(skills = oldSkills) else it }
+                setAgentSkills(agentID, recordRestored(agentSkills[agentID].orEmpty(), original, provisionalID) { it.id })
                 if (route == Route.Skills && skillDraft == null) skillDraft = form
             },
             work = { api ->
-                val patch = mapOf<String, JsonElement>(
-                    "skills" to CrumbleJson.encodeToJsonElement(ListSerializer(Skill.serializer()), updatedSkills),
-                )
-                val saved = api.updateAgent(agentID, patch)
+                val saved = if (isNew) api.createBotSkill(agentID, name, instructions) else api.updateBotSkill(agentID, form.skillID, name, instructions)
                 return@optimisticMutation {
-                    agents = agents.map { current -> if (current.id == agentID) current.copy(skills = saved.skills) else current }
+                    setAgentSkills(agentID, upserted(agentSkills[agentID].orEmpty(), provisionalID, saved) { it.id })
                 }
             },
         )
     }
 
     fun deleteAgentSkill(agentID: String, skillID: String) {
-        val oldSkills = agents.firstOrNull { it.id == agentID }?.skills.orEmpty()
-        if (agents.none { it.id == agentID }) return
-        val updatedSkills = oldSkills.filterNot { it.id == skillID }
+        val original = agentSkills[agentID].orEmpty()
+        if (original.none { it.id == skillID }) return
         optimisticMutation(
-            key = "agent-skills:$agentID",
-            update = { agents = agents.map { if (it.id == agentID) it.copy(skills = updatedSkills) else it } },
-            rollback = { agents = agents.map { if (it.id == agentID) it.copy(skills = oldSkills) else it } },
+            key = "agent-skill:$skillID",
+            touches = setOf("$BOT_RECORD$agentID"),
+            update = { setAgentSkills(agentID, agentSkills[agentID].orEmpty().filterNot { it.id == skillID }) },
+            rollback = { setAgentSkills(agentID, recordRestored(agentSkills[agentID].orEmpty(), original, skillID) { it.id }) },
             work = { api ->
-                val patch = mapOf<String, JsonElement>(
-                    "skills" to CrumbleJson.encodeToJsonElement(ListSerializer(Skill.serializer()), updatedSkills),
-                )
-                val saved = api.updateAgent(agentID, patch)
+                api.deleteBotSkill(agentID, skillID)
+                null
+            },
+        )
+    }
+
+    fun toggleSkillPin(agentID: String, skillID: String) {
+        val original = agentSkills[agentID].orEmpty()
+        val skill = original.firstOrNull { it.id == skillID } ?: return
+        val pinned = !skill.pinned
+        optimisticMutation(
+            key = "agent-skill:$skillID",
+            touches = setOf("$BOT_RECORD$agentID"),
+            update = { setAgentSkills(agentID, upserted(agentSkills[agentID].orEmpty(), skillID, skill.copy(pinned = pinned)) { it.id }) },
+            rollback = { setAgentSkills(agentID, recordRestored(agentSkills[agentID].orEmpty(), original, skillID) { it.id }) },
+            work = { api ->
+                val saved = api.pinBotSkill(agentID, skillID, pinned)
                 return@optimisticMutation {
-                    agents = agents.map { current -> if (current.id == agentID) current.copy(skills = saved.skills) else current }
+                    setAgentSkills(agentID, upserted(agentSkills[agentID].orEmpty(), skillID, saved) { it.id })
                 }
             },
         )
@@ -1884,6 +3681,7 @@ class AppModel(
         }
         optimisticMutation(
             key = "skill:$id",
+            touches = affectedAgents.map { "$BOT_RECORD${it.first}" }.toSet(),
             update = {
                 sharedSkills = sharedSkills.filterNot { it.id == id }
                 agents = agents.map { agent ->
@@ -1918,6 +3716,7 @@ class AppModel(
         if (next == current) return
         optimisticMutation(
             key = "agent-shared-skills:$agentID",
+            touches = setOf("$BOT_RECORD$agentID"),
             update = { agents = agents.map { if (it.id == agentID) it.copy(sharedSkills = next) else it } },
             rollback = { agents = agents.map { if (it.id == agentID) it.copy(sharedSkills = current) else it } },
             work = { api ->
@@ -1930,7 +3729,420 @@ class AppModel(
         )
     }
 
+    /** An editable shared copy of an installed skill, documents included. */
+    fun copySkill(id: String) {
+        val skill = sharedSkills.firstOrNull { it.id == id } ?: return
+        val provisionalID = "pending-skill-${newRequestID()}"
+        val provisional = skill.copy(id = provisionalID, name = "${skill.name} copy".take(100), origin = null, update = null)
+        optimisticMutation(
+            key = "skill:$provisionalID",
+            update = { sharedSkills = sharedSkills + provisional },
+            rollback = { sharedSkills = sharedSkills.filterNot { it.id == provisionalID } },
+            work = { api ->
+                val saved = api.copySharedSkill(api.skillPackage(id))
+                return@optimisticMutation { sharedSkills = upserted(sharedSkills, provisionalID, saved) { it.id } }
+            },
+        )
+    }
+
+    fun toggleSkillSelection(ids: List<String>, selected: Boolean) {
+        selectedSkills = if (selected) selectedSkills + ids else selectedSkills - ids.toSet()
+    }
+
+    /** Deletes apply at once, and shared assignments too. Copies and updates show once the server has them. */
+    fun runBulkAction(action: BulkAction, targets: Set<String> = emptySet()) {
+        val picked = selectionCatalog(sharedSkills, agents, agentSkills).filter { it.id in selectedSkills }
+        if (picked.isEmpty()) return
+        val bots = agents.filter { it.id in targets }
+        val ids = picked.map { it.id }.toSet()
+        val shared = picked.filter { it.botID == null }.map { it.id }.toSet()
+        val originalShared = sharedSkills
+        val originalPersonal = agentSkills
+        val originalAgents = agents
+        bulkReport = emptyList()
+
+        fun undo(agentID: String, skills: Set<String>) {
+            val before = originalAgents.firstOrNull { it.id == agentID }?.sharedSkills.orEmpty()
+            setSharedSkillsOf(agentID) { current ->
+                (current - skills + before.filter { it in skills }).distinct().sorted()
+            }
+        }
+
+        fun restoreDeleted(failed: Set<String>) {
+            sharedSkills = restoring(sharedSkills, originalShared, failed) { it.id }
+            for ((agentID, skills) in originalPersonal) {
+                setAgentSkills(agentID, restoring(agentSkills[agentID].orEmpty(), skills, failed) { it.id })
+            }
+            for (agent in originalAgents) undo(agent.id, failed intersect shared)
+        }
+
+        optimisticMutation(
+            key = "skills:bulk",
+            touches = shared.map { "$SKILL_RECORD$it" }.toSet() + (ids - shared).map { "$BOT_SKILL_RECORD$it" } +
+                (if (action == BulkAction.delete) agents else bots).map { "$BOT_RECORD${it.id}" },
+            update = {
+                when (action) {
+                    BulkAction.delete -> {
+                        sharedSkills = sharedSkills.filterNot { it.id in ids }
+                        for ((agentID, skills) in agentSkills) setAgentSkills(agentID, skills.filterNot { it.id in ids })
+                        for (agent in agents) setSharedSkillsOf(agent.id) { it - shared }
+                    }
+                    BulkAction.assign -> for (bot in bots) setSharedSkillsOf(bot.id) { (it + shared).distinct().sorted() }
+                    BulkAction.remove -> for (bot in bots) setSharedSkillsOf(bot.id) { it - shared }
+                    BulkAction.update -> Unit
+                }
+            },
+            rollback = {
+                when (action) {
+                    BulkAction.delete -> restoreDeleted(ids)
+                    BulkAction.assign, BulkAction.remove -> for (bot in bots) undo(bot.id, shared)
+                    BulkAction.update -> Unit
+                }
+            },
+            work = { api ->
+                val result = applyBulkAction(api, action, picked, bots)
+                return@optimisticMutation {
+                    if (action == BulkAction.delete) restoreDeleted(result.failed)
+                    for ((skill, bot) in result.failedAssignments) if (skill in shared) undo(bot, setOf(skill))
+                    selectedSkills = result.failed
+                    bulkReport = result.messages
+                    loadSkills()
+                }
+            },
+        )
+    }
+
+    fun checkSkillUpdates() {
+        if (checkingSkillUpdates) return
+        confirmed(
+            start = {
+                checkingSkillUpdates = true
+                skillCheckFailures = emptyList()
+            },
+            work = { api -> api.checkSkillUpdates() },
+            finish = { result ->
+                checkingSkillUpdates = false
+                result
+                    .onSuccess { skillCheckFailures = updateCheckFailures(it) }
+                    .onFailure { skillCheckFailures = listOf(friendlyError(it)) }
+                loadSkills()
+            },
+        )
+    }
+
+    fun openSkillInstall() {
+        skillBrowseVersion += 1
+        skillInstall = SkillInstallForm()
+    }
+
+    fun closeSkillInstall() {
+        skillBrowseVersion += 1
+        skillInstall = null
+    }
+
+    fun changeSkillLocation(location: String) {
+        val form = skillInstall ?: return
+        skillBrowseVersion += 1
+        skillInstall = form.copy(location = location, listing = null, picked = emptySet(), browsing = false, error = "")
+    }
+
+    /** A late answer for an older location never replaces what the owner typed since. */
+    fun findSkills() {
+        val form = skillInstall ?: return
+        val location = form.location.trim()
+        if (location.isEmpty()) return
+        skillBrowseVersion += 1
+        val version = skillBrowseVersion
+        confirmed(
+            start = { skillInstall = form.copy(browsing = true, error = "") },
+            work = { api -> api.browseSkills(location) },
+            finish = { result ->
+                val current = skillInstall
+                if (current != null && skillBrowseVersion == version) {
+                    skillInstall = result.fold(
+                        onSuccess = { current.copy(listing = it, picked = newSkillPaths(it), browsing = false) },
+                        onFailure = { current.copy(listing = null, browsing = false, error = friendlyError(it)) },
+                    )
+                }
+            },
+        )
+    }
+
+    fun toggleSkillCandidate(path: String, selected: Boolean) {
+        val form = skillInstall ?: return
+        skillInstall = form.copy(picked = if (selected) form.picked + path else form.picked - path)
+    }
+
+    fun toggleInstallBot(id: String, selected: Boolean) {
+        val form = skillInstall ?: return
+        skillInstall = form.copy(botIDs = if (selected) form.botIDs + id else form.botIDs - id)
+    }
+
+    /** Depends on GitHub, so the sheet stays open and pending until the server confirms. */
+    fun installSkills() {
+        val form = skillInstall ?: return
+        val listing = form.listing ?: return
+        if (form.installing || form.picked.isEmpty()) return
+        confirmed(
+            start = { skillInstall = form.copy(installing = true, error = "") },
+            work = { api -> api.installSkills(listing, form.picked, form.botIDs) },
+            finish = { result ->
+                result
+                    .onSuccess {
+                        skillInstall = null
+                        loadSkills()
+                    }
+                    .onFailure { skillInstall = skillInstall?.copy(installing = false, error = friendlyError(it)) }
+            },
+        )
+    }
+
+    fun openInstalledSkill(id: String) {
+        confirmed(
+            start = { installedSkill = InstalledSkillView(id) },
+            work = { api -> api.skillPackage(id) },
+            finish = { result ->
+                installedSkill = installedSkill?.takeIf { it.skillID == id }?.let { view ->
+                    result.fold({ view.copy(full = it) }, { view.copy(error = friendlyError(it)) })
+                }
+            },
+        )
+    }
+
+    fun openSkillUpdate(id: String) {
+        installedSkill = null
+        confirmed(
+            start = { skillUpdate = SkillUpdateView(id) },
+            work = { api ->
+                coroutineScope {
+                    val current = async { attempt { api.skillPackage(id) } }
+                    val pending = async { attempt { api.pendingSkillUpdate(id) } }
+                    current.await() to pending.await()
+                }
+            },
+            finish = { result ->
+                val current = result.getOrNull()?.first
+                val pending = result.getOrNull()?.second
+                val failure = result.exceptionOrNull() ?: pending?.exceptionOrNull() ?: current?.exceptionOrNull()
+                skillUpdate = skillUpdate?.takeIf { it.skillID == id }?.copy(
+                    current = current?.getOrNull(),
+                    pending = pending?.getOrNull(),
+                    error = failure?.let(::friendlyError).orEmpty(),
+                )
+            },
+        )
+    }
+
+    /** The server applies what it read from GitHub, so the row changes only once it confirms. */
+    fun applySkillUpdate() {
+        val view = skillUpdate ?: return
+        if (view.pending == null || view.applying) return
+        val id = view.skillID
+        confirmed(
+            start = { skillUpdate = view.copy(applying = true, error = "") },
+            work = { api -> api.applySkillUpdate(id) },
+            finish = { result ->
+                result
+                    .onSuccess { saved ->
+                        sharedSkills = upserted(sharedSkills, id, saved.asShared()) { it.id }
+                        skillUpdate = null
+                        loadSkills()
+                    }
+                    .onFailure { failure -> skillUpdate = skillUpdate?.copy(applying = false, error = friendlyError(failure)) }
+            },
+        )
+    }
+
+    // MARK: Change history
+
+    fun openChanges() {
+        showingChanges = true
+        loadChanges(before = null)
+    }
+
+    fun closeChanges() {
+        changesVersion += 1
+        changesLoading = false
+        showingChanges = false
+    }
+
+    fun loadMoreChanges() {
+        if (!changesLoading) changes.lastOrNull()?.let { loadChanges(before = it.id) }
+    }
+
+    private fun loadChanges(before: String?) {
+        changesVersion += 1
+        val version = changesVersion
+        confirmed(
+            start = {
+                changesLoading = true
+                changesError = ""
+            },
+            work = { api -> api.changes(before) },
+            finish = { result ->
+                if (changesVersion == version) {
+                    changesLoading = false
+                    result
+                        .onSuccess { page ->
+                            changes = if (before == null) page else (changes + page).distinctBy { it.id }
+                            changesHasMore = page.size == CHANGES_PAGE
+                        }
+                        .onFailure { changesError = friendlyError(it) }
+                }
+            },
+        )
+    }
+
+    private fun revertSkillRecord(change: LearnedChange): () -> Unit {
+        val id = change.targetId
+        val restored = change.beforeSkill
+        val owner = change.agentId
+        if (owner != null) {
+            val original = agentSkills[owner].orEmpty()
+            setAgentSkills(owner, upserted(original, id, restored) { it.id })
+            return { setAgentSkills(owner, recordRestored(agentSkills[owner].orEmpty(), original, id) { it.id }) }
+        }
+        val original = sharedSkills
+        sharedSkills = upserted(original, id, restored?.asShared()) { it.id }
+        return { sharedSkills = recordRestored(sharedSkills, original, id) { it.id } }
+    }
+
+    /** Applies the state before `change` to its record and returns how to undo that. */
+    private fun revertRecord(change: LearnedChange): () -> Unit {
+        if (change.target == "skill") return revertSkillRecord(change)
+        val owner = change.agentId
+        val original = memoriesOf(owner)
+        setMemories(owner, upserted(original, change.targetId, change.beforeMemory) { it.id })
+        return { setMemories(owner, recordRestored(memoriesOf(owner), original, change.targetId) { it.id }) }
+    }
+
+    fun revertChange(change: LearnedChange) {
+        var undo: () -> Unit = {}
+        optimisticMutation(
+            key = "change:${change.id}",
+            touches = setOf(
+                when {
+                    change.target != "skill" -> "$MEMORY_RECORD${change.targetId}"
+                    change.agentId != null -> "$BOT_SKILL_RECORD${change.targetId}"
+                    else -> "$SKILL_RECORD${change.targetId}"
+                },
+            ),
+            update = { undo = revertRecord(change) },
+            rollback = { undo() },
+            work = { api ->
+                val reverted = api.revertChange(change.id)
+                return@optimisticMutation {
+                    changes = listOf(reverted) + changes
+                    reloadPage()
+                }
+            },
+        )
+    }
+
+    // MARK: Avatars
+
+    fun pickAvatarBot(id: String) {
+        val page = avatarPage
+        if (page.saving) return
+        val bot = agents.firstOrNull { it.id == id }
+        avatarPage = page.copy(botID = id, value = bot?.let { it.avatar ?: placeholderAvatar(it.id) } ?: page.value, saved = false)
+    }
+
+    fun changeAvatar(value: BotAvatarDefinition) {
+        if (!avatarPage.saving) avatarPage = avatarPage.copy(value = value, saved = false)
+    }
+
+    /** The page locks while saving: a PATCH can't be cancelled, and edits could save out of order. */
+    fun saveAvatar() {
+        val page = avatarPage
+        val id = page.botID
+        if (page.saving) return
+        val old = agents.firstOrNull { it.id == id } ?: return
+        fun setAvatar(avatar: BotAvatarDefinition?) {
+            agents = agents.map { if (it.id == id) it.copy(avatar = avatar) else it }
+        }
+        optimisticMutation(
+            key = "agent-avatar:$id",
+            touches = setOf("$BOT_RECORD$id"),
+            update = {
+                setAvatar(page.value)
+                avatarPage = page.copy(saving = true, saved = false)
+            },
+            rollback = {
+                setAvatar(old.avatar)
+                avatarPage = avatarPage.copy(saving = false)
+            },
+            work = { api ->
+                val saved = api.updateAgent(id, mapOf("avatar" to CrumblePatchJson.encodeToJsonElement(page.value)))
+                return@optimisticMutation {
+                    setAvatar(saved.avatar)
+                    avatarPage = avatarPage.copy(saving = false, saved = true)
+                }
+            },
+        )
+    }
+
     // MARK: Settings
+
+    /** Applies at once. One save runs at a time, so the account ends on the newest choice. */
+    fun chooseTheme(next: ThemeChoice) {
+        if (next == theme) return
+        themeChanges += 1
+        adoptTheme(next)
+        if (client?.token.isNullOrEmpty()) accountTheme = next
+        else if (!themeSaving) saveTheme()
+    }
+
+    private fun adoptTheme(next: ThemeChoice) {
+        theme = next
+        credentials.write(THEME_KEY, next.value)
+    }
+
+    private fun saveTheme() {
+        val sending = theme
+        confirmed(
+            start = { themeSaving = true },
+            work = { api -> api.updateTheme(sending.value) },
+            finish = { result ->
+                themeSaving = false
+                result.onSuccess { accountTheme = sending }
+                if (theme != sending) saveTheme()
+                else result.onFailure {
+                    adoptTheme(accountTheme)
+                    errorText = friendlyError(it)
+                }
+            },
+        )
+    }
+
+    fun changeReplyNotifications(on: Boolean) {
+        replyNotifications = on
+        notificationSettings.replies = on
+        onNotificationsChanged()
+    }
+
+    fun changeNotificationSound(on: Boolean) {
+        notificationSound = on
+        notificationSettings.sound = on
+    }
+
+    fun runPalette(action: PaletteAction) {
+        showingPalette = false
+        when (action) {
+            is PaletteAction.OpenBot -> navigate(Route.AgentChat(action.id))
+            is PaletteAction.OpenGroup -> navigate(Route.GroupChat(action.id))
+            PaletteAction.NewBot -> createAgent()
+            PaletteAction.NewGroup -> navigate(Route.NewGroup)
+            is PaletteAction.OpenPage -> navigate(action.route)
+            is PaletteAction.SetTheme -> chooseTheme(action.theme)
+        }
+    }
+
+    fun closeSettings() {
+        errorText = ""
+        password = ""
+        inviteCode = ""
+    }
 
     fun saveSettings() {
         if (savingConnection) return
@@ -1946,95 +4158,1594 @@ class AppModel(
             errorText = "Enter a valid server URL."
             return
         }
-        val candidate = APIClient(baseURL = rawURL, token = trimmedToken)
+        val trimmedEmail = email.trim()
+        val enteredPassword = password
+        val signingUp = accountMode == AccountMode.SignUp
+        if (signingUp && !canCreateAccount(accountName, trimmedEmail, enteredPassword)) {
+            errorText = "Enter your name, email, and password."
+            return
+        }
+        if (enteredPassword.isEmpty() && trimmedToken.isEmpty()) {
+            errorText = "Enter your email and password."
+            return
+        }
+        // A session belongs to one server, so it never goes to a URL the owner just typed.
+        if (enteredPassword.isEmpty() && !signingUp && rawURL != client?.baseURL?.trimmingTrailingSlashes) {
+            errorText = "Enter your password to connect to this server."
+            return
+        }
+        val newName = accountName.trim()
+        val invite = inviteToken(inviteCode)
         savingConnection = true
         errorText = ""
         scope.launch {
+            var created = false
             try {
+                val session = when {
+                    signingUp -> APIClient(rawURL, "", transport).signUp(newName, trimmedEmail, enteredPassword, invite).also { created = true }
+                    enteredPassword.isEmpty() -> trimmedToken
+                    else -> APIClient(rawURL, "", transport).signIn(trimmedEmail, enteredPassword)
+                }
+                val candidate = APIClient(rawURL, session, transport)
                 candidate.agents()
-                credentials.write("server-token", trimmedToken)
+                val replaced = client?.takeIf { it.token.isNotEmpty() && it.token != session }
+                // The server keeps one device row per installation, so this must land before the new session registers.
+                replaced?.let { old -> quietly { onSignOut(old) } }
+                credentials.write("server-token", session)
+                credentials.write("account-email", trimmedEmail)
                 credentials.write("server-url", rawURL)
-                cancelStream()
-                generation += 1
-                pendingMutations = emptySet()
-                mutationRevision += 1
-                resetPendingMessages()
-                recentChats.clear()
-                awaitingInitialSnapshot = false
-                agents = emptyList()
-                agentMemories = emptyMap()
-                sharedMemories = emptyList()
-                sharedSkills = emptyList()
-                schedules = emptyList()
-                executions = emptyList()
-                mcpServers = emptyList()
-                providers = emptyList()
-                models = emptyList()
-                signingIn = null
-                agentDraft = null
-                memoryDraft = null
-                taskDraft = null
-                mcpDraft = null
-                skillDraft = null
-                snapshot = null
-                messages = emptyList()
+                token = session
+                resetConnectionState()
                 client = candidate
-                activeRequests = 0
-                loading = false
-                errorText = ""
-                selectedAgentID = ""
-                showingSettings = false
+                if (route == Route.General) route = null
                 showNotice("Connected")
                 refresh()
                 followActivity()
+                replaced?.let { old -> scope.launch { quietly { old.signOut() } } }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                errorText = friendlyError(e)
+                if (created) {
+                    // The account and any invite are spent, so a retry must sign in rather than sign up.
+                    resetAccountForm()
+                    errorText = "Your account was created, but connecting failed: ${friendlyError(e)}"
+                } else {
+                    errorText = friendlyError(e)
+                }
             } finally {
                 savingConnection = false
             }
         }
     }
 
-    fun saveProviderKey() {
-        val currentProvider = provider
-        val key = providerKey.trim()
-        if (key.isEmpty()) {
-            errorText = "Enter an API key."
-            return
+    /** Ending a replaced session is best effort: it expires on its own, and the new one must still connect. */
+    private suspend fun quietly(work: suspend () -> Unit) {
+        try {
+            work()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
         }
-        optimisticMutation(
-            key = "provider:$currentProvider",
-            update = { providerKey = "" },
-            rollback = {
-                if (provider == currentProvider && providerKey.isEmpty()) {
-                    providerKey = key
+    }
+
+    /** Drops everything that belonged to the old session, so nothing carries over to the next one. */
+    private fun resetConnectionState() {
+        cancelStream()
+        generation += 1
+        pendingMutations = emptySet()
+        mutationRevision += 1
+        activeRecords.clear()
+        settledRecords.clear()
+        resetPendingMessages()
+        resetGroupChats()
+        resetSecrets()
+        resetConnections()
+        resetAccountForm()
+        recentChats.clear()
+        attachmentBytes = emptyMap()
+        credentials.deletePrefixed(RECENT_CHAT_PREFIX)
+        forgetDrafts()
+        awaitingInitialSnapshot = false
+        activityFeed = ActivityFeedState()
+        agents = emptyList()
+        agentMemories = emptyMap()
+        memoryErrors = emptyMap()
+        memoryScope = null
+        sharedMemories = emptyList()
+        sharedSkills = emptyList()
+        agentSkills = emptyMap()
+        agentSkillErrors = emptyMap()
+        selectedSkills = emptySet()
+        bulkReport = emptyList()
+        checkingSkillUpdates = false
+        skillCheckFailures = emptyList()
+        skillInstall = null
+        installedSkill = null
+        skillUpdate = null
+        changes = emptyList()
+        showingChanges = false
+        changesLoading = false
+        changesHasMore = false
+        changesError = ""
+        avatarPage = AvatarPage()
+        schedules = emptyList()
+        schedulesLoaded = false
+        schedulesError = ""
+        showingBotDetails = false
+        showingPalette = false
+        themeSaving = false
+        accountTheme = theme
+        workingBots = emptySet()
+        desktopModels = emptyList()
+        executions = emptyList()
+        scriptRuns = emptyMap()
+        taskRunsLoading = false
+        taskRunsError = ""
+        taskTab = TaskTab.Tasks
+        capabilities = null
+        eventSources = emptyList()
+        eventSourcesLoaded = false
+        eventSourcesError = ""
+        deletingEventSources = emptySet()
+        eventSourceErrors = emptyMap()
+        eventSourceDraft = null
+        mcpServers = emptyList()
+        providers = emptyList()
+        models = emptyList()
+        signingIn = null
+        browserSignIn = null
+        agentDraft = null
+        memoryDraft = null
+        taskDraft = null
+        mcpDraft = null
+        skillDraft = null
+        snapshot = null
+        messages = emptyList()
+        activeRequests = 0
+        loading = false
+        errorText = ""
+        selectedAgentID = ""
+        password = ""
+        onSessionReset()
+    }
+
+    /** Ends the session here and on the server. The device forgets it even if the server can't be reached. */
+    fun signOut() {
+        val api = client ?: return
+        if (signingOut || savingConnection) return
+        signingOut = true
+        errorText = ""
+        scope.launch {
+            try {
+                val revoked = try {
+                    onSignOut(api)
+                    api.signOut()
+                    true
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: APIError) {
+                    e.statusCode == 401
+                } catch (_: Exception) {
+                    false
                 }
+                credentials.delete("server-token")
+                credentials.delete("account-email")
+                resetConnectionState()
+                token = ""
+                email = ""
+                client = APIClient(api.baseURL, "", transport)
+                if (revoked) showNotice("Signed out")
+                else errorText = "Signed out of this device. The server couldn't be reached, so the session may stay active there."
+            } finally {
+                signingOut = false
+            }
+        }
+    }
+
+    // MARK: Credentials and logins
+
+    private fun secretMark(kind: String, botID: String) = secretRevisions["$kind:$botID"] ?: 0
+
+    private fun touchSecrets(kind: String, botID: String) {
+        secretRevisions["$kind:$botID"] = secretMark(kind, botID) + 1
+    }
+
+    /** Whether a read started at `mark` may replace local state: nothing changed since, and nothing is on its way. */
+    private fun secretSettled(kind: String, botID: String, mark: Int): Boolean {
+        val prefix = if (botID.isEmpty()) "$kind:" else "$kind:$botID:"
+        return secretMark(kind, botID) == mark && pendingMutations.none { it.startsWith(prefix) }
+    }
+
+    /** Typed secrets last only as long as the screen they were typed on. */
+    private fun clearSecretDrafts() {
+        credentialForm = null
+        loginForm = null
+        tokenForm = null
+        providerKeyForm = null
+        clearConnectionDrafts()
+        secretUses = null
+    }
+
+    private fun resetSecrets() {
+        clearSecretDrafts()
+        hideProviderLogin()
+        botCredentials = emptyMap()
+        botLogins = emptyMap()
+        credentialLoadErrors = emptyMap()
+        loginLoadErrors = emptyMap()
+        credentialScope = SKILLS_ALL
+        loginScope = SKILLS_ALL
+        freshSecretRequests = emptySet()
+        passwordManagers = emptyList()
+        passwordManagersLoaded = false
+        passwordManagersError = ""
+        providerAccounts = emptyList()
+    }
+
+    private fun <D> editSecrets(ops: SecretOps<D>, botID: String, change: (D) -> D) {
+        val current = ops.lists()[botID] ?: return
+        ops.store(ops.lists() + (botID to change(current)))
+    }
+
+    private fun <D> loadSecretLists(ops: SecretOps<D>) {
+        val revision = mutationRevision
+        request { api ->
+            val bots = api.agents()
+            val marks = bots.associate { it.id to secretMark(ops.kind, it.id) }
+            val loaded = coroutineScope {
+                bots.map { bot -> async { bot.id to attempt { ops.read(api, bot.id) } } }.awaitAll()
+            }
+            return@request {
+                if (settledSince(revision, BOT_RECORD)) loadAgentsForPanel() else applyBots(bots)
+                for ((id, result) in loaded) {
+                    result.onSuccess { list ->
+                        if (secretSettled(ops.kind, id, marks.getValue(id))) ops.store(ops.lists() + (id to list))
+                    }
+                }
+                ops.failures(loaded.mapNotNull { (id, result) -> result.exceptionOrNull()?.let { id to friendlyError(it) } }.toMap())
+            }
+        }
+    }
+
+    private fun <D> reloadSecrets(ops: SecretOps<D>, botID: String) {
+        val api = client ?: return
+        val gen = generation
+        val mark = secretMark(ops.kind, botID)
+        scope.launch {
+            attempt { ops.read(api, botID) }.onSuccess { list ->
+                if (generation == gen && secretSettled(ops.kind, botID, mark)) ops.store(ops.lists() + (botID to list))
+            }
+        }
+    }
+
+    // Restored requests must be followed again: the loop stops once none waits.
+    private fun resumeDecisions() {
+        if (route !is Route.AgentChat) return
+        decisionsKey = ""
+        followDecisions()
+    }
+
+    private fun canSubmit(key: String): Boolean {
+        if (client == null) {
+            errorText = "Connect to your server in Settings."
+            return false
+        }
+        return key !in pendingMutations
+    }
+
+    private fun <D, I> submitSecret(
+        ops: SecretOps<D>,
+        botID: String,
+        name: String,
+        /** The local change to show now, or null when the outcome must wait for a password manager. */
+        provisional: ((D) -> D)?,
+        save: suspend (APIClient) -> I,
+        saved: (D, I) -> D,
+        confirmed: () -> Unit,
+        recover: (String) -> Unit,
+    ) {
+        val before = ops.lists()[botID]
+        optimisticMutation(
+            key = secretKey(ops.kind, botID, name),
+            update = {
+                touchSecrets(ops.kind, botID)
+                if (provisional != null) editSecrets(ops, botID, provisional)
+            },
+            rollback = {
+                touchSecrets(ops.kind, botID)
+                if (provisional != null && before != null) editSecrets(ops, botID) { ops.restored(it, before, name) }
+            },
+            fail = {
+                recover(it)
+                resumeDecisions()
             },
             work = { api ->
-                api.setProviderKey(currentProvider, apiKey = key)
+                val item = save(api)
                 return@optimisticMutation {
-                    showNotice("Provider key saved")
-                    loadProviders()
+                    touchSecrets(ops.kind, botID)
+                    editSecrets(ops, botID) { saved(it, item) }
+                    confirmed()
+                    reloadSecrets(ops, botID)
                 }
             },
         )
     }
 
-    fun removeProviderKey() {
-        val currentProvider = provider
+    private fun submitCredential(form: CredentialForm, confirmed: () -> Unit, recover: (String) -> Unit) {
+        val fields = credentialFields(form)
+        submitSecret(
+            ops = credentialOps,
+            botID = form.owner,
+            name = form.name,
+            provisional = if (form.readsPasswordManager) null else { list -> list.withCredential(provisionalCredential(form)) },
+            save = { api -> api.saveCredential(form.owner, form.name, fields) },
+            saved = { list, item -> list.withCredential(item) },
+            confirmed = confirmed,
+            recover = recover,
+        )
+    }
+
+    fun openCredentialForm(botID: String?, existing: Credential? = null, request: CredentialRequest? = null) {
+        if (existing?.github == true) return
+        credentialForm = credentialForm(botID ?: credentialScope.takeIf { it != SKILLS_ALL }, agents, existing, request)
+        loadPasswordManagers()
+    }
+
+    fun closeCredentialForm() {
+        credentialForm = null
+    }
+
+    /** A plain value applies at once; a new password manager reference stays pending until Crumble has read it. */
+    fun saveCredential() {
+        val form = credentialForm ?: return
+        if (!form.ready || !canSubmit(secretKey("credential", form.owner, form.name))) return
+        val waits = form.readsPasswordManager
+        val from = route
+        credentialForm = if (waits) form.copy(saving = true, error = "") else null
+        val open = { credentialForm?.let { it.saving && it.owner == form.owner && it.name == form.name } == true }
+        submitCredential(
+            form,
+            confirmed = { if (open()) credentialForm = null },
+            recover = { message ->
+                val reopen = !waits && credentialForm == null && loginForm == null && route == from
+                if (open() || reopen) credentialForm = form.copy(error = message) else errorText = message
+            },
+        )
+    }
+
+    fun openLoginForm(botID: String?, existing: Login? = null, request: LoginRequest? = null) {
+        loginForm = loginForm(botID ?: loginScope.takeIf { it != SKILLS_ALL }, agents, existing, request)
+        loadPasswordManagers()
+    }
+
+    fun closeLoginForm() {
+        loginForm = null
+    }
+
+    fun saveLogin() {
+        val form = loginForm ?: return
+        if (!form.ready || !canSubmit(secretKey("login", form.owner, form.name))) return
+        val waits = form.readsPasswordManager
+        val from = route
+        val fields = loginFields(form)
+        loginForm = if (waits) form.copy(saving = true, error = "") else null
+        val open = { loginForm?.let { it.saving && it.owner == form.owner && it.name == form.name } == true }
+        submitSecret(
+            ops = loginOps,
+            botID = form.owner,
+            name = form.name,
+            provisional = if (waits) null else { list -> list.withLogin(provisionalLogin(form)) },
+            save = { api -> api.saveLogin(form.owner, form.name, fields) },
+            saved = { list, item -> list.withLogin(item) },
+            confirmed = { if (open()) loginForm = null },
+            recover = { message ->
+                val reopen = !waits && credentialForm == null && loginForm == null && route == from
+                if (open() || reopen) loginForm = form.copy(error = message) else errorText = message
+            },
+        )
+    }
+
+    private fun <D> changeSecret(
+        ops: SecretOps<D>,
+        botID: String,
+        name: String,
+        change: (D, String) -> D,
+        call: suspend (APIClient, String, String) -> Unit,
+    ) {
+        val key = secretKey(ops.kind, botID, name)
+        val before = ops.lists()[botID]
         optimisticMutation(
-            key = "provider:$currentProvider",
-            update = {},
-            rollback = {},
+            key = key,
+            update = {
+                touchSecrets(ops.kind, botID)
+                decisionErrors = decisionErrors - key
+                editSecrets(ops, botID) { change(it, name) }
+            },
+            rollback = {
+                touchSecrets(ops.kind, botID)
+                if (before != null) editSecrets(ops, botID) { ops.restored(it, before, name) }
+            },
+            fail = { message ->
+                if (route == Route.AgentChat(botID)) decisionErrors = decisionErrors + (key to message) else errorText = message
+                resumeDecisions()
+            },
             work = { api ->
-                api.deleteProviderKey(currentProvider)
+                call(api, botID, name)
                 return@optimisticMutation {
-                    showNotice("Provider key removed")
-                    loadProviders()
+                    touchSecrets(ops.kind, botID)
+                    reloadSecrets(ops, botID)
                 }
             },
         )
+    }
+
+    fun deleteCredential(botID: String, name: String) {
+        if (botCredentials[botID]?.credentials?.any { it.name == name && it.github } == true) return
+        changeSecret(credentialOps, botID, name, credentialOps.withoutItem, credentialOps.delete)
+    }
+
+    fun deleteLogin(botID: String, name: String) = changeSecret(loginOps, botID, name, loginOps.withoutItem, loginOps.delete)
+
+    // Never a delete: a saved item and a request for more under its name can coexist.
+    fun declineCredentialRequest(botID: String, name: String) =
+        changeSecret(credentialOps, botID, name, credentialOps.withoutRequest, credentialOps.decline)
+
+    fun declineLoginRequest(botID: String, name: String) =
+        changeSecret(loginOps, botID, name, loginOps.withoutRequest, loginOps.decline)
+
+    fun openBotCredentials(botID: String) {
+        agentDraft = null
+        credentialScope = botID
+        navigate(Route.Credentials)
+    }
+
+    fun openSecretUses(kind: SecretKind, botID: String, name: String) {
+        secretUses = SecretUsesView(kind, botID, name)
+        fetchSecretUses(null)
+    }
+
+    fun closeSecretUses() {
+        secretUses = null
+    }
+
+    fun loadMoreSecretUses() {
+        val view = secretUses ?: return
+        if (view.loading || view.loadingMore) return
+        secretUses = view.copy(loadingMore = true, error = "")
+        fetchSecretUses(view.rows.lastOrNull()?.id)
+    }
+
+    private fun fetchSecretUses(before: String?) {
+        val view = secretUses ?: return
+        val api = client ?: return
+        val gen = generation
+        scope.launch {
+            val page = attempt {
+                when (view.kind) {
+                    SecretKind.credential -> api.credentialUses(view.botID, view.name, before).map { it.row() }
+                    SecretKind.login -> api.loginUses(view.botID, view.name, before).map { it.row() }
+                }
+            }
+            val current = secretUses?.takeIf { generation == gen && it.id == view.id } ?: return@launch
+            secretUses = page.fold(
+                onSuccess = {
+                    current.copy(rows = current.rows + it, loading = false, loadingMore = false, hasMore = it.size == SECRET_USES_PAGE)
+                },
+                onFailure = { current.copy(loading = false, loadingMore = false, error = friendlyError(it)) },
+            )
+        }
+    }
+
+    // MARK: Password managers
+
+    val connectedManagers: List<PasswordManager> get() = passwordManagers.filter { it.connected }
+
+    fun loadPasswordManagers() {
+        val api = client ?: return
+        val gen = generation
+        val mark = secretMark("password-manager", "")
+        scope.launch {
+            val loaded = attempt { api.passwordManagers() }
+            if (generation != gen) return@launch
+            loaded.fold(
+                onSuccess = {
+                    if (secretSettled("password-manager", "", mark)) passwordManagers = it
+                    passwordManagersLoaded = true
+                    passwordManagersError = ""
+                },
+                onFailure = { passwordManagersError = friendlyError(it) },
+            )
+        }
+    }
+
+    fun openManagerToken(manager: PasswordManager) {
+        tokenForm = ManagerTokenForm(manager)
+    }
+
+    fun closeManagerToken() {
+        tokenForm = null
+    }
+
+    private fun editManager(id: String, change: (PasswordManager) -> PasswordManager) {
+        passwordManagers = passwordManagers.map { if (it.id == id) change(it) else it }
+    }
+
+    /** Crumble signs in to check the token, so this stays pending until the password manager has answered. */
+    fun saveManagerToken() {
+        val form = tokenForm ?: return
+        val id = form.manager.id
+        val key = "password-manager:$id"
+        if (!form.ready || !canSubmit(key)) return
+        val token = form.token.text.trim()
+        tokenForm = form.copy(saving = true, error = "")
+        val open = { tokenForm?.let { it.saving && it.manager.id == id } == true }
+        optimisticMutation(
+            key = key,
+            update = { touchSecrets("password-manager", "") },
+            rollback = { touchSecrets("password-manager", "") },
+            fail = { message -> if (open()) tokenForm = form.copy(error = message) else errorText = message },
+            work = { api ->
+                val saved = api.connectPasswordManager(id, token)
+                return@optimisticMutation {
+                    touchSecrets("password-manager", "")
+                    editManager(id) { saved }
+                    if (open()) tokenForm = null
+                    loadPasswordManagers()
+                }
+            },
+        )
+    }
+
+    fun disconnectManager(manager: PasswordManager) {
+        val key = "password-manager:${manager.id}"
+        if (manager.usedBy.isNotEmpty()) return
+        optimisticMutation(
+            key = key,
+            update = {
+                touchSecrets("password-manager", "")
+                editManager(manager.id) { it.copy(connected = false, connectedAt = null) }
+            },
+            rollback = {
+                touchSecrets("password-manager", "")
+                editManager(manager.id) { manager }
+            },
+            work = { api ->
+                api.disconnectPasswordManager(manager.id)
+                return@optimisticMutation {
+                    touchSecrets("password-manager", "")
+                    loadPasswordManagers()
+                }
+            },
+        )
+    }
+
+    // MARK: Connections
+
+    var githubApps by mutableStateOf(Remote<List<GitHubApp>>())
+    var githubAccounts by mutableStateOf(Remote<List<GitHubAccount>>())
+    var serverSettings by mutableStateOf(Remote<ServerSettings>())
+    /** Null until `/v1/admin/settings` answers; only admins may read it. */
+    var isAdmin by mutableStateOf<Boolean?>(null)
+    var gateways by mutableStateOf(Remote<List<MessageGateway>>())
+    var gatewayForm by mutableStateOf<GatewayForm?>(null)
+    var eventRelay by mutableStateOf(Remote<RelayStatus>())
+    var relayDraft by mutableStateOf("")
+    var relaySaving by mutableStateOf(false)
+    var pluginSettings by mutableStateOf(Remote<PluginSettings>())
+    var pluginForm by mutableStateOf<PluginSecretForm?>(null)
+    var webSearch by mutableStateOf(Remote<WebSearchSettings>())
+    var judgeModel by mutableStateOf(Remote<JudgeModel>())
+    var visionModel by mutableStateOf(Remote<VisionModel>())
+    var createAppForm by mutableStateOf<CreateGitHubAppForm?>(null)
+    var githubAppForm by mutableStateOf<GitHubAppForm?>(null)
+    var addAccountForm by mutableStateOf<AddGitHubAccountForm?>(null)
+    var githubAccountForm by mutableStateOf<GitHubAccountForm?>(null)
+    var serverSettingsForm by mutableStateOf<ServerSettingsForm?>(null)
+    var githubFlow by mutableStateOf<GitHubFlow?>(null)
+
+    private fun clearConnectionDrafts() {
+        pluginForm = null
+        addAccountForm = null
+        githubAccountForm = null
+        githubAppForm = null
+        mcpDraft = null
+        inviteSheet = null
+    }
+
+    private fun resetConnections() {
+        clearConnectionDrafts()
+        githubApps = Remote()
+        githubAccounts = Remote()
+        serverSettings = Remote()
+        isAdmin = null
+        gateways = Remote()
+        gatewayForm = null
+        eventRelay = Remote()
+        relayDraft = ""
+        relaySaving = false
+        pluginSettings = Remote()
+        webSearch = Remote()
+        judgeModel = Remote()
+        visionModel = Remote()
+        createAppForm = null
+        serverSettingsForm = null
+        githubFlow = null
+        accountID = null
+        adminUsers = Remote()
+        invites = Remote()
+        outdatedWorkspaces = Remote()
+    }
+
+    /** Newest read wins, and no read replaces a change that's on its way. */
+    private fun <T> loadRemote(kind: String, get: () -> Remote<T>, set: (Remote<T>) -> Unit, work: suspend (APIClient) -> T) {
+        touchSecrets(kind, "")
+        val mark = secretMark(kind, "")
+        confirmed(
+            start = {},
+            work = work,
+            finish = { result ->
+                result.fold(
+                    onSuccess = { if (secretSettled(kind, "", mark)) set(Remote(it, failure = get().failure)) },
+                    onFailure = { if (secretMark(kind, "") == mark) set(get().copy(error = friendlyError(it))) },
+                )
+            },
+        )
+    }
+
+    private fun recordChange(
+        kind: String,
+        key: String,
+        update: () -> Unit,
+        rollback: () -> Unit,
+        fail: (String) -> Unit = { errorText = it },
+        work: suspend (APIClient) -> (() -> Unit),
+    ) = optimisticMutation(
+        key = "$kind:$key",
+        update = {
+            touchSecrets(kind, "")
+            update()
+        },
+        rollback = {
+            touchSecrets(kind, "")
+            rollback()
+        },
+        fail = fail,
+        work = { api ->
+            val confirm = work(api)
+            val done: () -> Unit = {
+                touchSecrets(kind, "")
+                confirm()
+            }
+            done
+        },
+    )
+
+    fun loadWebSearch() = loadRemote("web-search", { webSearch }, { webSearch = it }) { it.webSearch() }
+
+    fun loadJudgeModel() = loadRemote("judge", { judgeModel }, { judgeModel = it }) { it.judgeModel() }
+
+    fun loadVisionModel() = loadRemote("vision", { visionModel }, { visionModel = it }) { it.visionModel() }
+
+    fun loadPluginSettings() = loadRemote("plugin", { pluginSettings }, { pluginSettings = it }) { it.pluginSettings() }
+
+    fun loadGateways() = loadRemote("gateway", { gateways }, {
+        gateways = it
+        seedGatewayForm()
+    }) { it.messageGateways() }
+
+    fun loadRelay() = loadRemote("relay", { eventRelay }, { next ->
+        val saved = eventRelay.value?.url.orEmpty()
+        eventRelay = next
+        // A typed address survives a refresh; one the owner hasn't touched follows the server.
+        if (relayDraft == saved) relayDraft = next.value?.url.orEmpty()
+    }) { it.eventRelay() }
+
+    fun loadGitHub() {
+        loadRemote("github-app", { githubApps }, { githubApps = it }) { it.githubApps() }
+        loadRemote("github-account", { githubAccounts }, { githubAccounts = it }) { it.githubAccounts() }
+    }
+
+    private fun loadCoding() {
+        loadAgentsForPanel()
+        loadCapabilities()
+        loadPasswordManagers()
+        loadGitHub()
+        touchSecrets("server-settings", "")
+        val mark = secretMark("server-settings", "")
+        confirmed(
+            start = {},
+            work = { api -> api.serverSettings() },
+            finish = { result ->
+                result.fold(
+                    onSuccess = {
+                        isAdmin = true
+                        if (secretSettled("server-settings", "", mark)) serverSettings = Remote(it)
+                        loadOutdatedWorkspaces()
+                        loadAdminUsers()
+                    },
+                    onFailure = {
+                        if ((it as? APIError)?.statusCode == 403) {
+                            isAdmin = false
+                        } else {
+                            serverSettings = serverSettings.copy(error = friendlyError(it))
+                        }
+                    },
+                )
+            },
+        )
+    }
+
+    private fun loadAgentsForPanel() {
+        val revision = mutationRevision
+        request { api ->
+            val loaded = api.agents()
+            return@request {
+                if (settledSince(revision, BOT_RECORD)) loadAgentsForPanel() else applyBots(loaded)
+            }
+        }
+    }
+
+    // MARK: Model choices
+
+    fun chooseJudgeModel(value: String) {
+        val data = judgeModel.value ?: return
+        val choice = judgeChoice(data, value)
+        if (value == judgeValue(data) || (choice == null && value != JUDGE_DEFAULT)) return
+        val chosen = choice?.let { JudgeModelJudgeModel(it.provider, it.model) }
+        recordChange(
+            "judge", "model",
+            update = { judgeModel = Remote(data.copy(judgeModel = chosen, effective = choice ?: data.effective)) },
+            rollback = { judgeModel = Remote(data) },
+            fail = { judgeModel = judgeModel.copy(failure = it) },
+        ) { api ->
+            val saved = api.updateJudgeModel(chosen?.provider, chosen?.model)
+            return@recordChange { judgeModel = Remote(saved) }
+        }
+    }
+
+    fun chooseVisionModel(value: String) {
+        val data = visionModel.value ?: return
+        val choice = visionChoice(data, value)
+        if (value == visionValue(data) || (choice == null && value != VISION_OFF)) return
+        val chosen = choice?.let { VisionModelVisionModel(it.provider, it.model) }
+        recordChange(
+            "vision", "model",
+            update = { visionModel = Remote(data.copy(visionModel = chosen)) },
+            rollback = { visionModel = Remote(data) },
+            fail = { visionModel = visionModel.copy(failure = it) },
+        ) { api ->
+            val saved = api.updateVisionModel(chosen?.provider, chosen?.model)
+            return@recordChange { visionModel = Remote(saved) }
+        }
+    }
+
+    fun chooseWebSearchProvider(provider: String) {
+        val data = webSearch.value ?: return
+        if (provider == data.defaultProvider) return
+        recordChange(
+            "web-search", "default",
+            update = { webSearch = Remote(data.copy(defaultProvider = provider)) },
+            rollback = { webSearch = Remote(data) },
+            fail = { webSearch = webSearch.copy(failure = it) },
+        ) { api ->
+            val saved = api.updateWebSearch(provider)
+            return@recordChange { webSearch = Remote(saved) }
+        }
+    }
+
+    // MARK: Plugin settings
+
+    private fun editPluginSetting(pluginID: String, key: String, change: (PluginSetting) -> PluginSetting) {
+        val data = pluginSettings.value ?: return
+        val plugins = data.plugins.map { plugin ->
+            if (plugin.id != pluginID) plugin else plugin.copy(settings = plugin.settings.map { if (it.key == key) change(it) else it })
+        }
+        pluginSettings = pluginSettings.copy(value = data.copy(plugins = plugins))
+    }
+
+    // These pages' own status depends on the plugin's secrets.
+    private fun refreshAfterPluginChange() {
+        loadPluginSettings()
+        loadPasswordManagers()
+        when (route) {
+            Route.WebSearch -> loadWebSearch()
+            Route.EventRelay -> loadRelay()
+            is Route.MessageGateway -> loadGateways()
+            else -> Unit
+        }
+    }
+
+    fun openPluginSetting(row: PluginRow) {
+        pluginForm = PluginSecretForm(row.pluginID, row.setting, secretDraft(row.setting.secret))
+        loadPasswordManagers()
+    }
+
+    fun closePluginSetting() {
+        pluginForm = null
+    }
+
+    fun savePluginSetting() {
+        val form = pluginForm ?: return
+        val input = form.secret.input ?: return
+        val pluginID = form.pluginID
+        val setting = form.setting
+        val key = "$pluginID:${setting.key}"
+        if (!form.secret.changed || form.saving || !canSubmit("plugin:$key")) return
+        val waits = input is SecretInput.Reference
+        val from = route
+        pluginForm = if (waits) form.copy(saving = true, error = "") else null
+        val open = { pluginForm?.let { it.saving && it.pluginID == pluginID && it.setting.key == setting.key } == true }
+        recordChange(
+            "plugin", key,
+            update = { if (!waits) editPluginSetting(pluginID, setting.key) { it.copy(secret = STORED) } },
+            rollback = { if (!waits) editPluginSetting(pluginID, setting.key) { setting } },
+            fail = { message ->
+                val reopen = !waits && pluginForm == null && route == from
+                if (open() || reopen) pluginForm = form.copy(saving = false, error = message) else errorText = message
+            },
+        ) { api ->
+            val saved = api.setPluginSetting(pluginID, setting.key, input)
+            return@recordChange {
+                editPluginSetting(pluginID, setting.key) { saved }
+                if (open()) pluginForm = null
+                refreshAfterPluginChange()
+            }
+        }
+    }
+
+    fun removePluginSetting(row: PluginRow) {
+        val setting = row.setting
+        recordChange(
+            "plugin", "${row.pluginID}:${setting.key}",
+            update = { editPluginSetting(row.pluginID, setting.key) { it.copy(secret = SecretStatus(false, null, null)) } },
+            rollback = { editPluginSetting(row.pluginID, setting.key) { setting } },
+        ) { api ->
+            val saved = api.deletePluginSetting(row.pluginID, setting.key)
+            return@recordChange {
+                editPluginSetting(row.pluginID, setting.key) { saved }
+                refreshAfterPluginChange()
+            }
+        }
+    }
+
+    // MARK: Event relay
+
+    /** The relay decides whether the address works, so its answer is the only status shown. */
+    fun saveRelay() {
+        val next = relayDraft.trim().ifEmpty { null }
+        if (relaySaving || next == eventRelay.value?.url) return
+        confirmed(
+            start = {
+                relaySaving = true
+                eventRelay = eventRelay.copy(failure = "")
+            },
+            work = { api -> api.updateEventRelay(next) },
+            finish = { result ->
+                relaySaving = false
+                result.fold(
+                    onSuccess = { saved ->
+                        touchSecrets("relay", "")
+                        eventRelay = Remote(saved)
+                        if (relayDraft.trim().ifEmpty { null } == next) relayDraft = saved.url.orEmpty()
+                    },
+                    onFailure = { eventRelay = eventRelay.copy(failure = friendlyError(it)) },
+                )
+            },
+        )
+    }
+
+    // MARK: Message gateways
+
+    private fun seedGatewayForm() {
+        val id = (route as? Route.MessageGateway)?.id ?: return
+        if (gatewayForm?.gatewayID == id) return
+        gateways.value?.firstOrNull { it.id == id }?.let { gatewayForm = gatewayForm(id, it.config) }
+    }
+
+    private fun editGateway(id: String, change: (MessageGateway) -> MessageGateway) {
+        val list = gateways.value ?: return
+        gateways = gateways.copy(value = list.map { if (it.id == id) change(it) else it })
+    }
+
+    fun resetGatewayForm() {
+        val form = gatewayForm ?: return
+        gateways.value?.firstOrNull { it.id == form.gatewayID }?.let { gatewayForm = gatewayForm(it.id, it.config) }
+    }
+
+    fun saveGateway() {
+        val form = gatewayForm ?: return
+        val id = form.gatewayID
+        val config = form.config()
+        val before = gateways.value?.firstOrNull { it.id == id } ?: return
+        if (form.saving) return
+        gatewayForm = form.copy(attempted = true, saved = false, error = "")
+        if (gatewayErrors(config, agents.map { it.id }.toSet()).isNotEmpty() || !canSubmit("gateway:$id")) return
+        val current = { gatewayForm?.takeIf { it.gatewayID == id } }
+        recordChange(
+            "gateway", id,
+            update = {
+                current()?.let { gatewayForm = it.copy(saving = true) }
+                editGateway(id) { it.copy(config = config) }
+            },
+            rollback = { editGateway(id) { before } },
+            fail = { message ->
+                val open = current()
+                if (open != null) gatewayForm = open.copy(saving = false, error = message) else errorText = message
+            },
+        ) { api ->
+            val saved = api.updateMessageGateway(id, config)
+            return@recordChange {
+                editGateway(id) { saved }
+                // Edits made while this was saving stay in the form.
+                current()?.let { open ->
+                    gatewayForm = if (open.config() == config) gatewayForm(id, saved.config).copy(saved = true) else open.copy(saving = false)
+                }
+                loadGateways()
+            }
+        }
+    }
+
+    // MARK: GitHub Apps
+
+    private fun apps() = githubApps.value.orEmpty()
+
+    private fun accounts() = githubAccounts.value.orEmpty()
+
+    private fun storeApp(app: GitHubApp) {
+        githubApps = githubApps.copy(value = upserted(apps(), app.id, app) { it.id })
+    }
+
+    private fun storeAccount(account: GitHubAccount) {
+        githubAccounts = githubAccounts.copy(value = upserted(accounts(), account.id, account) { it.id })
+    }
+
+    private fun appForm(id: String) = githubAppForm?.takeIf { it.appID == id }
+
+    private fun editAppForm(id: String, change: (GitHubAppForm) -> GitHubAppForm) {
+        appForm(id)?.let { githubAppForm = change(it) }
+    }
+
+    fun openCreateApp() {
+        createAppForm = CreateGitHubAppForm()
+    }
+
+    fun closeCreateApp() {
+        if (createAppForm?.saving != true) createAppForm = null
+    }
+
+    /** GitHub creates an App only from a form post with the manifest, so its page opens inside the app. */
+    fun createGitHubApp() {
+        val form = createAppForm ?: return
+        val origin = client?.baseURL?.let(::webOrigin) ?: return
+        if (!form.ready) return
+        confirmed(
+            start = { createAppForm = form.copy(saving = true, error = "") },
+            work = { api -> api.createGithubAppManifest(form.name.trim(), origin, form.organization.trim().nilIfEmpty) },
+            finish = { result ->
+                result.fold(
+                    onSuccess = {
+                        createAppForm = null
+                        githubFlow = GitHubFlow(GitHubStep.created, it.url, manifest = it.manifest)
+                    },
+                    onFailure = { createAppForm = createAppForm?.copy(saving = false, error = friendlyError(it)) },
+                )
+            },
+        )
+    }
+
+    fun installGitHubApp(app: GitHubApp) {
+        if (isWebLink(app.installUrl)) githubFlow = GitHubFlow(GitHubStep.installed, app.installUrl, appID = app.id)
+    }
+
+    fun signInToGitHubApp(app: GitHubApp) {
+        val origin = client?.baseURL?.let(::webOrigin) ?: return
+        confirmed(
+            start = { editAppForm(app.id) { it.copy(signingIn = true, signInError = "") } },
+            work = { api -> api.signInGithubApp(app.id, origin) },
+            finish = { result ->
+                editAppForm(app.id) { it.copy(signingIn = false, signInError = result.exceptionOrNull()?.let(::friendlyError).orEmpty()) }
+                result.onSuccess { url -> if (isWebLink(url)) githubFlow = GitHubFlow(GitHubStep.authorized, url, appID = app.id) }
+            },
+        )
+    }
+
+    fun closeGitHubFlow() {
+        githubFlow = null
+    }
+
+    /** GitHub sent the owner back; the App counts only once the server has confirmed it. */
+    fun finishGitHubFlow(url: String) {
+        val flow = githubFlow ?: return
+        if (flow.finishing) return
+        confirmed(
+            start = { githubFlow = flow.copy(finishing = true, error = "") },
+            work = { api ->
+                when (flow.step) {
+                    GitHubStep.installed -> api.connectGithubApp(checkNotNull(flow.appID))
+                    GitHubStep.created -> oauthResult(url).let { api.completeGithubApp(it.code, it.state) }
+                    GitHubStep.authorized -> oauthResult(url).let { api.completeGithubAppSignIn(it.code, it.state) }
+                }
+            },
+            finish = { result ->
+                result.onSuccess {
+                    storeApp(it)
+                    loadGitHub()
+                }
+                if (githubFlow?.id == flow.id) {
+                    githubFlow = result.fold({ null }, { flow.copy(error = friendlyError(it)) })
+                }
+            },
+        )
+    }
+
+    fun openGitHubApp(app: GitHubApp) {
+        githubAppForm = GitHubAppForm(app.id, app.botIds, secretDraft(app.clientSecret))
+        loadPasswordManagers()
+    }
+
+    fun closeGitHubApp() {
+        githubAppForm = null
+    }
+
+    fun saveGitHubAppBots() {
+        val form = githubAppForm ?: return
+        val before = apps().firstOrNull { it.id == form.appID } ?: return
+        val from = route
+        if (!canSubmit("github-app:${form.appID}")) return
+        githubAppForm = null
+        recordChange(
+            "github-app", form.appID,
+            update = { storeApp(before.copy(botIds = form.botIDs)) },
+            rollback = { storeApp(before) },
+            fail = { message ->
+                if (githubAppForm == null && route == from) githubAppForm = form.copy(error = message) else errorText = message
+            },
+        ) { api ->
+            val saved = api.setGithubAppBots(form.appID, form.botIDs)
+            return@recordChange {
+                storeApp(saved)
+                // A bot uses one App per GitHub account, so the server may have moved it off another.
+                loadGitHub()
+            }
+        }
+    }
+
+    fun deleteGitHubApp(app: GitHubApp) {
+        val before = apps()
+        recordChange(
+            "github-app", app.id,
+            update = { githubApps = githubApps.copy(value = before.filterNot { it.id == app.id }) },
+            rollback = { githubApps = githubApps.copy(value = recordRestored(apps(), before, app.id) { it.id }) },
+        ) { api ->
+            api.deleteGithubApp(app.id)
+            return@recordChange { loadGitHub() }
+        }
+    }
+
+    fun checkGitHubApp(id: String) {
+        confirmed(
+            start = { editAppForm(id) { it.copy(checking = true, checkError = "") } },
+            work = { api -> api.connectGithubApp(id) },
+            finish = { result ->
+                result.onSuccess(::storeApp)
+                editAppForm(id) { it.copy(checking = false, checkError = result.exceptionOrNull()?.let(::friendlyError).orEmpty()) }
+            },
+        )
+    }
+
+    fun saveGitHubClientSecret() {
+        val form = githubAppForm ?: return
+        val id = form.appID
+        val input = form.clientSecret.input?.takeIf { form.clientSecret.changed } ?: return
+        if (form.savingSecret) return
+        confirmed(
+            start = { githubAppForm = form.copy(savingSecret = true, secretError = "") },
+            work = { api -> api.setGithubAppClientSecret(id, input) },
+            finish = { result ->
+                result.onSuccess { saved ->
+                    storeApp(saved)
+                    loadPasswordManagers()
+                }
+                editAppForm(id) { open ->
+                    result.fold(
+                        { saved -> open.copy(savingSecret = false, clientSecret = secretDraft(saved.clientSecret)) },
+                        { open.copy(savingSecret = false, secretError = friendlyError(it)) },
+                    )
+                }
+            },
+        )
+    }
+
+    fun signOutOfGitHubApp(id: String) {
+        confirmed(
+            start = { editAppForm(id) { it.copy(signingOut = true, signInError = "") } },
+            work = { api -> api.signOutGithubApp(id) },
+            finish = { result ->
+                result.onSuccess(::storeApp)
+                editAppForm(id) { it.copy(signingOut = false, signInError = result.exceptionOrNull()?.let(::friendlyError).orEmpty()) }
+            },
+        )
+    }
+
+    // MARK: Machine accounts
+
+    fun openAddAccount() {
+        addAccountForm = AddGitHubAccountForm()
+        loadPasswordManagers()
+    }
+
+    fun closeAddAccount() {
+        addAccountForm = null
+    }
+
+    /** GitHub vouches for the token, so the account appears when the server has read it. */
+    fun addGitHubAccount() {
+        val form = addAccountForm ?: return
+        val input = form.token.input ?: return
+        if (form.saving) return
+        confirmed(
+            start = { addAccountForm = form.copy(saving = true, error = "") },
+            work = { api -> api.addGithubAccount(input) },
+            finish = { result ->
+                result.fold(
+                    onSuccess = {
+                        storeAccount(it)
+                        addAccountForm = null
+                        loadGitHub()
+                        loadPasswordManagers()
+                    },
+                    onFailure = { failure -> addAccountForm = addAccountForm?.copy(saving = false, error = friendlyError(failure)) },
+                )
+            },
+        )
+    }
+
+    fun openGitHubAccount(account: GitHubAccount) {
+        githubAccountForm = GitHubAccountForm(account.id, account.botIds, secretDraft(account.token))
+        loadPasswordManagers()
+    }
+
+    fun closeGitHubAccount() {
+        githubAccountForm = null
+    }
+
+    fun saveGitHubAccount() {
+        val form = githubAccountForm ?: return
+        val before = accounts().firstOrNull { it.id == form.accountID } ?: return
+        val token = form.token.input?.takeIf { form.token.changed }
+        if (form.saving) return
+        if (token == null) return saveAccountBots(form, before)
+        val id = form.accountID
+        confirmed(
+            start = { githubAccountForm = form.copy(saving = true, error = "") },
+            work = { api ->
+                val replaced = api.setGithubAccountToken(id, token)
+                replaced to attempt { api.setGithubAccountBots(id, form.botIDs) }
+            },
+            finish = { result ->
+                val replaced = result.getOrNull()?.first
+                replaced?.let(::storeAccount)
+                val failure = result.exceptionOrNull() ?: result.getOrNull()?.second?.exceptionOrNull()
+                val open = githubAccountForm?.takeIf { it.accountID == id }
+                when {
+                    failure == null -> {
+                        result.getOrNull()?.second?.getOrNull()?.let(::storeAccount)
+                        if (open != null) githubAccountForm = null
+                        loadGitHub()
+                    }
+                    // A saved token isn't sent again when the owner retries the bots.
+                    open != null -> githubAccountForm = open.copy(
+                        saving = false,
+                        error = friendlyError(failure),
+                        token = replaced?.let { secretDraft(it.token) } ?: open.token,
+                    )
+                    else -> errorText = friendlyError(failure)
+                }
+                if (replaced != null) loadPasswordManagers()
+            },
+        )
+    }
+
+    private fun saveAccountBots(form: GitHubAccountForm, before: GitHubAccount) {
+        val from = route
+        if (!canSubmit("github-account:${form.accountID}")) return
+        githubAccountForm = null
+        recordChange(
+            "github-account", form.accountID,
+            update = { storeAccount(before.copy(botIds = form.botIDs)) },
+            rollback = { storeAccount(before) },
+            fail = { message ->
+                if (githubAccountForm == null && route == from) githubAccountForm = form.copy(error = message) else errorText = message
+            },
+        ) { api ->
+            val saved = api.setGithubAccountBots(form.accountID, form.botIDs)
+            return@recordChange {
+                storeAccount(saved)
+                loadGitHub()
+            }
+        }
+    }
+
+    fun deleteGitHubAccount(account: GitHubAccount) {
+        val before = accounts()
+        recordChange(
+            "github-account", account.id,
+            update = { githubAccounts = githubAccounts.copy(value = before.filterNot { it.id == account.id }) },
+            rollback = { githubAccounts = githubAccounts.copy(value = recordRestored(accounts(), before, account.id) { it.id }) },
+        ) { api ->
+            api.deleteGithubAccount(account.id)
+            return@recordChange { loadGitHub() }
+        }
+    }
+
+    // MARK: Workspaces
+
+    fun openServerSettings(field: WorkspaceField) {
+        serverSettings.value?.let { serverSettingsForm = serverSettingsForm(field, it) }
+    }
+
+    fun saveServerSettings() {
+        val form = serverSettingsForm ?: return
+        val before = serverSettings.value ?: return
+        val patch = form.patch() ?: return
+        val from = route
+        if (!canSubmit("server-settings:patch")) return
+        serverSettingsForm = null
+        recordChange(
+            "server-settings", "patch",
+            update = { serverSettings = Remote(before.patched(form)) },
+            rollback = { serverSettings = Remote(before) },
+            fail = { message ->
+                if (serverSettingsForm == null && route == from) serverSettingsForm = form.copy(error = message) else errorText = message
+            },
+        ) { api ->
+            val saved = api.updateServerSettings(patch)
+            return@recordChange {
+                serverSettings = Remote(saved)
+                loadOutdatedWorkspaces()
+            }
+        }
+    }
+
+    // MARK: Users
+
+    var accountMode by mutableStateOf(AccountMode.SignIn)
+    var accountName by mutableStateOf("")
+    var inviteCode by mutableStateOf("")
+    /** Null until the session answers; the rows of an unknown account offer no actions. */
+    var accountID by mutableStateOf<String?>(null)
+    var adminUsers by mutableStateOf(Remote<List<AdminUser>>())
+    var invites by mutableStateOf(Remote<List<Invite>>())
+    var outdatedWorkspaces by mutableStateOf(Remote<List<ListOutdatedWorkspacesResponseWorkspacesItem>>())
+    var inviteSheet by mutableStateOf<InviteSheet?>(null)
+    private var inviteAttempt = 0
+
+    fun switchAccountMode() {
+        accountMode = if (accountMode == AccountMode.SignIn) AccountMode.SignUp else AccountMode.SignIn
+        errorText = ""
+    }
+
+    private fun resetAccountForm() {
+        accountMode = AccountMode.SignIn
+        accountName = ""
+        inviteCode = ""
+    }
+
+    private fun loadAccount(then: () -> Unit = {}) {
+        if (client == null) return
+        val changes = themeChanges
+        confirmed(
+            start = {},
+            work = { api -> api.accountSession() },
+            finish = { result ->
+                result.fold(
+                    onSuccess = {
+                        accountID = it.id
+                        isAdmin = it.admin
+                        // The account's theme wins unless the owner chose one since this read began.
+                        ThemeChoice.of(it.theme)?.takeIf { changes == themeChanges && !themeSaving }?.let { saved ->
+                            accountTheme = saved
+                            if (saved != theme) adoptTheme(saved)
+                        }
+                        then()
+                    },
+                    onFailure = { adminUsers = adminUsers.copy(error = friendlyError(it)) },
+                )
+            },
+        )
+    }
+
+    private fun loadUsers() = loadAccount {
+        if (isAdmin == true) {
+            loadAdminUsers()
+            loadInvites()
+            loadRemote("server-settings", { serverSettings }, { serverSettings = it }) { it.serverSettings() }
+        }
+    }
+
+    private fun loadAdminUsers() = loadRemote("admin-user", { adminUsers }, { adminUsers = it }) { it.adminUsers() }
+
+    private fun loadInvites() = loadRemote("admin-invite", { invites }, { invites = it }) { it.invites() }
+
+    private fun loadOutdatedWorkspaces() =
+        loadRemote("outdated-workspace", { outdatedWorkspaces }, { outdatedWorkspaces = it }) { it.outdatedWorkspaces() }
+
+    private fun editUsers(change: (List<AdminUser>) -> List<AdminUser>) {
+        adminUsers = Remote(adminUsers.value?.let(change), error = adminUsers.error)
+    }
+
+    private fun failUsers(message: String) {
+        adminUsers = adminUsers.copy(failure = message)
+        loadAdminUsers()
+    }
+
+    fun setUserRole(user: AdminUser, role: String) {
+        val assign = { next: String ->
+            editUsers { users -> users.map { if (it.id == user.id) it.copy(role = next) else it } }
+        }
+        recordChange(
+            "admin-user", user.id,
+            update = { assign(role) },
+            rollback = { assign(user.role) },
+            fail = ::failUsers,
+        ) { api ->
+            val saved = api.setUserRole(user.id, role)
+            return@recordChange { editUsers { users -> users.map { if (it.id == saved.id) saved else it } } }
+        }
+    }
+
+    fun removeUser(user: AdminUser) {
+        recordChange(
+            "admin-user", user.id,
+            update = { editUsers { users -> users.filter { it.id != user.id } } },
+            rollback = { editUsers { users -> (users + user).sortedBy { it.createdAt } } },
+            fail = ::failUsers,
+        ) { api ->
+            api.removeUser(user.id)
+            return@recordChange {}
+        }
+    }
+
+    fun revokeInvite(invite: Invite) {
+        val edit = { change: (List<Invite>) -> List<Invite> ->
+            invites = Remote(invites.value?.let(change), error = invites.error)
+        }
+        recordChange(
+            "admin-invite", invite.id,
+            update = { edit { rows -> rows.filter { it.id != invite.id } } },
+            rollback = { edit { rows -> (rows + invite).sortedByDescending { it.createdAt } } },
+            fail = { message ->
+                invites = invites.copy(failure = message)
+                loadInvites()
+            },
+        ) { api ->
+            api.revokeInvite(invite.id)
+            return@recordChange {}
+        }
+    }
+
+    /** Mints one link per request: the server shows it once, so nothing here retries on its own. */
+    fun createInvite() {
+        inviteAttempt += 1
+        val attempt = inviteAttempt
+        confirmed(
+            start = { inviteSheet = InviteSheet() },
+            work = { api -> api.createInvite() },
+            finish = { result ->
+                val waiting = attempt == inviteAttempt && inviteSheet != null
+                result.fold(
+                    onSuccess = {
+                        if (waiting) inviteSheet = InviteSheet(url = it.url)
+                        loadInvites()
+                    },
+                    onFailure = {
+                        val message = friendlyError(it)
+                        if (waiting) inviteSheet = InviteSheet(error = message) else invites = invites.copy(failure = message)
+                    },
+                )
+            },
+        )
+    }
+
+    fun closeInviteSheet() {
+        inviteSheet = null
+        loadInvites()
+    }
+
+    /** Shares the settings slot and key with the workspace sheet, so neither change overwrites the other. */
+    fun setSignUpOpen(open: Boolean) {
+        val before = serverSettings.value ?: return
+        recordChange(
+            "server-settings", "patch",
+            update = { serverSettings = Remote(before.copy(signUpOpen = open)) },
+            rollback = { serverSettings = Remote(before) },
+            fail = { serverSettings = serverSettings.copy(failure = it) },
+        ) { api ->
+            val saved = api.updateServerSettings(UpdateServerSettingsRequest(signUpOpen = OptionalField.Present(open)))
+            return@recordChange { serverSettings = Remote(saved) }
+        }
+    }
+
+    // MARK: Provider accounts
+
+    private fun refreshProviders() {
+        loadProviders()
+    }
+
+    private fun editProvider(id: String, change: (Provider) -> Provider) {
+        providerAccounts = providerAccounts.map { if (it.provider == id) change(it) else it }
+    }
+
+    fun openProviderKey(provider: Provider) {
+        providerKeyForm = ProviderKeyForm(provider, secretDraft(provider.apiKey))
+        loadPasswordManagers()
+    }
+
+    fun closeProviderKey() {
+        providerKeyForm = null
+    }
+
+    fun saveProviderAccountKey() {
+        val form = providerKeyForm ?: return
+        val input = form.key.input ?: return
+        val id = form.provider.provider
+        val key = "provider:$id"
+        if (!form.key.changed || form.saving || !canSubmit(key)) return
+        val waits = input is SecretInput.Reference
+        val from = route
+        val before = providerAccounts.firstOrNull { it.provider == id }
+        providerKeyForm = if (waits) form.copy(saving = true, error = "") else null
+        val open = { providerKeyForm?.let { it.saving && it.provider.provider == id } == true }
+        optimisticMutation(
+            key = key,
+            update = {
+                touchSecrets("provider", "")
+                if (!waits) editProvider(id) { it.withKey() }
+            },
+            rollback = {
+                touchSecrets("provider", "")
+                if (!waits && before != null) editProvider(id) { before }
+            },
+            fail = { message ->
+                val reopen = !waits && providerKeyForm == null && route == from
+                if (open() || reopen) providerKeyForm = form.copy(error = message) else errorText = message
+            },
+            work = { api ->
+                api.setProviderKey(id, input)
+                return@optimisticMutation {
+                    touchSecrets("provider", "")
+                    if (open()) providerKeyForm = null
+                    refreshProviders()
+                }
+            },
+        )
+    }
+
+    /** Removes the provider's key or signs it out; the server holds only one credential per provider. */
+    fun removeProviderCredential(provider: Provider) {
+        val id = provider.provider
+        optimisticMutation(
+            key = "provider:$id",
+            update = {
+                touchSecrets("provider", "")
+                editProvider(id) { it.withoutCredential() }
+            },
+            rollback = {
+                touchSecrets("provider", "")
+                editProvider(id) { provider }
+            },
+            work = { api ->
+                api.deleteProviderKey(id)
+                return@optimisticMutation {
+                    touchSecrets("provider", "")
+                    refreshProviders()
+                }
+            },
+        )
+    }
+
+    fun openProviderLogin(provider: Provider) {
+        providerLoginJob?.cancel()
+        providerLogin = ProviderLoginView(provider, sessionID = provider.activeLoginId)
+        provider.activeLoginId?.let(::followProviderLogin)
+    }
+
+    /** The sign-in keeps going on the server; the row offers to continue it. */
+    fun hideProviderLogin() {
+        providerLoginJob?.cancel()
+        providerLoginJob = null
+        providerLogin = null
+    }
+
+    private fun ProviderLoginView.showing(next: ProviderLoginSession) = copy(
+        session = next,
+        gone = false,
+        error = "",
+        answer = if (next.prompt?.id == session?.prompt?.id) answer else SecretDraft(),
+        answerError = if (next.prompt?.id == session?.prompt?.id) answerError else "",
+    )
+
+    // Sign-ins advance on the server, so read until they end.
+    private fun followProviderLogin(id: String) {
+        val api = client ?: return
+        val gen = generation
+        providerLoginJob?.cancel()
+        providerLoginJob = scope.launch {
+            while (isActive) {
+                val read = providerLoginReads
+                val session = attempt { api.providerLogin(id) }
+                val view = providerLogin?.takeIf { generation == gen && it.sessionID == id } ?: return@launch
+                val failure = session.exceptionOrNull()
+                if ((failure as? APIError)?.statusCode == 410) {
+                    providerLogin = view.copy(gone = true, error = "")
+                    return@launch
+                }
+                if (read == providerLoginReads && !view.answering) {
+                    providerLogin = session.fold({ view.showing(it) }, { view.copy(error = friendlyError(it)) })
+                    if (session.getOrNull()?.let { it.status != "pending" } == true) {
+                        refreshProviders()
+                        return@launch
+                    }
+                }
+                delay(PROVIDER_LOGIN_POLL_MS)
+            }
+        }
+    }
+
+    fun startProviderLogin() {
+        val view = providerLogin ?: return
+        val api = client ?: return
+        if (view.starting) return
+        val id = view.provider.provider
+        val gen = generation
+        providerLogin = view.copy(starting = true, error = "")
+        scope.launch {
+            val started = attempt { api.startProviderLogin(id) }
+            if (generation != gen) return@launch
+            started.onSuccess { refreshProviders() }
+            val current = providerLogin?.takeIf { it.provider.provider == id && it.starting } ?: return@launch
+            started.fold(
+                onSuccess = {
+                    providerLogin = current.copy(starting = false, sessionID = it.id, session = it)
+                    followProviderLogin(it.id)
+                },
+                onFailure = { providerLogin = current.copy(starting = false, error = friendlyError(it)) },
+            )
+        }
+    }
+
+    fun answerProviderLogin(value: String) {
+        val view = providerLogin ?: return
+        val id = view.sessionID ?: return
+        val prompt = view.session?.prompt ?: return
+        val api = client ?: return
+        if (view.answering || value.isEmpty()) return
+        val gen = generation
+        providerLoginReads += 1
+        providerLogin = view.copy(answering = true, answerError = "")
+        scope.launch {
+            val answered = attempt { api.answerProviderLogin(id, prompt.id, value) }
+            val current = providerLogin?.takeIf { generation == gen && it.sessionID == id } ?: return@launch
+            providerLoginReads += 1
+            providerLogin = answered.fold(
+                onSuccess = { current.showing(it).copy(answering = false, answer = SecretDraft(), answerError = "") },
+                onFailure = { current.copy(answering = false, answerError = friendlyError(it)) },
+            )
+        }
+    }
+
+    fun cancelProviderLogin() {
+        val view = providerLogin ?: return
+        val id = view.sessionID ?: return
+        val api = client ?: return
+        if (view.cancelling) return
+        val gen = generation
+        providerLogin = view.copy(cancelling = true)
+        scope.launch {
+            attempt { api.cancelProviderLogin(id) }
+            if (generation != gen) return@launch
+            refreshProviders()
+            if (providerLogin?.sessionID == id) hideProviderLogin()
+        }
     }
 }

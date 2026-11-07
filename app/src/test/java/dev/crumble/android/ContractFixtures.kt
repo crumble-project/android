@@ -4,10 +4,19 @@ import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
 import kotlinx.serialization.json.*
 
+private val avatarFixture = buildJsonObject {
+    put("definition", buildJsonObject {
+        put("version", 1); put("id", "box"); put("name", "Box")
+        put("body", buildJsonObject { put("path", "M20 20H80V80H20Z") })
+        put("eyes", buildJsonObject { put("x", 50); put("y", 46); put("spacing", 15); put("scale", 1) })
+    })
+    put("color", "#38bdf8"); put("eyeColor", "#151515")
+}
+
 internal fun agentFixture(id: String, name: String = "Atlas", enabled: Boolean = true, lastMessage: String? = null): String =
     buildJsonObject {
         put("id", id); put("name", name); put("enabled", enabled)
-        put("avatar", "bot"); put("description", ""); put("instructions", "")
+        put("avatar", avatarFixture); put("description", ""); put("instructions", "")
         put("provider", "openai"); put("model", "model")
         for (key in listOf("tools", "skills", "mcpServers", "delegates")) put(key, JsonArray(emptyList()))
         put("createdAt", "2026-10-18T10:00:00Z"); put("updatedAt", "2026-10-18T10:00:00Z")
@@ -16,7 +25,7 @@ internal fun agentFixture(id: String, name: String = "Atlas", enabled: Boolean =
 
 internal fun memoryFixture(id: String, content: String): String =
     buildJsonObject {
-        put("id", id); put("agentId", JsonNull); put("content", content)
+        put("id", id); put("agentId", JsonNull); put("content", content); put("source", JsonNull)
         put("createdAt", "2026-10-18T10:00:00Z"); put("updatedAt", "2026-10-18T10:00:00Z")
     }.toString()
 
