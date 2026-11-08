@@ -48,3 +48,7 @@ CRUMBLE_KEYSTORE_PATH=~/crumble-release.jks CRUMBLE_KEYSTORE_PASSWORD=... ./grad
 ## Push notifications (optional)
 
 Without `app/google-services.json`, the app builds cleanly and posts local notifications while connected to `/v1/events`. To enable background delivery via Firebase Cloud Messaging (FCM), place `google-services.json` registering `ng.crumbli.android` and `ng.crumbli.android.dev` in `app/` and set `CRUMBLE_FCM_SERVICE_ACCOUNT_PATH` on the server (see `bot/docs/native-push.md`).
+
+## License
+
+Licensed under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Third-party components retain their respective licenses.
