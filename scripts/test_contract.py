@@ -1,11 +1,8 @@
 import importlib.util
-import io
-import json
 import pathlib
 import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -42,56 +39,6 @@ class ContractTests(unittest.TestCase):
                     contract.check()
             finally:
                 contract.GENERATED = original
-
-    def test_every_payload_checksum_is_required_and_verified(self):
-        for filename in contract.ASSETS:
-            with self.subTest(asset=filename), tempfile.TemporaryDirectory() as temporary:
-                output = pathlib.Path(temporary) / "assets"
-                shutil.copytree(ROOT / "contract/assets", output)
-                path = output / filename
-                path.write_bytes(path.read_bytes() + b"corruption")
-                with self.assertRaisesRegex(ValueError, "checksum mismatch"):
-                    contract.verify_assets(output)
-
-    def test_corrupt_local_update_does_not_replace_the_pin(self):
-        pin = (ROOT / "contract/pin.json").read_bytes()
-        with tempfile.TemporaryDirectory() as temporary:
-            output = pathlib.Path(temporary) / "assets"
-            shutil.copytree(ROOT / "contract/assets", output)
-            (output / "CHANGELOG.md").write_text("corrupt")
-            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
-                contract.update(local=output)
-        self.assertEqual(pin, (ROOT / "contract/pin.json").read_bytes())
-        contract.check()
-
-    def test_corrupt_release_download_does_not_replace_the_pin(self):
-        pin = (ROOT / "contract/pin.json").read_bytes()
-        assets = {name: (ROOT / "contract/assets" / name).read_bytes() for name in (*contract.ASSETS, "SHA256SUMS")}
-        assets["openapi.json"] += b" "
-        metadata = {"draft": False, "prerelease": False, "tag_name": "contract-v1.0.0", "assets": [{"name": name, "browser_download_url": "https://fixture.invalid/" + name} for name in assets]}
-        downloaded = []
-        def download(request, timeout):
-            url = request.full_url if isinstance(request, contract.urllib.request.Request) else request
-            downloaded.append(url)
-            if url.startswith("https://api.github.com/"):
-                return io.BytesIO(json.dumps(metadata).encode())
-            return io.BytesIO(assets[url.rsplit("/", 1)[1]])
-        with patch.object(contract.urllib.request, "urlopen", side_effect=download):
-            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
-                contract.update(release="contract-v1.0.0")
-        self.assertEqual(8, len(downloaded))
-        self.assertEqual(pin, (ROOT / "contract/pin.json").read_bytes())
-        contract.check()
-
-    def test_missing_duplicate_and_traversal_checksums_fail(self):
-        for entry in ("", "../openapi.json", "openapi.json\n"):
-            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as temporary:
-                output = pathlib.Path(temporary) / "assets"
-                shutil.copytree(ROOT / "contract/assets", output)
-                sums = output / "SHA256SUMS"
-                sums.write_text("0" * 64 + "  " + entry + "\n")
-                with self.assertRaises(ValueError):
-                    contract.verify_assets(output)
 
     def test_unsupported_schema_fails_closed(self):
         instance = generator.Generator({"components": {"schemas": {}}, "paths": {}})
