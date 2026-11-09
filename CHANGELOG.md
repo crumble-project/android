@@ -3,6 +3,7 @@
 ## Unreleased
 
 - CI caches Gradle and runs tests and lint as parallel jobs. Lint skips test sources.
+- `scripts/contract.py update --from DIRECTORY` copies the contract files from a directory such as `bot/openapi/`, replacing `--local` and `--release`. `contract/` no longer carries `pin.json`, `SHA256SUMS`, `CHANGELOG.md`, or `source-commit.txt`; the `verify` and `update-latest` commands and the weekly contract update workflow are gone.
 - Publish signed release APKs: a `vX.Y.Z` tag builds one with FCM and attaches it to a GitHub release. Release builds are signed when `CRUMBLE_KEYSTORE_PATH` and `CRUMBLE_KEYSTORE_PASSWORD` are set, and take their version from `crumble.versionName` and `crumble.versionCode`.
 - The bot form shows the portrait with a pencil, and the avatar editor opens in a dialog instead of filling the form, as on the web.
 - Pin the bot's `6.0.0` contract as a local export and bump the generator to `1.1.0`, adding closed objects with declared properties, nullable named schemas and `allOf` parts, and `*/*` binary responses.

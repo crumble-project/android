@@ -24,13 +24,12 @@ Open the navigation drawer › **Settings**, enter the server URL (`http://10.0.
 
 ## Shared API contract
 
-`contract/pin.json` and `contract/assets/` pin a verified `bot` contract: a local export of a `bot` commit, or a release (`contract-vX.Y.Z`). `bot` no longer publishes contract releases, so current updates use `--local`. `scripts/generate-contract.py` generates Kotlin wire models and operations without external build-time dependencies.
+`contract/assets/` holds a copy of the `bot` contract files from `bot/openapi/`. A running server also serves its document at `GET /openapi.json`. `scripts/generate-contract.py` generates Kotlin wire models and operations without external build-time dependencies.
 
 ```bash
-python3 scripts/contract.py generate                        # Regenerate from current pin
-python3 scripts/contract.py check                           # Verify checksums and byte-for-byte output
-python3 scripts/contract.py update --release contract-vX.Y.Z # Update to a published release
-python3 scripts/contract.py update --local EXPORT_DIR       # Update from a local bot bundle
+python3 scripts/contract.py generate                         # Regenerate from contract/assets/
+python3 scripts/contract.py check                            # Verify the generated output byte-for-byte
+python3 scripts/contract.py update --from ../bot/openapi     # Copy the contract files, regenerate, and run ./gradlew test
 ```
 
 ## Release
