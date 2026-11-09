@@ -61,6 +61,12 @@ android {
         excludes += "/META-INF/{AL2.0,LGPL2.1}"
       }
     }
+
+    // Lint only shipped app code: test sources and the avatar library roughly doubled CI lint time.
+    lint {
+      ignoreTestSources = true
+      checkDependencies = false
+    }
 }
 
 kotlin {
