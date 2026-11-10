@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0
+
 - Remove the pages that configure the server or the account: Providers, Judge model, Vision model, Web search, Credentials, Logins, Password managers, Integrations, Coding, Message gateways, Event relay, and Users. The web app is the only client that configures them. Settings gains a Server settings row that opens the web app's settings in the browser, and the links that led to a removed page, such as Provider Settings on a failed reply, the bot editor's web search, integrations, and credentials notes, and Connect a password manager, open the matching web page. The `oauth/callback` deep link is gone with MCP sign-in. Bots' requests for credentials and logins are still answered in the chat.
 - Add the data layer for outside calls: the contract copy brings call requests (`request_call`), `callee` on call events, and `callsOthers` on voice lines. The app reads call requests, approves or declines them, follows them every five seconds while they are pending or calling, and reads a call's transcript every two seconds while it goes on.
 - Show call requests in the bot chat: a pending one reads "Wants to call for you" with the callee, number, goal and opening and has Decline and Approve; a declined one reads "Declined"; a placed one is a row with its state that opens the call, with its goal and a transcript that follows the call live. An outside call's end notice becomes the same row.
@@ -10,6 +12,9 @@
 - Bump the contract generator to `1.2.0`: an object that declares properties and allows others keeps the others in `additionalProperties`, so `getOpenAPI()` returns the whole document instead of only `openapi`.
 - CI caches Gradle and runs tests and lint as parallel jobs. Lint skips test sources.
 - `scripts/contract.py update --from DIRECTORY` copies the contract files from a directory such as `bot/openapi/`, replacing `--local` and `--release`. `contract/` no longer carries `pin.json`, `SHA256SUMS`, `CHANGELOG.md`, or `source-commit.txt`; the `verify` and `update-latest` commands and the weekly contract update workflow are gone.
+
+## 0.1.0
+
 - Publish signed release APKs: a `vX.Y.Z` tag builds one with FCM and attaches it to a GitHub release. Release builds are signed when `CRUMBLE_KEYSTORE_PATH` and `CRUMBLE_KEYSTORE_PASSWORD` are set, and take their version from `crumble.versionName` and `crumble.versionCode`.
 - The bot form shows the portrait with a pencil, and the avatar editor opens in a dialog instead of filling the form, as on the web.
 - Pin the bot's `6.0.0` contract as a local export and bump the generator to `1.1.0`, adding closed objects with declared properties, nullable named schemas and `allOf` parts, and `*/*` binary responses.
