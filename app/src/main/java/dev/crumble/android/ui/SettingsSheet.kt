@@ -1,7 +1,10 @@
 package dev.crumble.android.ui
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SegmentedButton
@@ -20,7 +23,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -32,7 +34,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.model.AccountMode
@@ -121,26 +122,15 @@ private fun ThemeSection(model: AppModel) {
 
 private fun settingsSubtitle(page: Route): String? = when (page) {
     Route.General -> "Notifications, theme, and account"
-    Route.Providers -> "API keys and account sign-in"
-    Route.JudgeModel -> "Checks what desktop jobs do"
-    Route.VisionModel -> "Describes images"
-    Route.WebSearch -> "Search provider"
-    Route.Credentials -> "Secrets your bots can use"
-    Route.Logins -> "Sites your bots can sign in to"
-    Route.PasswordManagers -> "1Password and Bitwarden"
-    Route.Integrations -> "MCP servers"
-    Route.Coding -> "GitHub and workspaces"
-    Route.MessageGateways -> "Talk to bots from other apps"
-    Route.EventRelay -> "Events from outside"
     Route.Skills -> "Skills your bots follow"
     Route.Avatars -> "Gallery and previews"
-    Route.Users -> "Accounts and invites"
     else -> null
 }
 
 /** Everything the website keeps under Settings, laid out like the system Settings app. */
 @Composable
 fun SettingsPanel(model: AppModel) {
+    val context = LocalContext.current
     val tones = Tone.entries
     Column(
         modifier = Modifier
@@ -157,8 +147,7 @@ fun SettingsPanel(model: AppModel) {
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        SETTINGS_GROUPS.forEachIndexed { groupIndex, group ->
-            val pages = group.filter { it != Route.Users || model.isAdmin == true }
+        SETTINGS_GROUPS.forEachIndexed { groupIndex, pages ->
             Column(verticalArrangement = Arrangement.spacedBy(ROW_GAP)) {
                 pages.forEachIndexed { index, page ->
                     GroupedRow(
@@ -170,6 +159,15 @@ fun SettingsPanel(model: AppModel) {
                     )
                 }
             }
+        }
+        if (model.token.isNotEmpty()) {
+            GroupedRow(
+                title = "Server settings",
+                subtitle = "Opens in the browser",
+                shape = groupedShape(0, 1),
+                onClick = { openWebSettings(context, model) },
+                leading = { IconTile(Icons.AutoMirrored.Filled.OpenInNew, tones[SETTINGS_GROUPS.size % tones.size]) },
+            )
         }
     }
 }

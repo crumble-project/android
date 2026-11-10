@@ -3,47 +3,22 @@ package dev.crumble.android.network
 import dev.crumble.android.generated.AssignSkillBotRequest
 import dev.crumble.android.generated.BrowseSkillRepositoryRequest
 import dev.crumble.android.generated.Capabilities
-import dev.crumble.android.generated.CompleteGithubAppRequest
-import dev.crumble.android.generated.CompleteGithubAppSignInRequest
 import dev.crumble.android.generated.CreateEventSourceRequest
 import dev.crumble.android.generated.CreateEventSourceResponse
-import dev.crumble.android.generated.CreateGithubAppManifestRequest
 import dev.crumble.android.generated.CreateSkillRequest
 import dev.crumble.android.generated.CreateSkillRequestDocumentsItem
-import dev.crumble.android.generated.AdminUser
-import dev.crumble.android.generated.CreatedInvite
 import dev.crumble.android.generated.DesktopControl
 import dev.crumble.android.generated.DesktopViewer
-import dev.crumble.android.generated.GitHubAccount
-import dev.crumble.android.generated.Invite
-import dev.crumble.android.generated.ListOutdatedWorkspacesResponseWorkspacesItem
-import dev.crumble.android.generated.SetUserRoleRequest
-import dev.crumble.android.generated.GitHubApp
 import dev.crumble.android.generated.GroupChat
 import dev.crumble.android.generated.InstallSkillsRequest
-import dev.crumble.android.generated.JudgeModel
 import dev.crumble.android.generated.LearnedChange
 import dev.crumble.android.generated.OptionalField
 import dev.crumble.android.generated.PendingSkillUpdate
-import dev.crumble.android.generated.PluginSetting
-import dev.crumble.android.generated.PluginSettings
 import dev.crumble.android.generated.PutDesktopControlRequest
 import dev.crumble.android.generated.ScriptRun
-import dev.crumble.android.generated.ServerSettings
-import dev.crumble.android.generated.SetGithubAccountBotsRequest
-import dev.crumble.android.generated.SetGithubAppBotsRequest
-import dev.crumble.android.generated.SignInGithubAppRequest
 import dev.crumble.android.generated.SkillCheck
 import dev.crumble.android.generated.SkillListing
 import dev.crumble.android.generated.SkillPackage
-import dev.crumble.android.generated.UpdateEventRelayRequest
-import dev.crumble.android.generated.UpdateJudgeModelRequest
-import dev.crumble.android.generated.UpdateJudgeModelRequestJudgeModel
-import dev.crumble.android.generated.UpdateServerSettingsRequest
-import dev.crumble.android.generated.UpdateVisionModelRequest
-import dev.crumble.android.generated.UpdateVisionModelRequestVisionModel
-import dev.crumble.android.generated.UpdateWebSearchRequest
-import dev.crumble.android.generated.VisionModel
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.ActivityFeedResponse
 import dev.crumble.android.model.ChatHistoryResponse
@@ -51,24 +26,14 @@ import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
 import dev.crumble.android.model.CrumblePatchJson
 import dev.crumble.android.model.Execution
-import dev.crumble.android.model.GatewayConfig
 import dev.crumble.android.model.GroupSnapshot
 import dev.crumble.android.model.JobKind
 import dev.crumble.android.model.JobRef
 import dev.crumble.android.model.JobSummary
 import dev.crumble.android.model.MCPServer
 import dev.crumble.android.model.Memory
-import dev.crumble.android.model.MessageGateway
 import dev.crumble.android.model.ModelSummary
-import dev.crumble.android.model.OAuthStart
 import dev.crumble.android.model.OutgoingAttachment
-import dev.crumble.android.model.RelayStatus
-import dev.crumble.android.model.SECRET_USES_PAGE
-import dev.crumble.android.model.SecretInput
-import dev.crumble.android.model.WebSearchSettings
-import dev.crumble.android.model.domain
-import dev.crumble.android.model.wire
-import dev.crumble.android.model.json
 import dev.crumble.android.model.EventSource
 import dev.crumble.android.model.Schedule
 import dev.crumble.android.model.SharedSkill
@@ -84,7 +49,6 @@ import java.net.HttpURLConnection
 import java.net.ProtocolException
 import java.net.URI
 import java.net.URL
-import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.ZoneId
@@ -117,7 +81,7 @@ class SSEClosedError : Exception("server-sent event stream closed")
 class SignInError(message: String) : Exception(message)
 
 /** Who a session belongs to, from Better Auth rather than the /v1 contract. */
-data class AccountSession(val id: String, val admin: Boolean, val theme: String? = null)
+data class AccountSession(val id: String, val theme: String? = null)
 
 const val INVITE_HEADER = "x-crumble-invite"
 
@@ -328,11 +292,7 @@ class APIClient(
         val user = session?.get("user") as? JsonObject
         val id = (user?.get("id") as? JsonPrimitive)?.contentOrNull
             ?: throw APIError(method = "GET", path = path, statusCode = 401, body = "")
-        return AccountSession(
-            id,
-            admin = (user["role"] as? JsonPrimitive)?.contentOrNull == "admin",
-            theme = (user["theme"] as? JsonPrimitive)?.contentOrNull,
-        )
+        return AccountSession(id, theme = (user["theme"] as? JsonPrimitive)?.contentOrNull)
     }
 
     suspend fun updateTheme(theme: String) {
@@ -595,92 +555,17 @@ class APIClient(
     }
 
     suspend fun models(provider: String): List<ModelSummary> = operations.listModels(provider).map { it.domain() }
-    suspend fun deleteProviderKey(provider: String) = operations.deleteProviderKey(provider)
     suspend fun providerAccounts() = operations.listProviders()
-    suspend fun setProviderKey(provider: String, secret: SecretInput) { operations.putProviderKey(request(secret.json()), provider) }
-    suspend fun startProviderLogin(provider: String) = operations.startProviderLogin(request(strings("method" to "oauth")), provider)
-    suspend fun providerLogin(id: String) = operations.getProviderLogin(id)
-    suspend fun cancelProviderLogin(id: String) = operations.cancelProviderLogin(id)
-    suspend fun answerProviderLogin(id: String, promptID: String, value: String) =
-        operations.answerProviderLogin(request(strings("promptId" to promptID, "value" to value)), id)
     suspend fun passwordManagers() = operations.listPasswordManagers().passwordManagers
-    suspend fun connectPasswordManager(id: String, token: String) = operations.connectPasswordManager(request(strings("token" to token)), id)
-    suspend fun disconnectPasswordManager(id: String) = operations.disconnectPasswordManager(id)
     suspend fun credentials(agentID: String) = operations.listAgentCredentials(agentID)
     suspend fun saveCredential(agentID: String, name: String, fields: Map<String, JsonElement>) =
         operations.saveAgentCredential(request(fields), agentID, name)
-    suspend fun deleteCredential(agentID: String, name: String) = operations.deleteAgentCredential(agentID, name)
     suspend fun declineCredential(agentID: String, name: String) = operations.declineAgentCredential(agentID, name)
-    suspend fun credentialUses(agentID: String, name: String, before: String?) =
-        operations.listAgentCredentialUses(agentID, name, SECRET_USES_PAGE.toLong(), before)
     suspend fun logins(agentID: String) = operations.listAgentLogins(agentID)
     suspend fun saveLogin(agentID: String, name: String, fields: Map<String, JsonElement>) =
         operations.saveAgentLogin(request(fields), agentID, name)
-    suspend fun deleteLogin(agentID: String, name: String) = operations.deleteAgentLogin(agentID, name)
     suspend fun declineLogin(agentID: String, name: String) = operations.declineAgentLogin(agentID, name)
-    suspend fun loginUses(agentID: String, name: String, before: String?) =
-        operations.listAgentLoginUses(agentID, name, SECRET_USES_PAGE.toLong(), before)
     suspend fun mcpServers(): List<MCPServer> = operations.listMcpServers().map { it.domain() }
-    suspend fun createMCPServer(payload: Map<String, JsonElement>): MCPServer = operations.createMcpServer(request(payload)).domain()
-    suspend fun updateMCPServer(id: String, patch: Map<String, JsonElement>): MCPServer = requireNotNull(operations.updateMcpServer(request(patch), id)).domain()
-    suspend fun deleteMCPServer(id: String) = operations.deleteMcpServer(id)
-    suspend fun startMCPSignIn(id: String, redirectURI: String): OAuthStart = operations.startMcpOAuth(request(strings("redirectUri" to redirectURI)), id, timeoutMs = 60_000).domain()
-    suspend fun finishMCPSignIn(id: String, code: String, state: String, iss: String?): MCPServer {
-        val fields = strings("code" to code, "state" to state).toMutableMap()
-        iss?.let { fields["iss"] = JsonPrimitive(it) }
-        return operations.finishMcpOAuth(request(fields), id, timeoutMs = 60_000).domain()
-    }
-    suspend fun signOutOfMCP(id: String): MCPServer = operations.signOutMcpOAuth(id).domain()
-
-    suspend fun githubApps(): List<GitHubApp> = operations.listGithubApps().apps
-    suspend fun createGithubAppManifest(name: String, origin: String, organization: String?) = operations.createGithubAppManifest(
-        CreateGithubAppManifestRequest(name, origin, organization?.let { OptionalField.Present(it) } ?: OptionalField.Absent),
-    )
-    suspend fun completeGithubApp(code: String, state: String): GitHubApp =
-        operations.completeGithubApp(CompleteGithubAppRequest(code, state), timeoutMs = GITHUB_TIMEOUT_MS)
-    suspend fun connectGithubApp(id: String): GitHubApp = operations.connectGithubApp(id, timeoutMs = GITHUB_TIMEOUT_MS)
-    suspend fun setGithubAppBots(id: String, botIDs: List<String>): GitHubApp = operations.setGithubAppBots(SetGithubAppBotsRequest(botIDs), id)
-    suspend fun deleteGithubApp(id: String) = operations.deleteGithubApp(id)
-    suspend fun signInGithubApp(id: String, origin: String): String = operations.signInGithubApp(SignInGithubAppRequest(origin), id).url
-    suspend fun completeGithubAppSignIn(code: String, state: String): GitHubApp =
-        operations.completeGithubAppSignIn(CompleteGithubAppSignInRequest(code, state), timeoutMs = GITHUB_TIMEOUT_MS)
-    suspend fun signOutGithubApp(id: String): GitHubApp = operations.signOutGithubApp(id, timeoutMs = GITHUB_TIMEOUT_MS)
-    suspend fun setGithubAppClientSecret(id: String, secret: SecretInput): GitHubApp = operations.setGithubAppClientSecret(request(secret.json()), id)
-    suspend fun githubAccounts(): List<GitHubAccount> = operations.listGithubAccounts().accounts
-    suspend fun addGithubAccount(token: SecretInput): GitHubAccount = operations.addGithubAccount(request(token.json()), timeoutMs = GITHUB_TIMEOUT_MS)
-    suspend fun setGithubAccountToken(id: String, token: SecretInput): GitHubAccount =
-        operations.setGithubAccountToken(request(token.json()), id, timeoutMs = GITHUB_TIMEOUT_MS)
-    suspend fun setGithubAccountBots(id: String, botIDs: List<String>): GitHubAccount = operations.setGithubAccountBots(SetGithubAccountBotsRequest(botIDs), id)
-    suspend fun deleteGithubAccount(id: String) = operations.deleteGithubAccount(id)
-
-    suspend fun adminUsers(): List<AdminUser> = operations.listUsers().users
-    suspend fun setUserRole(id: String, role: String): AdminUser = operations.setUserRole(SetUserRoleRequest(role), id)
-    suspend fun removeUser(id: String) = operations.removeUser(id)
-    suspend fun invites(): List<Invite> = operations.listInvites().invites
-    suspend fun createInvite(): CreatedInvite = operations.createInvite()
-    suspend fun revokeInvite(id: String) = operations.revokeInvite(id)
-    suspend fun outdatedWorkspaces(): List<ListOutdatedWorkspacesResponseWorkspacesItem> = operations.listOutdatedWorkspaces().workspaces
-    suspend fun serverSettings(): ServerSettings = operations.getServerSettings()
-    suspend fun updateServerSettings(patch: UpdateServerSettingsRequest): ServerSettings = operations.updateServerSettings(patch)
-
-    suspend fun messageGateways(): List<MessageGateway> = operations.messageGateways().gateways.map { it.domain() }
-    suspend fun updateMessageGateway(id: String, config: GatewayConfig): MessageGateway = operations.updateMessageGateway(config.wire(), id).domain()
-    suspend fun eventRelay(): RelayStatus = operations.getEventRelay().domain()
-    suspend fun updateEventRelay(url: String?): RelayStatus = operations.updateEventRelay(UpdateEventRelayRequest(url)).domain()
-    suspend fun pluginSettings(): PluginSettings = operations.listPluginSettings()
-    suspend fun setPluginSetting(pluginID: String, key: String, secret: SecretInput): PluginSetting =
-        operations.setPluginSetting(request(secret.json()), pluginID, key)
-    suspend fun deletePluginSetting(pluginID: String, key: String): PluginSetting = operations.deletePluginSetting(pluginID, key)
-    suspend fun webSearch(): WebSearchSettings = operations.getWebSearch().domain()
-    suspend fun updateWebSearch(defaultProvider: String): WebSearchSettings = operations.updateWebSearch(UpdateWebSearchRequest(defaultProvider)).domain()
-    suspend fun judgeModel(): JudgeModel = operations.getJudgeModel()
-    suspend fun updateJudgeModel(provider: String?, model: String?): JudgeModel = operations.updateJudgeModel(
-        UpdateJudgeModelRequest(if (provider != null && model != null) UpdateJudgeModelRequestJudgeModel(provider, model) else null),
-    )
-    suspend fun visionModel(): VisionModel = operations.getVisionModel()
-    suspend fun updateVisionModel(provider: String?, model: String?): VisionModel = operations.updateVisionModel(
-        UpdateVisionModelRequest(if (provider != null && model != null) UpdateVisionModelRequestVisionModel(provider, model) else null),
-    )
 }
 
 /**
@@ -751,40 +636,4 @@ fun friendlyError(error: Throwable): String {
         }
     }
     return error.message ?: error.toString()
-}
-
-data class OAuthCallbackResult(
-    val code: String,
-    val state: String,
-    val iss: String?,
-)
-
-/** Reads the code, state and issuer from a sign-in callback, or the provider's reason for refusing. */
-fun oauthResult(callbackUri: String): OAuthCallbackResult {
-    val uri = URI(callbackUri)
-    val rawQuery = uri.rawQuery ?: ""
-    val params = LinkedHashMap<String, String>()
-    if (rawQuery.isNotEmpty()) {
-        for (pair in rawQuery.split("&")) {
-            val idx = pair.indexOf('=')
-            if (idx >= 0) {
-                val k = URLDecoder.decode(pair.substring(0, idx), StandardCharsets.UTF_8.name())
-                val v = URLDecoder.decode(pair.substring(idx + 1), StandardCharsets.UTF_8.name())
-                params[k] = v
-            } else if (pair.isNotEmpty()) {
-                params[URLDecoder.decode(pair, StandardCharsets.UTF_8.name())] = ""
-            }
-        }
-    }
-    val error = params["error"]
-    if (error != null) {
-        val desc = params["error_description"] ?: error
-        throw SignInError("Sign-in was refused: $desc")
-    }
-    val code = params["code"]
-    val state = params["state"]
-    if (code.isNullOrEmpty() || state.isNullOrEmpty()) {
-        throw SignInError("Sign-in returned no authorization code.")
-    }
-    return OAuthCallbackResult(code = code, state = state, iss = params["iss"])
 }

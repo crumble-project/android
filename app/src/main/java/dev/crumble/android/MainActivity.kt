@@ -40,7 +40,7 @@ import kotlinx.coroutines.launch
 private val LIGHT_BAR_SCRIM = Color.argb(0xe6, 0xff, 0xff, 0xff)
 private val DARK_BAR_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
 
-/** GitHub's pages keep their own sign-in, which must not carry over to the next account. */
+/** Web pages in the app, such as the bot desktop viewer, keep their own storage, which must not carry over to the next account. */
 private fun forgetWebSessions() {
     runCatching {
         CookieManager.getInstance().removeAllCookies(null)
@@ -137,7 +137,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         model.appActive = true
-        model.browserReturned()
         model.notificationsAllowed = push.notificationsAllowed()
         model.client?.let { push.configure(it) }
         push.updatePresence(true, model.route)
@@ -176,10 +175,6 @@ class MainActivity : ComponentActivity() {
             model.openGroupChat(groupId)
         } else if (!agentId.isNullOrEmpty()) {
             model.selectAgent(agentId)
-        }
-        val data = intent.data
-        if (data != null && data.scheme == AppModel.oauthCallbackScheme) {
-            model.handleOAuthCallback(data.toString())
         }
     }
 

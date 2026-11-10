@@ -18,7 +18,6 @@ class NavigationTests {
     @Test
     fun settingsPagesReturnToTheSettingsList() {
         SETTINGS_PAGES.forEach { assertEquals(Route.Settings, it.parent) }
-        assertEquals(Route.MessageGateways, Route.MessageGateway("telegram").parent)
     }
 
     @Test

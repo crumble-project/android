@@ -1,12 +1,12 @@
 package dev.crumble.android.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import dev.crumble.android.model.activityTime
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CardDefaults
 import androidx.activity.compose.BackHandler
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,16 +24,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -43,10 +39,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -58,27 +52,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.model.AppModel
-import dev.crumble.android.model.MCPDraft
-import dev.crumble.android.model.MCPServer
 import dev.crumble.android.model.Memory
 import dev.crumble.android.model.MemoryDraft
 import dev.crumble.android.model.Route
 import dev.crumble.android.model.SkillDraft
 import dev.crumble.android.model.SKILLS_SHARED
-import dev.crumble.android.model.activityTime
-import dev.crumble.android.model.matchesMCP
 import dev.crumble.android.model.memoryLine
 import java.time.Instant
 
@@ -95,20 +82,7 @@ fun PanelView(
             Route.Skills -> SkillsPanel(model)
             Route.Tasks -> TasksPanel(model)
             Route.Activity -> ActivityPanel(model)
-            Route.Integrations -> IntegrationsPanel(model)
             Route.Avatars -> AvatarsPanel(model)
-            Route.Providers -> ProvidersPanel(model)
-            Route.PasswordManagers -> PasswordManagersPanel(model)
-            Route.Credentials -> CredentialsPanel(model)
-            Route.Logins -> LoginsPanel(model)
-            Route.WebSearch -> WebSearchPanel(model)
-            Route.JudgeModel -> JudgeModelPanel(model)
-            Route.VisionModel -> VisionModelPanel(model)
-            Route.Coding -> CodingPanel(model)
-            Route.Users -> UsersPanel(model)
-            Route.MessageGateways -> MessageGatewaysPanel(model)
-            is Route.MessageGateway -> MessageGatewayPanel(model, panel.id)
-            Route.EventRelay -> EventRelayPanel(model)
             Route.Settings -> SettingsPanel(model)
             Route.General -> GeneralPanel(model)
             Route.Account -> AccountPanel(model)
@@ -263,143 +237,6 @@ private fun MemoryRow(
                 },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
                 ) { Text("Delete") }
-            },
-            dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") } },
-        )
-    }
-}
-
-@Composable
-private fun IntegrationsPanel(model: AppModel) {
-    val appContext = LocalContext.current.applicationContext
-    var search by remember { mutableStateOf("") }
-    val needle = search.trim().lowercase()
-    val listed = model.mcpServers.filter { matchesMCP(it, needle) }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        item {
-            OutlinedTextField(
-                value = search,
-                onValueChange = { search = it },
-                label = { Text("Search MCP servers") },
-                shape = CircleShape,
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
-        item {
-            val shared = listed.filter { it.agentId == null }
-            RowsSection(
-                title = "Shared",
-                footer = "Every bot can use these. Turn one on for a bot in its profile.",
-            ) {
-                if (shared.isEmpty()) note("No shared MCP servers yet.")
-                for (server in shared) {
-                    row { shape -> MCPServerRow(model = model, server = server, shape = shape, onOpenBrowser = { url -> openSignInPage(appContext, url) }) }
-                }
-                add("Add Shared MCP Server") { model.openMCPForm("", agentID = null) }
-            }
-        }
-
-        items(model.agents.filter { agent -> needle.isEmpty() || listed.any { it.agentId == agent.id } }, key = { it.id }) { agent ->
-            val own = listed.filter { it.agentId == agent.id }
-            RowsSection(
-                title = agent.name,
-                footer = "Only ${agent.name} can use these, with their own sign-in.",
-            ) {
-                if (own.isEmpty()) note("No MCP servers of its own.")
-                for (server in own) {
-                    row { shape -> MCPServerRow(model = model, server = server, shape = shape, onOpenBrowser = { url -> openSignInPage(appContext, url) }) }
-                }
-                add("Add MCP Server") { model.openMCPForm("", agentID = agent.id) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MCPServerRow(
-    model: AppModel,
-    server: MCPServer,
-    shape: Shape,
-    onOpenBrowser: (String) -> Unit,
-) {
-    val isPending = server.id.startsWith("pending-")
-    var confirmingDelete by remember { mutableStateOf(false) }
-    val statusText = when (server.auth) {
-        "oauth" -> "Signed in with OAuth"
-        "token" -> "Uses a token"
-        else -> "No sign-in"
-    }
-    GroupedItem(
-        shape = shape,
-        leading = { LetterTile(server.name) },
-        trailing = {
-            if (!server.enabled) {
-                Text(
-                    text = "Disabled",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        below = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (model.signingIn == server.id) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else if (server.auth == "oauth") {
-                    OutlinedButton(onClick = { model.signOutOfMCP(server.id) }) {
-                        Text("Sign Out")
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = { model.beginMCPSignIn(server.id, onOpenBrowser) },
-                        enabled = model.signingIn == null && !isPending,
-                    ) {
-                        Text("Sign In…")
-                    }
-                }
-                TextButton(
-                    onClick = { model.openMCPForm(server.id) },
-                    enabled = !isPending,
-                ) {
-                    Text("Edit")
-                }
-                TextButton(
-                    onClick = { confirmingDelete = true },
-                    enabled = !isPending,
-                ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                }
-            }
-        },
-    ) {
-        RowTitle(server.name)
-        RowSubtitle(server.url, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-        RowSubtitle(statusText)
-        server.error?.let { RowSubtitle(it, color = MaterialTheme.colorScheme.error) }
-    }
-    if (confirmingDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmingDelete = false },
-            title = { Text("Delete ${server.name}?") },
-            text = { Text("Bots lose its tools and its sign-in is removed. This cannot be undone.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmingDelete = false
-                        model.deleteMCP(server.id)
-                    },
-                ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                }
             },
             dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") } },
         )
@@ -613,153 +450,6 @@ fun MemoryFormDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MCPFormDialog(
-    model: AppModel,
-    draft: MCPDraft,
-) {
-    var ownerMenuExpanded by remember { mutableStateOf(false) }
-    val server = model.mcpServers.firstOrNull { it.id == draft.serverID }
-    val selectedOwnerName = if (draft.agentID == null) {
-        "Every bot (shared)"
-    } else {
-        model.agents.firstOrNull { it.id == draft.agentID }?.name ?: "Every bot (shared)"
-    }
-
-    AlertDialog(
-        onDismissRequest = {
-            model.errorText = ""
-            model.mcpDraft = null
-        },
-        title = { Text(if (draft.serverID.isEmpty()) "Add MCP Server" else "Edit MCP Server") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                SheetErrorBanner(model.errorText)
-                if (draft.serverID.isEmpty()) {
-                    ExposedDropdownMenuBox(
-                        expanded = ownerMenuExpanded,
-                        onExpandedChange = { ownerMenuExpanded = it },
-                    ) {
-                        OutlinedTextField(
-                            value = selectedOwnerName,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Available to") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = ownerMenuExpanded) },
-                            modifier = Modifier
-                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                                .fillMaxWidth(),
-                        )
-                        ExposedDropdownMenu(
-                            expanded = ownerMenuExpanded,
-                            onDismissRequest = { ownerMenuExpanded = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Every bot (shared)") },
-                                onClick = {
-                                    model.mcpDraft = draft.copy(agentID = null)
-                                    ownerMenuExpanded = false
-                                },
-                            )
-                            for (agent in model.agents) {
-                                DropdownMenuItem(
-                                    text = { Text(agent.name) },
-                                    onClick = {
-                                        model.mcpDraft = draft.copy(agentID = agent.id)
-                                        ownerMenuExpanded = false
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-                OutlinedTextField(
-                    value = draft.name,
-                    onValueChange = { model.mcpDraft = draft.copy(name = it) },
-                    label = { Text("Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = draft.url,
-                    onValueChange = { model.mcpDraft = draft.copy(url = it) },
-                    label = { Text("HTTP URL") },
-                    placeholder = { Text("https://") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                SecretSourceField(
-                    model = model,
-                    label = "Token (Optional)",
-                    draft = draft.token,
-                    onChange = { model.mcpDraft = model.mcpDraft?.copy(token = it) },
-                    valueDescription = "Leave the token empty for servers that use OAuth, then choose Sign In in the list after saving.",
-                    valuePlaceholder = server?.takeIf { it.auth == "token" && it.token?.reference == null }?.let { "Replace the saved token" },
-                )
-                Text(
-                    text = "OAuth app",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                )
-                Text(
-                    text = "Only for servers whose sign-in can't register Crumble, such as GitHub's. Register an OAuth app there with the callback URL ${AppModel.oauthRedirectURI} and enter its client ID and secret.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = draft.clientID,
-                    onValueChange = { model.mcpDraft = model.mcpDraft?.copy(clientID = it) },
-                    label = { Text("Client ID") },
-                    placeholder = { Text("Optional") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                SecretSourceField(
-                    model = model,
-                    label = "Client secret",
-                    draft = draft.clientSecret,
-                    onChange = { model.mcpDraft = model.mcpDraft?.copy(clientSecret = it) },
-                    valueDescription = "Stored encrypted and never shown again. Changing the app signs the server out.",
-                    valuePlaceholder = if (server?.oauthClientSecret?.configured == true) "Replace the saved secret" else "Optional",
-                    enabled = draft.clientID.isNotBlank(),
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("Enabled")
-                    Switch(
-                        checked = draft.enabled,
-                        onCheckedChange = { model.mcpDraft = draft.copy(enabled = it) },
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { model.saveMCP() },
-                enabled = !model.loading && !draft.saving,
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = {
-                    model.errorText = ""
-                    model.mcpDraft = null
-                },
-            ) {
-                Text("Cancel")
-            }
-        },
-    )
-}
-
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 fun SkillFormDialog(
@@ -879,7 +569,3 @@ fun SheetErrorBanner(errorText: String) {
     }
 }
 
-/** The sign-in outlives the activity that started it, so this can't go through that activity. */
-private fun openSignInPage(context: Context, url: String) {
-    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-}

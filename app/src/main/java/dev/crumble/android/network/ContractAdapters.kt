@@ -172,12 +172,7 @@ internal fun DesktopJob.domain() = JobSummary(
     JobKind.desktop, name, status, model?.model, usage,
     question?.let { CodingJobQuestion(it.id, it.text, it.askedAt, it.options, it.multiple) },
 )
-internal fun McpServer.domain() = MCPServer(id, name, url, enabled, agentId, oauthClientId = oauthClientId, token = token, oauthClientSecret = oauthClientSecret)
-internal fun McpServerStatus.domain() = MCPServer(id, name, url, enabled, agentId, authenticated, auth, oauthClientId, token, oauthClientSecret, error)
-internal fun McpOAuthStart.domain(): OAuthStart = when (this) {
-    is McpOAuthStart.Variant1 -> OAuthStart(authorizationUrl = value.authorizationUrl)
-    is McpOAuthStart.Variant2 -> OAuthStart(authorized = value.authorized)
-}
+internal fun McpServerStatus.domain() = MCPServer(id, name, url, enabled, agentId)
 internal fun PushStatus.domain() = PushInfo(serverId, mapOf("apns" to transports.apns, "fcm" to transports.fcm))
 internal fun PushDeviceRegistration.domain() = PushRegistrationResult(serverId, remoteDelivery)
 internal fun ActivityEventPayload.domain(): dev.crumble.android.model.ActivityEvent = when (this) {

@@ -1,5 +1,6 @@
 package dev.crumble.android.ui
 
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,7 +24,6 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,8 +61,8 @@ private const val PLACEHOLDER = "Search chats, pages, and settings"
 @Composable
 fun CommandPaletteDialog(model: AppModel) {
     var query by rememberSaveable { mutableStateOf("") }
-    val sections = remember(query, model.agents, model.groupChats, model.isAdmin, model.theme) {
-        val all = paletteSections(model.agents, model.groupChats, model.isAdmin == true, model.theme)
+    val sections = remember(query, model.agents, model.groupChats, model.theme) {
+        val all = paletteSections(model.agents, model.groupChats, model.theme)
         searchPalette(all, query)
     }
     val focus = remember { FocusRequester() }

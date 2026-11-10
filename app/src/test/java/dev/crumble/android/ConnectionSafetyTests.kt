@@ -1,8 +1,8 @@
 package dev.crumble.android
 
+import dev.crumble.android.generated.CredentialRequest
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
-import dev.crumble.android.model.MCPServer
 import dev.crumble.android.model.Route
 import dev.crumble.android.model.isExposedHttp
 import dev.crumble.android.model.splitSources
@@ -32,12 +32,7 @@ import org.w3c.dom.Document
 import org.w3c.dom.Element
 
 private const val BASE = "https://example.test"
-private const val CALLBACK = "dev.crumble.android:/oauth/callback?code=c&state=x"
-private const val START = "POST /v1/mcp-servers/s1/oauth"
-private const val FINISH = "POST /v1/mcp-servers/s1/oauth/callback"
-
-private val SIGNED_IN =
-    """{"id":"s1","name":"Linear","url":"https://mcp.linear.app/mcp","enabled":true,"agentId":null,"oauthClientId":null,"oauthClientSecret":{"configured":false,"passwordManager":null,"reference":null},"token":{"configured":false,"passwordManager":null,"reference":null},"error":null,"auth":"oauth","authenticated":true}"""
+private val CREDENTIAL_REQUEST = CredentialRequest("ACME_TOKEN", listOf("api.acme.com"), "Deploys", "t1")
 
 private class SafetyTransport : HttpTransport {
     val requests = mutableListOf<HttpRequestData>()
@@ -84,14 +79,7 @@ class ConnectionSafetyTests {
             transport = transport,
         ).also {
             it.agents = listOf(Agent(id = "a1", name = "Atlas"), Agent(id = "a2", name = "Scout"))
-            it.mcpServers = listOf(MCPServer(id = "s1", name = "Linear"), MCPServer(id = "s2", name = "Notion"))
         }
-
-    private fun signInTransport() = SafetyTransport().apply {
-        responses[START] = 200 to """{"authorizationUrl":"https://auth.example.com/authorize?state=x"}"""
-        responses["POST /v1/mcp-servers/s2/oauth"] = 200 to """{"authorizationUrl":"https://auth.example.com/authorize?state=y"}"""
-        responses[FINISH] = 200 to SIGNED_IN
-    }
 
     @Test
     fun dismissingSettingsDropsTypedSecrets() = runTest {
@@ -132,8 +120,8 @@ class ConnectionSafetyTests {
         val model = modelWith(SafetyTransport(), backgroundScope)
         model.selectAgent("a1")
         runCurrent()
-        model.openPanel(Route.Credentials)
-        model.openCredentialForm("a1")
+        model.openPanel(Route.Avatars)
+        model.openCredentialForm("a1", CREDENTIAL_REQUEST)
         assertNotNull(model.credentialForm)
 
         model.selectAgent("a1")
@@ -147,7 +135,7 @@ class ConnectionSafetyTests {
         val model = modelWith(SafetyTransport(), backgroundScope)
         model.selectAgent("a1")
         runCurrent()
-        model.openCredentialForm("a1")
+        model.openCredentialForm("a1", CREDENTIAL_REQUEST)
 
         model.selectAgent("a1")
 
@@ -187,132 +175,6 @@ class ConnectionSafetyTests {
 
         assertEquals("{}", store.read(cachedChatKey("a1")))
         assertTrue(model.agents.any { it.id == "a1" })
-    }
-
-    @Test
-    fun backingOutOfTheBrowserEndsTheWait() = runTest {
-        val transport = signInTransport()
-        val model = modelWith(transport, backgroundScope)
-        val opened = mutableListOf<String>()
-        model.beginMCPSignIn("s1") { opened.add(it) }
-        runCurrent()
-        assertEquals("s1", model.signingIn)
-        assertEquals(1, opened.size)
-
-        model.browserReturned()
-
-        assertNull(model.signingIn)
-        model.beginMCPSignIn("s2") { opened.add(it) }
-        runCurrent()
-        assertEquals("s2", model.signingIn)
-        assertEquals(2, opened.size)
-    }
-
-    @Test
-    fun resumingBeforeTheBrowserOpensKeepsThePendingState() = runTest {
-        val transport = signInTransport()
-        val gate = transport.hold(START)
-        val model = modelWith(transport, backgroundScope)
-        val opened = mutableListOf<String>()
-        model.beginMCPSignIn("s1") { opened.add(it) }
-        runCurrent()
-
-        model.browserReturned()
-        assertEquals("s1", model.signingIn)
-
-        gate.complete(Unit)
-        runCurrent()
-        assertEquals(1, opened.size)
-        assertEquals("s1", model.signingIn)
-    }
-
-    @Test
-    fun theResumeAfterACallbackWaitsForTheServer() = runTest {
-        val transport = signInTransport()
-        val gate = transport.hold(FINISH)
-        val model = modelWith(transport, backgroundScope)
-        model.beginMCPSignIn("s1") {}
-        runCurrent()
-
-        model.handleOAuthCallback(CALLBACK)
-        model.browserReturned()
-        runCurrent()
-        assertEquals("s1", model.signingIn)
-        assertEquals("", model.notice)
-
-        gate.complete(Unit)
-        runCurrent()
-        assertNull(model.signingIn)
-        assertEquals("Signed in", model.notice)
-        assertEquals(true, model.mcpServers.first { it.id == "s1" }.authenticated)
-    }
-
-    @Test
-    fun aCallbackAfterLookingAwayStillFinishes() = runTest {
-        val transport = signInTransport()
-        val gate = transport.hold(FINISH)
-        val model = modelWith(transport, backgroundScope)
-        model.beginMCPSignIn("s1") {}
-        runCurrent()
-        model.browserReturned()
-
-        model.handleOAuthCallback(CALLBACK)
-        runCurrent()
-        assertEquals("s1", model.signingIn)
-
-        gate.complete(Unit)
-        runCurrent()
-        assertNull(model.signingIn)
-        assertEquals("Signed in", model.notice)
-    }
-
-    @Test
-    fun aRefusedCallbackAllowsARetry() = runTest {
-        val transport = signInTransport()
-        transport.responses[FINISH] = 400 to """{"error":"Sign-in expired"}"""
-        val model = modelWith(transport, backgroundScope)
-        model.beginMCPSignIn("s1") {}
-        runCurrent()
-
-        model.handleOAuthCallback(CALLBACK)
-        runCurrent()
-
-        assertNull(model.signingIn)
-        assertTrue(model.errorText.contains("Sign-in expired"))
-        assertEquals("", model.notice)
-    }
-
-    @Test
-    fun aNewSignInReplacesAnAbandonedOne() = runTest {
-        val transport = signInTransport()
-        val gate = transport.hold("POST /v1/mcp-servers/s2/oauth")
-        val model = modelWith(transport, backgroundScope)
-        model.beginMCPSignIn("s1") {}
-        runCurrent()
-        model.browserReturned()
-        model.beginMCPSignIn("s2") {}
-        runCurrent()
-
-        model.handleOAuthCallback(CALLBACK)
-        runCurrent()
-
-        assertEquals("s2", model.signingIn)
-        assertEquals(0, transport.sent(FINISH))
-        gate.complete(Unit)
-        runCurrent()
-    }
-
-    @Test
-    fun aBrowserThatWontOpenReportsTheFailure() = runTest {
-        val model = modelWith(signInTransport(), backgroundScope)
-
-        model.beginMCPSignIn("s1") { throw IllegalStateException("No browser") }
-        runCurrent()
-        model.handleOAuthCallback(CALLBACK)
-        runCurrent()
-
-        assertNull(model.signingIn)
-        assertEquals("", model.notice)
     }
 
     @Test
