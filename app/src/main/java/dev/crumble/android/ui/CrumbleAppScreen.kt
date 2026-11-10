@@ -226,6 +226,9 @@ fun CrumbleAppScreen(model: AppModel) {
     model.jobPanel?.let { panel ->
         JobPanelDialog(model = model, panel = panel)
     }
+    model.callTranscript?.let { transcript ->
+        CallDialog(model = model, transcript = transcript)
+    }
     model.botDesktop?.let { desktop ->
         BotDesktopDialog(model = model, desktop = desktop)
     }

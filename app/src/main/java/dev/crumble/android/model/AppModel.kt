@@ -11,6 +11,7 @@ import dev.crumble.android.generated.MemorySource
 import dev.crumble.android.generated.ScriptRun
 import dev.crumble.android.generated.SkillPackage
 import dev.crumble.android.generated.BotRequest
+import dev.crumble.android.generated.CallRequest
 import dev.crumble.android.generated.Credential
 import dev.crumble.android.generated.CredentialRequest
 import dev.crumble.android.generated.Credentials
@@ -268,6 +269,8 @@ private fun defaultAppScope(): CoroutineScope {
 }
 
 private const val DECISION_POLL_MS = 5_000L
+private const val CALL_TRANSCRIPT_POLL_MS = 2_000L
+private const val CALL_TRANSCRIPT_PAGE_SIZE = 200
 private const val BOT_STATUS_POLL_MS = 5_000L
 private const val PROVIDER_LOGIN_POLL_MS = 1_000L
 private const val JOB_REFRESH_MS = 3_000L
@@ -314,6 +317,9 @@ class AppModel(
     var heldActions by mutableStateOf<List<HeldAction>>(emptyList())
     var codingJobs by mutableStateOf<List<CodingJob>>(emptyList())
     var botRequests by mutableStateOf<List<BotRequest>>(emptyList())
+    var callRequests by mutableStateOf<List<CallRequest>>(emptyList())
+    var callTranscript by mutableStateOf<CallTranscript?>(null)
+    private var callTranscriptJob: Job? = null
     var decisionsLoaded by mutableStateOf(false)
     var decisionsFailed by mutableStateOf(false)
     var decidingIDs by mutableStateOf<Set<String>>(emptySet())
@@ -916,6 +922,7 @@ class AppModel(
         heldActions = emptyList()
         codingJobs = emptyList()
         botRequests = emptyList()
+        callRequests = emptyList()
         decisionsLoaded = false
         decisionsFailed = false
         decisionErrors = emptyMap()
@@ -997,6 +1004,7 @@ class AppModel(
         streamStatus = ""
         decisionsJob?.cancel()
         decisionsKey = ""
+        closeCallTranscript()
         closeJobs()
     }
 
@@ -1005,9 +1013,15 @@ class AppModel(
             message.heldAction?.let { ref -> heldActions.any { it.id == ref.id && it.status == "pending" } } == true ||
                 message.jobQuestion?.let { ref -> codingJobs.any { it.question?.id == ref.id } } == true ||
                 message.botRequest?.let { ref -> botRequests.any { it.id == ref.id && it.status == "pending" } } == true ||
+                message.callRequest?.let { ref -> callRequests.any { it.id == ref.id && (it.status == "pending" || it.status == "calling") } } == true ||
                 message.credentialRequest?.let { ref -> botCredentials[selectedAgentID]?.requests?.any { ref.answers(it.name, it.requestedAt) } } == true ||
                 message.loginRequest?.let { ref -> botLogins[selectedAgentID]?.requests?.any { ref.answers(it.name, it.requestedAt) } } == true
         }
+
+    private fun isCallNotice(message: Message) =
+        message.role == "user" && (message.origin?.kind == "call" || message.origin?.kind == "call_request")
+
+    private fun concernsCalls(message: Message) = message.callRequest != null || isCallNotice(message)
 
     private fun secretRefs() = messages.flatMap {
         listOfNotNull(it.credentialRequest?.let(::credentialReadKey), it.loginRequest?.let(::loginReadKey))
@@ -1018,6 +1032,7 @@ class AppModel(
             val held = if (messages.any { it.heldAction != null }) api.heldActions(agentID) else emptyList()
             val jobs = if (messages.any { it.jobQuestion != null }) api.codingJobs(agentID) else emptyList()
             val requests = if (messages.any { it.botRequest != null }) api.botRequests(agentID) else emptyList()
+            val calls = if (messages.any(::concernsCalls)) api.callRequests(agentID) else emptyList()
             val asked = secretRefs().toSet()
             val credentialMark = secretMark("credential", agentID)
             val loginMark = secretMark("login", agentID)
@@ -1027,6 +1042,7 @@ class AppModel(
             heldActions = held
             codingJobs = jobs
             botRequests = requests
+            callRequests = calls
             if (credentialList != null && secretSettled("credential", agentID, credentialMark)) botCredentials = botCredentials + (agentID to credentialList)
             if (loginList != null && secretSettled("login", agentID, loginMark)) botLogins = botLogins + (agentID to loginList)
             freshSecretRequests = asked
@@ -1043,7 +1059,9 @@ class AppModel(
 
     // Another client, a stopped job, or a restart can settle a decision, so keep reading while one waits.
     private fun followDecisions() {
-        val refs = messages.flatMap { listOfNotNull(it.heldAction?.id, it.jobQuestion?.id, it.botRequest?.id) } + secretRefs()
+        val refs = messages.flatMap {
+            listOfNotNull(it.heldAction?.id, it.jobQuestion?.id, it.botRequest?.id, it.callRequest?.id, it.id.takeIf { _ -> isCallNotice(it) })
+        } + secretRefs()
         val key = selectedAgentID + "\n" + refs.joinToString("\n")
         val api = client
         if (refs.isEmpty() || key == decisionsKey || api == null) return
@@ -1101,6 +1119,45 @@ class AppModel(
         }
         api.declineBotRequest(agentID, id)
         null
+    }
+
+    fun decideCallRequest(id: String, approve: Boolean) = decide(id) { api, agentID ->
+        val decided = if (approve) api.approveCallRequest(agentID, id) else api.declineCallRequest(agentID, id)
+        return@decide {
+            if (selectedAgentID == agentID) callRequests = callRequests.map { if (it.id == decided.id) decided else it }
+        }
+    }
+
+    /** Reads the call's transcript, then follows it every two seconds while the call goes on. */
+    fun openCallTranscript(requestID: String) {
+        val api = client ?: return
+        val agentID = selectedAgentID
+        val gen = generation
+        callTranscriptJob?.cancel()
+        callTranscript = CallTranscript(agentID, requestID)
+        callTranscriptJob = scope.launch {
+            do {
+                // Checked before the read, so a call that ends meanwhile still gets one last read.
+                val calling = callRequests.any { it.id == requestID && it.status == "calling" }
+                try {
+                    val page = api.callRequestTranscript(agentID, requestID, CALL_TRANSCRIPT_PAGE_SIZE)
+                    if (generation != gen || selectedAgentID != agentID) return@launch
+                    callTranscript = CallTranscript(agentID, requestID, callLines(page.messages.orEmpty()), loaded = true)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    if (generation != gen || selectedAgentID != agentID) return@launch
+                    callTranscript = callTranscript?.copy(loaded = true, failed = true)
+                }
+                if (calling) delay(CALL_TRANSCRIPT_POLL_MS)
+            } while (isActive && calling)
+        }
+    }
+
+    fun closeCallTranscript() {
+        callTranscriptJob?.cancel()
+        callTranscriptJob = null
+        callTranscript = null
     }
 
     private fun addCreatedBot(created: Agent) {

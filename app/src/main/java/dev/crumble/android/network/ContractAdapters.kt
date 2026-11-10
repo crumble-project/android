@@ -79,6 +79,14 @@ private fun botRequestRef(toolName: String?, isError: Boolean?, details: JsonEle
     return BotRequestRef(id, name)
 }
 
+private fun callRequestRef(toolName: String?, isError: Boolean?, details: JsonElement?): CallRequestRef? {
+    if (toolName != "request_call" || isError == true) return null
+    val request = details as? JsonObject ?: return null
+    val id = (request["id"] as? JsonPrimitive)?.contentOrNull ?: return null
+    val callee = (request["callee"] as? JsonPrimitive)?.contentOrNull ?: return null
+    return CallRequestRef(id, callee)
+}
+
 private fun secretRequestRef(tool: String, toolName: String?, isError: Boolean?, details: JsonElement?): SecretRequestRef? {
     if (toolName != tool || isError == true) return null
     val request = details as? JsonObject ?: return null
@@ -90,13 +98,15 @@ private fun secretRequestRef(tool: String, toolName: String?, isError: Boolean?,
 internal fun TranscriptMessage.domain() = Message(
     id = id, entryId = entryId, role = role, content = JsonPrimitive(content), blocks = blocks,
     kind = kind, replyTo = replyTo, replyPreview = replyPreview,
-    origin = origin?.let { dev.crumble.android.model.MessageOrigin(it.kind, it.name, it.agentId, it.source) },
+    origin = origin?.let { dev.crumble.android.model.MessageOrigin(it.kind, it.name, it.agentId, it.source, it.via) },
     communication = communication?.let { dev.crumble.android.model.BotCommunication(it.executionId, it.fromAgentId, it.fromName, it.toAgentId, it.toName, it.status) },
     timestamp = timestamp?.toLong(), attachments = attachments?.map { dev.crumble.android.model.AttachmentInfo(it.name, it.mimeType, it.size.toInt(), it.kind) },
     requestId = requestId,
     heldAction = heldAction?.let { HeldActionRef(it.id, it.job) },
     jobQuestion = jobQuestion?.let { JobQuestionRef(it.id, it.job) },
+    call = call?.let { MessageCall(it.callId, it.direction, it.callee) },
     botRequest = botRequestRef(toolName, isError, toolDetails),
+    callRequest = callRequestRef(toolName, isError, toolDetails),
     credentialRequest = secretRequestRef("request_credential", toolName, isError, toolDetails),
     loginRequest = secretRequestRef("request_login", toolName, isError, toolDetails),
     toolName = toolName, toolCallId = toolCallId, isError = isError, toolDetails = toolDetails,
@@ -106,13 +116,15 @@ internal fun TranscriptMessage.domain() = Message(
 internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
     id = id, entryId = entryId, role = role, content = JsonPrimitive(content), blocks = blocks,
     kind = kind, replyTo = replyTo, replyPreview = replyPreview,
-    origin = origin?.let { dev.crumble.android.model.MessageOrigin(it.kind, it.name, it.agentId, it.source) },
+    origin = origin?.let { dev.crumble.android.model.MessageOrigin(it.kind, it.name, it.agentId, it.source, it.via) },
     communication = communication?.let { dev.crumble.android.model.BotCommunication(it.executionId, it.fromAgentId, it.fromName, it.toAgentId, it.toName, it.status) },
     timestamp = timestamp?.toLong(), attachments = attachments?.map { dev.crumble.android.model.AttachmentInfo(it.name, it.mimeType, it.size.toInt(), it.kind) },
     requestId = requestId,
     heldAction = heldAction?.let { HeldActionRef(it.id, it.job) },
     jobQuestion = jobQuestion?.let { JobQuestionRef(it.id, it.job) },
+    call = call?.let { MessageCall(it.callId, it.direction, it.callee) },
     botRequest = botRequestRef(toolName, isError, toolDetails),
+    callRequest = callRequestRef(toolName, isError, toolDetails),
     credentialRequest = secretRequestRef("request_credential", toolName, isError, toolDetails),
     loginRequest = secretRequestRef("request_login", toolName, isError, toolDetails),
     toolName = toolName, toolCallId = toolCallId, isError = isError, toolDetails = toolDetails,
