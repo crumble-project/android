@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.outlined.Image
@@ -106,6 +107,7 @@ import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.MentionCompletion
+import dev.crumble.android.model.CallMarker
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.MessageDeliveryState
 import dev.crumble.android.model.PendingAttachment
@@ -114,6 +116,7 @@ import dev.crumble.android.model.Sources
 import dev.crumble.android.model.SplitReply
 import dev.crumble.android.model.botReactions
 import dev.crumble.android.model.displayOf
+import dev.crumble.android.model.callMarkerOf
 import dev.crumble.android.model.isDesktopScreenshot
 import dev.crumble.android.model.isNotice
 import dev.crumble.android.model.isWebLink
@@ -257,6 +260,7 @@ fun ChatRowView(
             MessageView(
                 model = model,
                 message = row.message,
+                botName = agent.name,
                 sources = sources[row.message.id],
                 reactions = reactions[row.message.entryId].orEmpty(),
             )
@@ -352,6 +356,7 @@ internal fun TimeRow(label: String) {
 fun MessageView(
     model: AppModel,
     message: Message,
+    botName: String,
     sources: Sources? = null,
     reactions: List<String> = emptyList(),
 ) {
@@ -359,6 +364,11 @@ fun MessageView(
     var menuExpanded by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
 
+    val call = callMarkerOf(message, botName)
+    if (call != null) {
+        CallMarkerRow(call, reactions)
+        return
+    }
     if (isNotice(message)) {
         NoticeRow(model, message)
         return
@@ -445,6 +455,7 @@ fun MessageView(
                         }
                     }
                     Reactions(reactions)
+                    if (message.origin?.via == "voice") SpokenOrigin()
                     DeliveryStatus(message = message, onRetry = { model.retryMessage(message) })
                 }
             }
@@ -703,6 +714,55 @@ private fun noticeIcon(message: Message): ImageVector? = when (message.origin?.k
     "credential" -> Icons.Default.Key
     "bot" -> Icons.Default.Group
     else -> null
+}
+
+@Composable
+private fun SpokenOrigin() {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            text = "Spoken on a call",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Where a voice call started or ended, centred like the website's call marker. */
+@Composable
+fun CallMarkerRow(marker: CallMarker, reactions: List<String> = emptyList()) {
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(14.dp), tint = tint)
+            Text(
+                text = marker.title,
+                style = MaterialTheme.typography.labelMedium,
+                color = tint,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Reactions(reactions)
+        }
+        marker.quote?.nilIfEmpty?.let { quote ->
+            Row(
+                modifier = Modifier.widthIn(max = 320.dp).height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(2.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.outlineVariant),
+                )
+                Text(text = quote, style = MaterialTheme.typography.bodySmall, color = tint)
+            }
+        }
+    }
 }
 
 @Composable

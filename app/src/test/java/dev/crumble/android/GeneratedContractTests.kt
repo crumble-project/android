@@ -1,8 +1,10 @@
 package dev.crumble.android
 
+import dev.crumble.android.generated.GetOpenAPIResponse
 import dev.crumble.android.generated.OptionalField
 import dev.crumble.android.generated.UpdateScheduleRequest
 import dev.crumble.android.model.ChatSnapshot
+import dev.crumble.android.model.CrumbleJson
 import dev.crumble.android.model.CrumblePatchJson
 import dev.crumble.android.model.OutgoingAttachment
 import dev.crumble.android.network.APIClient
@@ -164,5 +166,14 @@ class GeneratedContractTests {
         assertEquals("Hello", preview)
         val message = CrumblePatchJson.decodeFromString<dev.crumble.android.generated.TranscriptMessage>("""{"id":"m1","entryId":"e1","role":"assistant","content":"","blocks":{"provider":[null,true,1,"text"]}}""")
         assertEquals(JsonPrimitive(true), message.blocks!!.jsonObject["provider"]!!.jsonArray[1])
+    }
+
+    @Test
+    fun openObjectKeepsUndeclaredProperties() {
+        val text = """{"openapi":"3.1.0","info":{"version":"6.0.0"},"paths":{}}"""
+        val document = CrumbleJson.decodeFromString<GetOpenAPIResponse>(text)
+        assertEquals("3.1.0", document.openapi)
+        assertEquals(setOf("info", "paths"), document.additionalProperties.keys)
+        assertEquals(CrumbleJson.parseToJsonElement(text), CrumbleJson.parseToJsonElement(CrumbleJson.encodeToString(document)))
     }
 }

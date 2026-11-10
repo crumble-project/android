@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Show voice gateway calls in bot chats, as on the web: a spoken message reads "Spoken on a call" under its bubble, and a call's start and end show as centred phone markers. A call the bot placed reads "{bot} called you" with the greeting it spoke, and the "Call ended" line that wakes the bot shows the bot's reaction instead of appearing as a typed message.
+- Copy the bot contract with the voice gateway. It adds the `call` field on transcript messages, the voice gateway and voice line operations, and the `partial` query on chat events, which the app does not use yet.
+- Bump the contract generator to `1.2.0`: an object that declares properties and allows others keeps the others in `additionalProperties`, so `getOpenAPI()` returns the whole document instead of only `openapi`.
 - CI caches Gradle and runs tests and lint as parallel jobs. Lint skips test sources.
 - `scripts/contract.py update --from DIRECTORY` copies the contract files from a directory such as `bot/openapi/`, replacing `--local` and `--release`. `contract/` no longer carries `pin.json`, `SHA256SUMS`, `CHANGELOG.md`, or `source-commit.txt`; the `verify` and `update-latest` commands and the weekly contract update workflow are gone.
 - Publish signed release APKs: a `vX.Y.Z` tag builds one with FCM and attaches it to a GitHub release. Release builds are signed when `CRUMBLE_KEYSTORE_PATH` and `CRUMBLE_KEYSTORE_PASSWORD` are set, and take their version from `crumble.versionName` and `crumble.versionCode`.

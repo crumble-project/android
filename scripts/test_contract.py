@@ -55,6 +55,17 @@ class ContractTests(unittest.TestCase):
         self.assertIn("val `requiredNull`: String?,", code)
         self.assertIn("val `optionalNull`: OptionalField<String?> = OptionalField.Absent", code)
 
+    def test_open_object_keeps_additional_properties(self):
+        instance = generator.Generator({"components": {"schemas": {}}, "paths": {}})
+        schema = {"type": "object", "properties": {"openapi": {"type": "string"}}, "required": ["openapi"], "additionalProperties": {}}
+        code = instance.model("Document", schema)
+        self.assertIn("val additionalProperties: Map<String, JsonElement> = emptyMap(),", code)
+        self.assertIn("return Document(fields.`openapi`, additional)", code)
+        self.assertIn("output.encodeJsonElement(JsonObject(additional + fields))", code)
+        self.assertNotIn("additionalProperties", instance.model("Closed", dict(schema, additionalProperties=False)))
+        with self.assertRaises(ValueError):
+            instance.model("Clash", dict(schema, properties={"additionalProperties": {"type": "string"}}))
+
 
 if __name__ == "__main__":
     unittest.main()

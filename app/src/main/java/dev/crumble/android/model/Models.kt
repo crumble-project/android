@@ -86,6 +86,14 @@ data class MessageOrigin(
     val name: String? = null,
     val agentId: String? = null,
     val source: String? = null,
+    val via: String? = null,
+)
+
+/** The voice gateway call a `call-started` or `call-ended` event marks. */
+@Serializable
+data class MessageCall(
+    val callId: String = "",
+    val direction: String = "",
 )
 
 /** A persisted request or reply exchanged between two bots. */
@@ -143,6 +151,7 @@ data class Message(
     val deliveryState: MessageDeliveryState = MessageDeliveryState.confirmed,
     val heldAction: HeldActionRef? = null,
     val jobQuestion: JobQuestionRef? = null,
+    val call: MessageCall? = null,
     val botRequest: BotRequestRef? = null,
     val credentialRequest: SecretRequestRef? = null,
     val loginRequest: SecretRequestRef? = null,
@@ -595,11 +604,25 @@ fun noticeTitle(message: Message): String? {
         "credential" -> "Credential · $name"
         "bot" -> "From $name"
         "bot_request" -> "Bot request"
+        "call" -> "Call"
         else -> null
     }
 }
 
 fun isNotice(message: Message) = message.role == "user" && noticeTitle(message) != null
+
+/** A centred call line and, on a call the bot placed, the greeting it spoke. */
+data class CallMarker(val title: String, val quote: String? = null)
+
+fun callMarkerOf(message: Message, botName: String): CallMarker? {
+    if (message.role == "user") return if (message.origin?.kind == "call") CallMarker(message.text) else null
+    val call = message.call ?: return null
+    return when (message.kind) {
+        "call-ended" -> CallMarker(message.text)
+        "call-started" -> if (call.direction == "outbound") CallMarker("$botName called you", message.text) else CallMarker("Call started")
+        else -> null
+    }
+}
 
 fun preview(text: String): String {
     var plain = text
