@@ -26,7 +26,6 @@ data class PaletteSection(val heading: String, val items: List<PaletteItem>)
 fun paletteSections(
     agents: List<Agent>,
     groups: List<GroupChat>,
-    admin: Boolean,
     theme: ThemeChoice,
 ): List<PaletteSection> {
     val bots = agents.filterNot { it.id.startsWith(PENDING_PREFIX) }.map {
@@ -43,7 +42,7 @@ fun paletteSections(
         val terms = if (route == Route.Tasks) listOf(route.title, "Automations") else listOf(route.title)
         PaletteItem(route.title, PaletteAction.OpenPage(route), terms)
     }
-    val settings = SETTINGS_PAGES.filter { it != Route.Users || admin }.map {
+    val settings = SETTINGS_PAGES.map {
         PaletteItem(it.title, PaletteAction.OpenPage(it), listOf("Settings ${it.title}"))
     }
     val themes = ThemeChoice.entries.map {
@@ -64,7 +63,7 @@ fun paletteSections(
     ).filter { it.items.isNotEmpty() }
 }
 
-/** Letters in order count, like the website's search: "prv" finds "Providers". Null means no match. */
+/** Letters in order count, like the website's search: "skl" finds "Skills". Null means no match. */
 internal fun matchScore(term: String, query: String): Int? {
     val text = term.lowercase()
     val at = text.indexOf(query)

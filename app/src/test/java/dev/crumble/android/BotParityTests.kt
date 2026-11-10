@@ -156,7 +156,7 @@ class BotParityTests {
             listOf("Same as the bot", "Melious (not set up)", "OpenAI"),
             desktopProviderOptions(providers, "melious").map { it.label },
         )
-        assertEquals("Add an API key or sign in for this provider in Settings to load its models.", desktopModelHint(providers, "melious", 0))
+        assertEquals("Add an API key or sign in for this provider in the web app to load its models.", desktopModelHint(providers, "melious", 0))
         assertEquals("3 models available.", desktopModelHint(providers, "openai", 3))
         assertEquals("Type a model ID.", desktopModelHint(providers, "openai", 0))
     }

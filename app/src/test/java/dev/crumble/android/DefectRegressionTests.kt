@@ -8,13 +8,11 @@ import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.AttachmentError
 import dev.crumble.android.generated.Credential
-import dev.crumble.android.generated.Credentials
 import dev.crumble.android.model.AttachmentLimits
 import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.CrumbleJson
 import dev.crumble.android.model.JobKind
 import dev.crumble.android.model.JobRef
-import dev.crumble.android.model.MCPServer
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.MessageOrigin
 import dev.crumble.android.model.ProviderStatus
@@ -287,23 +285,6 @@ class DefectRegressionTests {
         assertTrue(ChatRow.shownInChat(user(null)))
     }
 
-    // MCP sign-in
-
-    @Test
-    fun aSignInAddressThatIsNotAWebPageNeverLeavesTheApp() = runTest {
-        val transport = RegressionTransport()
-        transport.responses["POST /v1/mcp-servers/s1/oauth"] = 200 to """{"authorizationUrl":"intent://evil#Intent;scheme=other;end"}"""
-        val model = model(transport, backgroundScope)
-        model.mcpServers = listOf(MCPServer(id = "s1", name = "Linear"))
-        val opened = mutableListOf<String>()
-        model.beginMCPSignIn("s1") { opened.add(it) }
-        runCurrent()
-
-        assertTrue(opened.isEmpty())
-        assertNull(model.signingIn)
-        assertTrue(model.errorText.isNotEmpty())
-    }
-
     // Attachments
 
     @Test
@@ -351,26 +332,6 @@ class DefectRegressionTests {
             readAttachment("huge.jpg", "image/jpeg", declaredSize = null, jpegReencoder = { byteArrayOf(1) }) { stream }
         }
         assertTrue("read ${stream.served}", stream.served <= AttachmentLimits.IMAGE_SOURCE_BYTES + 8192)
-    }
-
-    // GitHub-managed credentials
-
-    private fun credential(name: String, github: Boolean) = Credential(name, listOf("github.com"), null, "t", "t", null, null, github)
-
-    @Test
-    fun aGithubCredentialCanBeNeitherEditedNorDeleted() = runTest {
-        val transport = RegressionTransport()
-        val model = model(transport, backgroundScope)
-        val github = credential("GITHUB_TOKEN", true)
-        model.botCredentials = mapOf("a1" to Credentials(listOf(github, credential("ACME", false)), emptyList()))
-
-        model.openCredentialForm("a1", existing = github)
-        assertNull(model.credentialForm)
-
-        model.deleteCredential("a1", "GITHUB_TOKEN")
-        runCurrent()
-        assertTrue(transport.sent("DELETE /v1/agents/a1/credentials/GITHUB_TOKEN").isEmpty())
-        assertEquals(2, model.botCredentials.getValue("a1").credentials.size)
     }
 
     // Timezone
@@ -437,18 +398,6 @@ class DefectRegressionTests {
 
         assertEquals("next", model.client?.token)
         assertEquals("", model.errorText)
-    }
-
-    // OAuth return
-
-    @Test
-    fun aCallbackWithNoSignInWaitingSaysSo() = runTest {
-        val transport = RegressionTransport()
-        val model = model(transport, backgroundScope)
-        model.handleOAuthCallback("dev.crumble.android:/oauth/callback?code=c&state=x")
-        runCurrent()
-        assertTrue(transport.requests.isEmpty())
-        assertTrue(model.errorText.isNotEmpty())
     }
 
     // Panels and the bot list

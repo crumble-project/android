@@ -339,8 +339,8 @@ class CommandPaletteTests {
         GroupChat("pending:2", "Unsaved", listOf("a1", "a2"), "t", "t"),
     )
 
-    private fun sections(agents: List<Agent> = bots, admin: Boolean = false, theme: ThemeChoice = ThemeChoice.System) =
-        paletteSections(agents, groups, admin, theme)
+    private fun sections(agents: List<Agent> = bots, theme: ThemeChoice = ThemeChoice.System) =
+        paletteSections(agents, groups, theme)
 
     private fun titles(list: List<PaletteSection>, heading: String) =
         list.firstOrNull { it.heading == heading }?.items?.map { it.title }.orEmpty()
@@ -368,12 +368,6 @@ class CommandPaletteTests {
     }
 
     @Test
-    fun usersIsForAdmins() {
-        assertFalse("Users" in titles(sections(), "Settings"))
-        assertTrue("Users" in titles(sections(admin = true), "Settings"))
-    }
-
-    @Test
     fun aGroupNeedsTwoBots() {
         assertEquals(listOf("New bot"), titles(sections(agents = bots.take(1)), "Create"))
     }
@@ -391,7 +385,7 @@ class CommandPaletteTests {
 
     @Test
     fun lettersInOrderMatchIgnoringCase() {
-        assertEquals(listOf("Providers"), titles(searchPalette(sections(), "PRVD"), "Settings"))
+        assertEquals(listOf("Skills"), titles(searchPalette(sections(), "SKLS"), "Settings"))
         assertTrue(searchPalette(sections(), "zzzz").isEmpty())
     }
 
@@ -399,9 +393,9 @@ class CommandPaletteTests {
     fun theBestMatchLeads() {
         val found = searchPalette(sections(), "memory")
         assertEquals("Memory", found.first().items.first().title)
-        val ranked = searchPalette(sections(), "web")
+        val ranked = searchPalette(sections(), "avatars")
         assertEquals(listOf("Settings"), ranked.map { it.heading }.take(1))
-        assertEquals("Web search", ranked.first().items.first().title)
+        assertEquals("Avatars", ranked.first().items.first().title)
     }
 
     @Test
@@ -409,7 +403,7 @@ class CommandPaletteTests {
         assertEquals(listOf("Automations"), titles(searchPalette(sections(), "automations"), "Workspace"))
         assertEquals(listOf("Dark theme"), titles(searchPalette(sections(), "theme dark"), "Theme"))
         assertEquals(listOf("Dark theme"), titles(searchPalette(sections(), "dark theme"), "Theme"))
-        assertEquals("Providers", titles(searchPalette(sections(), "settings prov"), "Settings").first())
+        assertEquals("Skills", titles(searchPalette(sections(), "settings sk"), "Settings").first())
     }
 }
 

@@ -23,9 +23,15 @@ fun shownCapabilities(server: Capabilities?, initialTools: Set<String>): List<Bo
         }
     }
 
+data class ChoiceOption(val value: String, val label: String)
+
 const val WEB_SEARCH_ACCOUNT_DEFAULT = "default"
 
-val WEB_SEARCH_OPTIONS = listOf(ChoiceOption(WEB_SEARCH_ACCOUNT_DEFAULT, "Account default")) + WEB_SEARCH_PROVIDERS
+val WEB_SEARCH_OPTIONS = listOf(
+    ChoiceOption(WEB_SEARCH_ACCOUNT_DEFAULT, "Account default"),
+    ChoiceOption("mixed", "Mixed"),
+    ChoiceOption("exa", "Exa"),
+)
 
 /** Set-up providers, plus the current one when its key is gone, so the owner sees why. */
 private fun providerOptions(providers: List<ProviderStatus>, current: String): List<ChoiceOption> {
@@ -44,7 +50,7 @@ fun botProviderOptions(providers: List<ProviderStatus>, current: String): List<C
 
 fun desktopModelHint(providers: List<ProviderStatus>, provider: String, modelCount: Int): String = when {
     providers.none { it.provider == provider && it.configured } ->
-        "Add an API key or sign in for this provider in Settings to load its models."
+        "Add an API key or sign in for this provider in the web app to load its models."
     modelCount > 0 -> "$modelCount models available."
     else -> "Type a model ID."
 }

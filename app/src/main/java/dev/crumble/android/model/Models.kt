@@ -1,6 +1,5 @@
 package dev.crumble.android.model
 
-import dev.crumble.android.generated.SecretStatus
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -280,20 +279,6 @@ data class MCPServer(
     val enabled: Boolean = false,
     /** The bot the server belongs to, or null when every bot may use it. */
     val agentId: String? = null,
-    val authenticated: Boolean? = null,
-    /** How the server signs in: "oauth", "token", or "none". */
-    val auth: String? = null,
-    val oauthClientId: String? = null,
-    val token: SecretStatus? = null,
-    val oauthClientSecret: SecretStatus? = null,
-    val error: String? = null,
-)
-
-/** The start of an OAuth sign-in: a URL to open, or `authorized` when saved tokens still work. */
-@Serializable
-data class OAuthStart(
-    val authorizationUrl: String? = null,
-    val authorized: Boolean? = null,
 )
 
 /** One event from the server's activity stream. */

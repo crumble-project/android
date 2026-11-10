@@ -1,28 +1,31 @@
 package dev.crumble.android.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Surface
+import dev.crumble.android.model.Skill
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DesktopWindows
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Psychology
@@ -39,7 +42,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,7 +60,6 @@ import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AgentDraft
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.ChoiceOption
-import dev.crumble.android.model.Skill
 import dev.crumble.android.model.THINKING_LEVELS
 import dev.crumble.android.model.WEB_SEARCH_ACCOUNT_DEFAULT
 import dev.crumble.android.model.WEB_SEARCH_OPTIONS
@@ -74,6 +75,7 @@ fun AgentEditorDialog(
     model: AppModel,
     draft: AgentDraft,
 ) {
+    val context = LocalContext.current
     val requestID = draft.botRequestID
     val complete = draft.name.isNotBlank() && draft.provider.isNotEmpty() && draft.model.isNotBlank()
 
@@ -321,9 +323,10 @@ fun AgentEditorDialog(
                                         },
                                     )
                                     Text(
-                                        text = "Manage the default and Exa key in Settings → Web search.",
+                                        text = "Manage the default and Exa key in the web app's Web search settings.",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.clickable { openWebSettings(context, model, "web-search") },
                                     )
                                 }
                             }
@@ -334,7 +337,15 @@ fun AgentEditorDialog(
                 item {
                     RowsSection(title = "Integrations") {
                         val servers = model.usableServers(forAgentID = draft.agentID)
-                        if (servers.isEmpty()) note("Add an MCP server under Integrations to use its tools here.")
+                        if (servers.isEmpty()) {
+                            row { shape ->
+                                GroupedRow(
+                                    title = "Add an MCP server in the web app to use its tools here.",
+                                    shape = shape,
+                                    onClick = { openWebSettings(context, model, "integrations") },
+                                )
+                            }
+                        }
                         for (server in servers) {
                             row { shape ->
                                 GroupedItem(
@@ -379,8 +390,8 @@ fun AgentEditorDialog(
                 if (!draft.isNew) {
                     item {
                         SectionCard(title = "Credentials") {
-                            OutlinedButton(onClick = { model.openBotCredentials(draft.agentID) }) {
-                                Text("Manage in Settings")
+                            OutlinedButton(onClick = { openWebSettings(context, model, "credentials") }) {
+                                Text("Manage in the web app")
                             }
                         }
                     }

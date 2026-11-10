@@ -1,10 +1,11 @@
 package dev.crumble.android.model
 
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonObject
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import dev.crumble.android.BuildConfig
 import dev.crumble.android.generated.BotAvatarDefinition
 import dev.crumble.android.generated.LearnedChange
 import dev.crumble.android.generated.MemorySource
@@ -12,31 +13,12 @@ import dev.crumble.android.generated.ScriptRun
 import dev.crumble.android.generated.SkillPackage
 import dev.crumble.android.generated.BotRequest
 import dev.crumble.android.generated.CallRequest
-import dev.crumble.android.generated.Credential
 import dev.crumble.android.generated.CredentialRequest
 import dev.crumble.android.generated.Credentials
-import dev.crumble.android.generated.Login
 import dev.crumble.android.generated.LoginRequest
 import dev.crumble.android.generated.Logins
 import dev.crumble.android.generated.PasswordManager
-import dev.crumble.android.generated.Provider
-import dev.crumble.android.generated.ProviderLoginSession
 import dev.crumble.android.generated.Capabilities
-import dev.crumble.android.generated.GitHubAccount
-import dev.crumble.android.generated.GitHubApp
-import dev.crumble.android.generated.JudgeModel
-import dev.crumble.android.generated.JudgeModelJudgeModel
-import dev.crumble.android.generated.PluginSetting
-import dev.crumble.android.generated.PluginSettings
-import dev.crumble.android.generated.SecretStatus
-import dev.crumble.android.generated.AdminUser
-import dev.crumble.android.generated.Invite
-import dev.crumble.android.generated.ListOutdatedWorkspacesResponseWorkspacesItem
-import dev.crumble.android.generated.OptionalField
-import dev.crumble.android.generated.ServerSettings
-import dev.crumble.android.generated.UpdateServerSettingsRequest
-import dev.crumble.android.generated.VisionModel
-import dev.crumble.android.generated.VisionModelVisionModel
 import dev.crumble.android.generated.CodingJob
 import dev.crumble.android.generated.GroupChat
 import dev.crumble.android.generated.HeldAction
@@ -48,7 +30,6 @@ import dev.crumble.android.network.UrlConnectionTransport
 import dev.crumble.android.network.domain
 import dev.crumble.android.network.edited
 import dev.crumble.android.network.friendlyError
-import dev.crumble.android.network.oauthResult
 import dev.crumble.android.storage.CredentialStore
 import dev.crumble.android.storage.InMemoryCredentialStore
 import dev.crumble.android.ui.BotState
@@ -70,10 +51,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
@@ -84,10 +63,7 @@ val WORKSPACE_PAGES: List<Route> get() = listOf(Route.Memory, Route.Tasks, Route
 /** The website's settings sections, grouped the way Android's Settings groups its rows. */
 val SETTINGS_GROUPS: List<List<Route>> get() = listOf(
     listOf(Route.General),
-    listOf(Route.Providers, Route.JudgeModel, Route.VisionModel, Route.WebSearch),
-    listOf(Route.Credentials, Route.Logins, Route.PasswordManagers),
-    listOf(Route.Integrations, Route.Coding, Route.MessageGateways, Route.EventRelay),
-    listOf(Route.Skills, Route.Avatars, Route.Users),
+    listOf(Route.Skills, Route.Avatars),
 )
 
 val SETTINGS_PAGES: List<Route> get() = SETTINGS_GROUPS.flatten()
@@ -99,20 +75,7 @@ sealed class Route {
     data object Skills : Route()
     data object Tasks : Route()
     data object Activity : Route()
-    data object Integrations : Route()
     data object Avatars : Route()
-    data object Providers : Route()
-    data object PasswordManagers : Route()
-    data object Credentials : Route()
-    data object Logins : Route()
-    data object WebSearch : Route()
-    data object JudgeModel : Route()
-    data object VisionModel : Route()
-    data object Coding : Route()
-    data object Users : Route()
-    data object MessageGateways : Route()
-    data class MessageGateway(val id: String) : Route()
-    data object EventRelay : Route()
     data object Settings : Route()
     data object General : Route()
     data object Account : Route()
@@ -124,7 +87,6 @@ sealed class Route {
         get() = when {
             this in SETTINGS_PAGES -> Settings
             this in WORKSPACE_PAGES || this == Settings -> Account
-            this is MessageGateway -> MessageGateways
             this == NewGroup -> NewChat
             else -> null
         }
@@ -137,20 +99,7 @@ sealed class Route {
             Skills -> "Skills"
             Tasks -> "Automations"
             Activity -> "Activity"
-            Integrations -> "Integrations"
             Avatars -> "Avatars"
-            Providers -> "Providers"
-            PasswordManagers -> "Password managers"
-            Credentials -> "Credentials"
-            Logins -> "Logins"
-            WebSearch -> "Web search"
-            JudgeModel -> "Judge model"
-            VisionModel -> "Vision model"
-            Coding -> "Coding"
-            Users -> "Users"
-            MessageGateways -> "Message gateways"
-            is MessageGateway -> "Message gateway"
-            EventRelay -> "Event relay"
             Settings -> "Settings"
             General -> "General"
             Account -> "Account"
@@ -242,21 +191,6 @@ data class TaskDraft(
     var enabled: Boolean = true,
 )
 
-data class MCPDraft(
-    val id: UUID = UUID.randomUUID(),
-    val serverID: String,
-    /** The bot a new server belongs to, or null for a shared one; fixed once the server exists. */
-    var agentID: String? = null,
-    var name: String = "",
-    var url: String = "",
-    var token: SecretDraft = SecretDraft(),
-    var enabled: Boolean = true,
-    var clientID: String = "",
-    var clientSecret: SecretDraft = SecretDraft(),
-    /** A changed password manager reference is read before anything is saved, so the sheet waits for it. */
-    var saving: Boolean = false,
-)
-
 private fun defaultAppScope(): CoroutineScope {
     val dispatcher = try {
         // Test if Main dispatcher is available in this environment
@@ -272,7 +206,6 @@ private const val DECISION_POLL_MS = 5_000L
 private const val CALL_TRANSCRIPT_POLL_MS = 2_000L
 private const val CALL_TRANSCRIPT_PAGE_SIZE = 200
 private const val BOT_STATUS_POLL_MS = 5_000L
-private const val PROVIDER_LOGIN_POLL_MS = 1_000L
 private const val JOB_REFRESH_MS = 3_000L
 private const val IDLE_JOB_REFRESH_MS = 15_000L
 private const val DESKTOP_STATUS_MS = 10_000L
@@ -290,7 +223,6 @@ private const val BOT_RECORD = "agent:"
 private const val GROUP_RECORD = "group:"
 private const val MEMORY_RECORD = "memory:"
 private const val SCHEDULE_RECORD = "schedule:"
-private const val MCP_RECORD = "mcp:"
 private const val SKILL_RECORD = "skill:"
 private const val BOT_SKILL_RECORD = "agent-skill:"
 
@@ -585,7 +517,6 @@ class AppModel(
     var memoryDraft by mutableStateOf<MemoryDraft?>(null)
     var taskDraft by mutableStateOf<TaskDraft?>(null)
     var eventSourceDraft by mutableStateOf<EventSourceDraft?>(null)
-    var mcpDraft by mutableStateOf<MCPDraft?>(null)
     var skillDraft by mutableStateOf<SkillDraft?>(null)
     var showingPalette by mutableStateOf(false)
     var theme by mutableStateOf(ThemeChoice.of(credentials.read(THEME_KEY)) ?: ThemeChoice.System)
@@ -602,70 +533,44 @@ class AppModel(
     var notificationsAllowed by mutableStateOf(true)
     var botCredentials by mutableStateOf<Map<String, Credentials>>(emptyMap())
     var botLogins by mutableStateOf<Map<String, Logins>>(emptyMap())
-    var credentialLoadErrors by mutableStateOf<Map<String, String>>(emptyMap())
-    var loginLoadErrors by mutableStateOf<Map<String, String>>(emptyMap())
-    var credentialScope by mutableStateOf(SKILLS_ALL)
-    var loginScope by mutableStateOf(SKILLS_ALL)
     var credentialForm by mutableStateOf<CredentialForm?>(null)
     var loginForm by mutableStateOf<LoginForm?>(null)
-    var secretUses by mutableStateOf<SecretUsesView?>(null)
     var freshSecretRequests by mutableStateOf<Set<String>>(emptySet())
     var passwordManagers by mutableStateOf<List<PasswordManager>>(emptyList())
-    var passwordManagersLoaded by mutableStateOf(false)
-    var passwordManagersError by mutableStateOf("")
-    var tokenForm by mutableStateOf<ManagerTokenForm?>(null)
-    var providerAccounts by mutableStateOf<List<Provider>>(emptyList())
-    var providerKeyForm by mutableStateOf<ProviderKeyForm?>(null)
-    var providerLogin by mutableStateOf<ProviderLoginView?>(null)
 
-    /** How one kind of bot-owned secret is read, stored, and changed; credentials and logins behave alike. */
+    /** How a bot's requests for one kind of secret are read and answered; credentials and logins behave alike. */
     private class SecretOps<D>(
         val kind: String,
         val read: suspend (APIClient, String) -> D,
-        val delete: suspend (APIClient, String, String) -> Unit,
         val decline: suspend (APIClient, String, String) -> Unit,
-        val withoutItem: (D, String) -> D,
         val withoutRequest: (D, String) -> D,
         val restored: (D, D, String) -> D,
         val lists: () -> Map<String, D>,
         val store: (Map<String, D>) -> Unit,
-        val failures: (Map<String, String>) -> Unit,
     )
 
     private val credentialOps = SecretOps(
         kind = "credential",
         read = { api, id -> api.credentials(id) },
-        delete = { api, id, name -> api.deleteCredential(id, name) },
         decline = { api, id, name -> api.declineCredential(id, name) },
-        withoutItem = { list, name -> list.copy(credentials = list.credentials.filterNot { it.name == name }) },
         withoutRequest = { list, name -> list.copy(requests = list.requests.filterNot { it.name == name }) },
         restored = { list, before, name -> list.restored(before, name) },
         lists = { botCredentials },
         store = { botCredentials = it },
-        failures = { credentialLoadErrors = it },
     )
 
     private val loginOps = SecretOps(
         kind = "login",
         read = { api, id -> api.logins(id) },
-        delete = { api, id, name -> api.deleteLogin(id, name) },
         decline = { api, id, name -> api.declineLogin(id, name) },
-        withoutItem = { list, name -> list.copy(logins = list.logins.filterNot { it.name == name }) },
         withoutRequest = { list, name -> list.copy(requests = list.requests.filterNot { it.name == name }) },
         restored = { list, before, name -> list.restored(before, name) },
         lists = { botLogins },
         store = { botLogins = it },
-        failures = { loginLoadErrors = it },
     )
 
     private val secretRevisions = mutableMapOf<String, Int>()
-    private var providerLoginJob: Job? = null
-    private var providerLoginReads = 0
 
-    /** The MCP server whose sign-in flow is currently active. */
-    var signingIn by mutableStateOf<String?>(null)
-    // Outlives the spinner: the owner can glance at the app and still finish in the browser.
-    private var browserSignIn: String? = null
     var confirmingDelete by mutableStateOf(false)
 
 
@@ -2282,10 +2187,10 @@ class AppModel(
                 val loadedServers = serversDeferred.await()
                 val loadedSkills = skillsDeferred.await()
                 return@coroutineScope {
-                    if (settledSince(revision, MCP_RECORD, SKILL_RECORD)) {
+                    if (settledSince(revision, SKILL_RECORD)) {
                         loadEditorLists()
                     } else {
-                        mcpServers = withLocalChanges(loadedServers, mcpServers, MCP_RECORD, MCPServer::id)
+                        mcpServers = loadedServers
                         sharedSkills = withLocalChanges(loadedSkills, sharedSkills, SKILL_RECORD, SharedSkill::id)
                     }
                 }
@@ -2295,11 +2200,9 @@ class AppModel(
 
     fun loadProviders() {
         request { api ->
-            val mark = secretMark("provider", "")
             val loaded = api.providerAccounts()
             return@request {
                 providers = loaded.map { it.domain() }
-                if (secretSettled("provider", "", mark)) providerAccounts = loaded
                 val chosen = firstConfiguredProvider()
                 if (agentDraft?.provider?.isEmpty() == true && chosen.isNotEmpty()) {
                     agentDraft = agentDraft?.copy(provider = chosen)
@@ -2355,10 +2258,10 @@ class AppModel(
 
     val modelHint: String
         get() {
-            if (providers.none { it.configured }) return "No provider is set up yet. Add one in Settings."
+            if (providers.none { it.configured }) return "No provider is set up yet. Add one in the web app."
             val p = providers.firstOrNull { it.provider == agentDraft?.provider }
             if (p != null && !p.configured) {
-                return "Add an API key for this provider in Settings to load its models."
+                return "Add an API key for this provider in the web app to load its models."
             }
             return if (models.isEmpty()) "Type a model ID." else "${models.size} models available."
         }
@@ -2609,9 +2512,7 @@ class AppModel(
         clearSecretDrafts()
         memoryDraft = null
         taskDraft = null
-        mcpDraft = null
         skillDraft = null
-        gatewayForm = null
     }
 
     fun openPanel(panel: Route) {
@@ -2627,48 +2528,8 @@ class AppModel(
                 loadEventSources()
             }
             Route.Activity -> loadActivity()
-            Route.Providers -> {
-                loadProviders()
-                loadPasswordManagers()
-            }
-            Route.PasswordManagers -> loadPasswordManagers()
-            Route.WebSearch -> {
-                loadWebSearch()
-                loadPluginSettings()
-                loadPasswordManagers()
-            }
-            Route.JudgeModel -> loadJudgeModel()
-            Route.VisionModel -> loadVisionModel()
-            Route.Coding -> loadCoding()
-            Route.Users -> loadUsers()
-            Route.MessageGateways -> loadGateways()
-            is Route.MessageGateway -> {
-                seedGatewayForm()
-                loadGateways()
-                loadAgentsForPanel()
-                loadPluginSettings()
-                loadPasswordManagers()
-            }
-            Route.EventRelay -> {
-                loadRelay()
-                loadEventSources()
-                loadPluginSettings()
-                loadPasswordManagers()
-            }
-            Route.Credentials -> {
-                loadSecretLists(credentialOps)
-                loadPasswordManagers()
-            }
-            Route.Logins -> {
-                loadSecretLists(loginOps)
-                loadPasswordManagers()
-            }
             Route.Avatars -> loadAgentsForPanel()
             Route.Settings, Route.General, Route.Account, Route.NewChat, Route.NewGroup -> Unit
-            Route.Integrations -> {
-                loadPasswordManagers()
-                loadIntegrations()
-            }
             is Route.AgentChat, is Route.GroupChat -> Unit
         }
     }
@@ -2700,26 +2561,6 @@ class AppModel(
                     schedulesLoaded = true
                     schedulesError = ""
                     if (taskTab == TaskTab.Runs) loadTaskRuns()
-                }
-            }
-        }
-    }
-
-    private fun loadIntegrations() {
-        val revision = mutationRevision
-        request { api ->
-            coroutineScope {
-                val botsDeferred = async { api.agents() }
-                val serversDeferred = async { api.mcpServers() }
-                val loadedBots = botsDeferred.await()
-                val loadedServers = serversDeferred.await()
-                return@coroutineScope {
-                    if (settledSince(revision, BOT_RECORD, MCP_RECORD)) {
-                        loadIntegrations()
-                    } else {
-                        applyBots(loadedBots)
-                        mcpServers = withLocalChanges(loadedServers, mcpServers, MCP_RECORD, MCPServer::id)
-                    }
                 }
             }
         }
@@ -3286,290 +3127,6 @@ class AppModel(
             },
             work = { api ->
                 api.deleteSchedule(id)
-                null
-            },
-        )
-    }
-
-    /** Opens a server to edit, or a new one owned by `agentID` (null for shared). */
-    fun openMCPForm(id: String, agentID: String? = null) {
-        var form = MCPDraft(serverID = id, agentID = agentID)
-        val server = mcpServers.firstOrNull { it.id == id }
-        if (server != null) {
-            form = form.copy(
-                agentID = server.agentId,
-                name = server.name,
-                url = server.url,
-                enabled = server.enabled,
-                token = secretDraft(server.token),
-                clientID = server.oauthClientId.orEmpty(),
-                clientSecret = secretDraft(server.oauthClientSecret),
-            )
-        }
-        mcpDraft = form
-    }
-
-    fun saveMCP() {
-        val form = mcpDraft ?: return
-        val name = form.name.trim()
-        val rawURL = form.url.trim()
-        val validUrl = try {
-            val u = java.net.URI(rawURL)
-            !u.host.isNullOrEmpty() && (u.scheme == "http" || u.scheme == "https")
-        } catch (_: Exception) {
-            false
-        }
-        if (name.isEmpty() || !validUrl) {
-            errorText = "MCP name and an HTTP(S) URL are required."
-            return
-        }
-        val payload = LinkedHashMap<String, JsonElement>().apply {
-            put("name", JsonPrimitive(name))
-            put("url", JsonPrimitive(rawURL))
-            put("enabled", JsonPrimitive(form.enabled))
-            form.token.takeIf { it.changed }?.input?.let { put("token", it.json()) }
-        }
-        val isNew = form.serverID.isEmpty()
-        val provisionalID = if (isNew) "pending-mcp-${newRequestID()}" else form.serverID
-        val old = mcpServers.firstOrNull { it.id == form.serverID }
-        payload.putAll(form.oauthFields(old))
-        val tokenChanged = form.token.changed
-        val waits = form.readsPasswordManager
-        var provisional = MCPServer(
-            id = provisionalID,
-            name = name,
-            url = rawURL,
-            enabled = form.enabled,
-            agentId = form.agentID,
-            authenticated = false,
-            auth = if (tokenChanged && !waits) "token" else "none",
-            oauthClientId = form.clientID.trim().nilIfEmpty,
-            token = old?.token,
-            oauthClientSecret = old?.oauthClientSecret,
-        )
-        if (old != null && (!tokenChanged || waits) && old.url == rawURL) {
-            provisional = provisional.copy(authenticated = old.authenticated, auth = old.auth)
-        }
-        val owner = form.agentID
-        val original = mcpServers
-
-        optimisticMutation(
-            key = "mcp:$provisionalID",
-            touches = if (isNew && owner != null) setOf("$BOT_RECORD$owner") else emptySet(),
-            update = {
-                mcpDraft = if (waits) form.copy(saving = true) else null
-                val idx = mcpServers.indexOfFirst { it.id == provisionalID || it.id == form.serverID }
-                mcpServers = if (idx >= 0) {
-                    mcpServers.toMutableList().also { it[idx] = provisional }
-                } else {
-                    mcpServers + provisional
-                }
-                if (isNew && owner != null) {
-                    val agentIdx = agents.indexOfFirst { it.id == owner }
-                    if (agentIdx >= 0) {
-                        val memberships = (agents[agentIdx].mcpServers ?: emptyList()).toMutableList()
-                        if (!memberships.contains(provisionalID)) memberships.add(provisionalID)
-                        agents = agents.toMutableList().also {
-                            it[agentIdx] = it[agentIdx].copy(mcpServers = memberships)
-                        }
-                    }
-                }
-            },
-            rollback = {
-                mcpServers = recordRestored(mcpServers, original, provisionalID) { it.id }
-                if (isNew && owner != null) {
-                    val agentIdx = agents.indexOfFirst { it.id == owner }
-                    if (agentIdx >= 0) {
-                        val memberships = agents[agentIdx].mcpServers?.filterNot { it == provisionalID }
-                        agents = agents.toMutableList().also {
-                            it[agentIdx] = it[agentIdx].copy(mcpServers = memberships)
-                        }
-                    }
-                }
-                if (route == Route.Integrations && (mcpDraft == null || mcpDraft?.id == form.id)) {
-                    mcpDraft = form
-                }
-            },
-            work = { api ->
-                if (isNew) {
-                    if (owner != null) payload["agentId"] = JsonPrimitive(owner)
-                    val saved = api.createMCPServer(payload)
-                    return@optimisticMutation {
-                        if (mcpDraft?.id == form.id) mcpDraft = null
-                        if (mcpServers.any { it.id == provisionalID }) {
-                            mcpServers = upserted(mcpServers, provisionalID, saved) { it.id }
-                        }
-                        if (owner != null) {
-                            val agentIdx = agents.indexOfFirst { it.id == owner }
-                            if (agentIdx >= 0) {
-                                val updatedMemberships = (agents[agentIdx].mcpServers ?: emptyList()).map {
-                                    if (it == provisionalID) saved.id else it
-                                }
-                                agents = agents.toMutableList().also {
-                                    it[agentIdx] = it[agentIdx].copy(mcpServers = updatedMemberships)
-                                }
-                            }
-                        }
-                    }
-                }
-                val saved = api.updateMCPServer(form.serverID, patch = payload)
-                return@optimisticMutation {
-                    if (mcpDraft?.id == form.id) mcpDraft = null
-                    val idx = mcpServers.indexOfFirst { it.id == provisionalID }
-                    if (idx >= 0) {
-                        mcpServers = mcpServers.toMutableList().also { it[idx] = saved }
-                    }
-                }
-            },
-        )
-    }
-
-    companion object {
-        const val oauthCallbackScheme = BuildConfig.APPLICATION_ID
-        const val oauthRedirectURI = "$oauthCallbackScheme:/oauth/callback"
-    }
-
-    /** Starts an OAuth sign-in flow and opens the authorization URL in the system browser. */
-    fun beginMCPSignIn(id: String, openBrowser: (String) -> Unit) {
-        val api = client ?: return
-        errorText = ""
-        signingIn = id
-        browserSignIn = null
-        val genAtStart = generation
-        scope.launch {
-            try {
-                val start = api.startMCPSignIn(id, redirectURI = oauthRedirectURI)
-                if (generation != genAtStart) return@launch
-                val address = start.authorizationUrl
-                if (!address.isNullOrEmpty() && !isWebLink(address)) {
-                    signingIn = null
-                    errorText = "This server's sign-in page isn't a web address."
-                } else if (!address.isNullOrEmpty()) {
-                    browserSignIn = id
-                    openBrowser(address)
-                } else if (start.authorized == true) {
-                    val idx = mcpServers.indexOfFirst { it.id == id }
-                    if (idx >= 0) {
-                        mcpServers = mcpServers.toMutableList().also {
-                            it[idx] = it[idx].copy(authenticated = true)
-                        }
-                    }
-                    signingIn = null
-                    showNotice("Signed in")
-                } else {
-                    signingIn = null
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                if (generation != genAtStart) return@launch
-                signingIn = null
-                browserSignIn = null
-                errorText = friendlyError(e)
-            }
-        }
-    }
-
-    /** A browser never reports being abandoned. Coming back without its callback ends the wait. */
-    fun browserReturned() {
-        if (signingIn == browserSignIn) signingIn = null
-    }
-
-    /** Completes an in-flight OAuth sign-in when the system redirects back to `dev.crumble.android:/oauth/callback`. */
-    fun handleOAuthCallback(callbackUri: String) {
-        val id = browserSignIn
-        val api = client
-        if (id == null || api == null) {
-            errorText = "That sign-in was interrupted. Try again."
-            return
-        }
-        browserSignIn = null
-        signingIn = id
-        val genAtStart = generation
-        scope.launch {
-            try {
-                val result = oauthResult(callbackUri)
-                if (generation != genAtStart) return@launch
-                val saved = api.finishMCPSignIn(id, code = result.code, state = result.state, iss = result.iss)
-                if (generation != genAtStart) return@launch
-                val idx = mcpServers.indexOfFirst { it.id == id }
-                if (idx >= 0) {
-                    mcpServers = mcpServers.toMutableList().also { it[idx] = saved }
-                }
-                showNotice("Signed in")
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                if (generation != genAtStart) return@launch
-                errorText = friendlyError(e)
-            } finally {
-                if (generation == genAtStart && signingIn == id) {
-                    signingIn = null
-                }
-            }
-        }
-    }
-
-    fun signOutOfMCP(id: String) {
-        val index = mcpServers.indexOfFirst { it.id == id }
-        if (index < 0) return
-        val old = mcpServers[index]
-        val signedOut = old.copy(authenticated = false, auth = "none")
-        optimisticMutation(
-            key = "mcp:$id",
-            update = {
-                mcpServers = mcpServers.toMutableList().also { it[index] = signedOut }
-            },
-            rollback = {
-                val cur = mcpServers.indexOfFirst { it.id == id }
-                if (cur >= 0) {
-                    mcpServers = mcpServers.toMutableList().also { it[cur] = old }
-                }
-            },
-            work = { api ->
-                val saved = api.signOutOfMCP(id)
-                return@optimisticMutation {
-                    val cur = mcpServers.indexOfFirst { it.id == id }
-                    if (cur >= 0) {
-                        mcpServers = mcpServers.toMutableList().also { it[cur] = saved }
-                    }
-                }
-            },
-        )
-    }
-
-    fun deleteMCP(id: String) {
-        val index = mcpServers.indexOfFirst { it.id == id }
-        if (index < 0) return
-        val old = mcpServers[index]
-        val affectedAgents = agents.mapNotNull { agent ->
-            if (agent.mcpServers?.contains(id) == true) agent.id to agent.mcpServers else null
-        }
-        optimisticMutation(
-            key = "mcp:$id",
-            touches = affectedAgents.map { "$BOT_RECORD${it.first}" }.toSet(),
-            update = {
-                mcpServers = mcpServers.filterNot { it.id == id }
-                agents = agents.map { agent ->
-                    if (agent.mcpServers?.contains(id) == true) {
-                        agent.copy(mcpServers = agent.mcpServers.filterNot { it == id })
-                    } else {
-                        agent
-                    }
-                }
-            },
-            rollback = {
-                val list = mcpServers.toMutableList()
-                list.add(minOf(index, list.size), old)
-                mcpServers = list
-                val restoredMap = affectedAgents.toMap()
-                agents = agents.map { agent ->
-                    val origMemberships = restoredMap[agent.id]
-                    if (origMemberships != null) agent.copy(mcpServers = origMemberships) else agent
-                }
-            },
-            work = { api ->
-                api.deleteMCPServer(id)
                 null
             },
         )
@@ -4296,7 +3853,6 @@ class AppModel(
         resetPendingMessages()
         resetGroupChats()
         resetSecrets()
-        resetConnections()
         resetAccountForm()
         recentChats.clear()
         attachmentBytes = emptyMap()
@@ -4349,12 +3905,9 @@ class AppModel(
         mcpServers = emptyList()
         providers = emptyList()
         models = emptyList()
-        signingIn = null
-        browserSignIn = null
         agentDraft = null
         memoryDraft = null
         taskDraft = null
-        mcpDraft = null
         skillDraft = null
         snapshot = null
         messages = emptyList()
@@ -4417,51 +3970,19 @@ class AppModel(
     private fun clearSecretDrafts() {
         credentialForm = null
         loginForm = null
-        tokenForm = null
-        providerKeyForm = null
-        clearConnectionDrafts()
-        secretUses = null
     }
 
     private fun resetSecrets() {
         clearSecretDrafts()
-        hideProviderLogin()
         botCredentials = emptyMap()
         botLogins = emptyMap()
-        credentialLoadErrors = emptyMap()
-        loginLoadErrors = emptyMap()
-        credentialScope = SKILLS_ALL
-        loginScope = SKILLS_ALL
         freshSecretRequests = emptySet()
         passwordManagers = emptyList()
-        passwordManagersLoaded = false
-        passwordManagersError = ""
-        providerAccounts = emptyList()
     }
 
     private fun <D> editSecrets(ops: SecretOps<D>, botID: String, change: (D) -> D) {
         val current = ops.lists()[botID] ?: return
         ops.store(ops.lists() + (botID to change(current)))
-    }
-
-    private fun <D> loadSecretLists(ops: SecretOps<D>) {
-        val revision = mutationRevision
-        request { api ->
-            val bots = api.agents()
-            val marks = bots.associate { it.id to secretMark(ops.kind, it.id) }
-            val loaded = coroutineScope {
-                bots.map { bot -> async { bot.id to attempt { ops.read(api, bot.id) } } }.awaitAll()
-            }
-            return@request {
-                if (settledSince(revision, BOT_RECORD)) loadAgentsForPanel() else applyBots(bots)
-                for ((id, result) in loaded) {
-                    result.onSuccess { list ->
-                        if (secretSettled(ops.kind, id, marks.getValue(id))) ops.store(ops.lists() + (id to list))
-                    }
-                }
-                ops.failures(loaded.mapNotNull { (id, result) -> result.exceptionOrNull()?.let { id to friendlyError(it) } }.toMap())
-            }
-        }
     }
 
     private fun <D> reloadSecrets(ops: SecretOps<D>, botID: String) {
@@ -4542,9 +4063,8 @@ class AppModel(
         )
     }
 
-    fun openCredentialForm(botID: String?, existing: Credential? = null, request: CredentialRequest? = null) {
-        if (existing?.github == true) return
-        credentialForm = credentialForm(botID ?: credentialScope.takeIf { it != SKILLS_ALL }, agents, existing, request)
+    fun openCredentialForm(botID: String, request: CredentialRequest) {
+        credentialForm = credentialForm(botID, request)
         loadPasswordManagers()
     }
 
@@ -4570,8 +4090,8 @@ class AppModel(
         )
     }
 
-    fun openLoginForm(botID: String?, existing: Login? = null, request: LoginRequest? = null) {
-        loginForm = loginForm(botID ?: loginScope.takeIf { it != SKILLS_ALL }, agents, existing, request)
+    fun openLoginForm(botID: String, request: LoginRequest) {
+        loginForm = loginForm(botID, request)
         loadPasswordManagers()
     }
 
@@ -4602,13 +4122,7 @@ class AppModel(
         )
     }
 
-    private fun <D> changeSecret(
-        ops: SecretOps<D>,
-        botID: String,
-        name: String,
-        change: (D, String) -> D,
-        call: suspend (APIClient, String, String) -> Unit,
-    ) {
+    private fun <D> declineSecretRequest(ops: SecretOps<D>, botID: String, name: String) {
         val key = secretKey(ops.kind, botID, name)
         val before = ops.lists()[botID]
         optimisticMutation(
@@ -4616,7 +4130,7 @@ class AppModel(
             update = {
                 touchSecrets(ops.kind, botID)
                 decisionErrors = decisionErrors - key
-                editSecrets(ops, botID) { change(it, name) }
+                editSecrets(ops, botID) { ops.withoutRequest(it, name) }
             },
             rollback = {
                 touchSecrets(ops.kind, botID)
@@ -4627,7 +4141,7 @@ class AppModel(
                 resumeDecisions()
             },
             work = { api ->
-                call(api, botID, name)
+                ops.decline(api, botID, name)
                 return@optimisticMutation {
                     touchSecrets(ops.kind, botID)
                     reloadSecrets(ops, botID)
@@ -4636,62 +4150,10 @@ class AppModel(
         )
     }
 
-    fun deleteCredential(botID: String, name: String) {
-        if (botCredentials[botID]?.credentials?.any { it.name == name && it.github } == true) return
-        changeSecret(credentialOps, botID, name, credentialOps.withoutItem, credentialOps.delete)
-    }
-
-    fun deleteLogin(botID: String, name: String) = changeSecret(loginOps, botID, name, loginOps.withoutItem, loginOps.delete)
-
     // Never a delete: a saved item and a request for more under its name can coexist.
-    fun declineCredentialRequest(botID: String, name: String) =
-        changeSecret(credentialOps, botID, name, credentialOps.withoutRequest, credentialOps.decline)
+    fun declineCredentialRequest(botID: String, name: String) = declineSecretRequest(credentialOps, botID, name)
 
-    fun declineLoginRequest(botID: String, name: String) =
-        changeSecret(loginOps, botID, name, loginOps.withoutRequest, loginOps.decline)
-
-    fun openBotCredentials(botID: String) {
-        agentDraft = null
-        credentialScope = botID
-        navigate(Route.Credentials)
-    }
-
-    fun openSecretUses(kind: SecretKind, botID: String, name: String) {
-        secretUses = SecretUsesView(kind, botID, name)
-        fetchSecretUses(null)
-    }
-
-    fun closeSecretUses() {
-        secretUses = null
-    }
-
-    fun loadMoreSecretUses() {
-        val view = secretUses ?: return
-        if (view.loading || view.loadingMore) return
-        secretUses = view.copy(loadingMore = true, error = "")
-        fetchSecretUses(view.rows.lastOrNull()?.id)
-    }
-
-    private fun fetchSecretUses(before: String?) {
-        val view = secretUses ?: return
-        val api = client ?: return
-        val gen = generation
-        scope.launch {
-            val page = attempt {
-                when (view.kind) {
-                    SecretKind.credential -> api.credentialUses(view.botID, view.name, before).map { it.row() }
-                    SecretKind.login -> api.loginUses(view.botID, view.name, before).map { it.row() }
-                }
-            }
-            val current = secretUses?.takeIf { generation == gen && it.id == view.id } ?: return@launch
-            secretUses = page.fold(
-                onSuccess = {
-                    current.copy(rows = current.rows + it, loading = false, loadingMore = false, hasMore = it.size == SECRET_USES_PAGE)
-                },
-                onFailure = { current.copy(loading = false, loadingMore = false, error = friendlyError(it)) },
-            )
-        }
-    }
+    fun declineLoginRequest(botID: String, name: String) = declineSecretRequest(loginOps, botID, name)
 
     // MARK: Password managers
 
@@ -4700,236 +4162,9 @@ class AppModel(
     fun loadPasswordManagers() {
         val api = client ?: return
         val gen = generation
-        val mark = secretMark("password-manager", "")
         scope.launch {
-            val loaded = attempt { api.passwordManagers() }
-            if (generation != gen) return@launch
-            loaded.fold(
-                onSuccess = {
-                    if (secretSettled("password-manager", "", mark)) passwordManagers = it
-                    passwordManagersLoaded = true
-                    passwordManagersError = ""
-                },
-                onFailure = { passwordManagersError = friendlyError(it) },
-            )
+            attempt { api.passwordManagers() }.onSuccess { if (generation == gen) passwordManagers = it }
         }
-    }
-
-    fun openManagerToken(manager: PasswordManager) {
-        tokenForm = ManagerTokenForm(manager)
-    }
-
-    fun closeManagerToken() {
-        tokenForm = null
-    }
-
-    private fun editManager(id: String, change: (PasswordManager) -> PasswordManager) {
-        passwordManagers = passwordManagers.map { if (it.id == id) change(it) else it }
-    }
-
-    /** Crumble signs in to check the token, so this stays pending until the password manager has answered. */
-    fun saveManagerToken() {
-        val form = tokenForm ?: return
-        val id = form.manager.id
-        val key = "password-manager:$id"
-        if (!form.ready || !canSubmit(key)) return
-        val token = form.token.text.trim()
-        tokenForm = form.copy(saving = true, error = "")
-        val open = { tokenForm?.let { it.saving && it.manager.id == id } == true }
-        optimisticMutation(
-            key = key,
-            update = { touchSecrets("password-manager", "") },
-            rollback = { touchSecrets("password-manager", "") },
-            fail = { message -> if (open()) tokenForm = form.copy(error = message) else errorText = message },
-            work = { api ->
-                val saved = api.connectPasswordManager(id, token)
-                return@optimisticMutation {
-                    touchSecrets("password-manager", "")
-                    editManager(id) { saved }
-                    if (open()) tokenForm = null
-                    loadPasswordManagers()
-                }
-            },
-        )
-    }
-
-    fun disconnectManager(manager: PasswordManager) {
-        val key = "password-manager:${manager.id}"
-        if (manager.usedBy.isNotEmpty()) return
-        optimisticMutation(
-            key = key,
-            update = {
-                touchSecrets("password-manager", "")
-                editManager(manager.id) { it.copy(connected = false, connectedAt = null) }
-            },
-            rollback = {
-                touchSecrets("password-manager", "")
-                editManager(manager.id) { manager }
-            },
-            work = { api ->
-                api.disconnectPasswordManager(manager.id)
-                return@optimisticMutation {
-                    touchSecrets("password-manager", "")
-                    loadPasswordManagers()
-                }
-            },
-        )
-    }
-
-    // MARK: Connections
-
-    var githubApps by mutableStateOf(Remote<List<GitHubApp>>())
-    var githubAccounts by mutableStateOf(Remote<List<GitHubAccount>>())
-    var serverSettings by mutableStateOf(Remote<ServerSettings>())
-    /** Null until `/v1/admin/settings` answers; only admins may read it. */
-    var isAdmin by mutableStateOf<Boolean?>(null)
-    var gateways by mutableStateOf(Remote<List<MessageGateway>>())
-    var gatewayForm by mutableStateOf<GatewayForm?>(null)
-    var eventRelay by mutableStateOf(Remote<RelayStatus>())
-    var relayDraft by mutableStateOf("")
-    var relaySaving by mutableStateOf(false)
-    var pluginSettings by mutableStateOf(Remote<PluginSettings>())
-    var pluginForm by mutableStateOf<PluginSecretForm?>(null)
-    var webSearch by mutableStateOf(Remote<WebSearchSettings>())
-    var judgeModel by mutableStateOf(Remote<JudgeModel>())
-    var visionModel by mutableStateOf(Remote<VisionModel>())
-    var createAppForm by mutableStateOf<CreateGitHubAppForm?>(null)
-    var githubAppForm by mutableStateOf<GitHubAppForm?>(null)
-    var addAccountForm by mutableStateOf<AddGitHubAccountForm?>(null)
-    var githubAccountForm by mutableStateOf<GitHubAccountForm?>(null)
-    var serverSettingsForm by mutableStateOf<ServerSettingsForm?>(null)
-    var githubFlow by mutableStateOf<GitHubFlow?>(null)
-
-    private fun clearConnectionDrafts() {
-        pluginForm = null
-        addAccountForm = null
-        githubAccountForm = null
-        githubAppForm = null
-        mcpDraft = null
-        inviteSheet = null
-    }
-
-    private fun resetConnections() {
-        clearConnectionDrafts()
-        githubApps = Remote()
-        githubAccounts = Remote()
-        serverSettings = Remote()
-        isAdmin = null
-        gateways = Remote()
-        gatewayForm = null
-        eventRelay = Remote()
-        relayDraft = ""
-        relaySaving = false
-        pluginSettings = Remote()
-        webSearch = Remote()
-        judgeModel = Remote()
-        visionModel = Remote()
-        createAppForm = null
-        serverSettingsForm = null
-        githubFlow = null
-        accountID = null
-        adminUsers = Remote()
-        invites = Remote()
-        outdatedWorkspaces = Remote()
-    }
-
-    /** Newest read wins, and no read replaces a change that's on its way. */
-    private fun <T> loadRemote(kind: String, get: () -> Remote<T>, set: (Remote<T>) -> Unit, work: suspend (APIClient) -> T) {
-        touchSecrets(kind, "")
-        val mark = secretMark(kind, "")
-        confirmed(
-            start = {},
-            work = work,
-            finish = { result ->
-                result.fold(
-                    onSuccess = { if (secretSettled(kind, "", mark)) set(Remote(it, failure = get().failure)) },
-                    onFailure = { if (secretMark(kind, "") == mark) set(get().copy(error = friendlyError(it))) },
-                )
-            },
-        )
-    }
-
-    private fun recordChange(
-        kind: String,
-        key: String,
-        update: () -> Unit,
-        rollback: () -> Unit,
-        fail: (String) -> Unit = { errorText = it },
-        work: suspend (APIClient) -> (() -> Unit),
-    ) = optimisticMutation(
-        key = "$kind:$key",
-        update = {
-            touchSecrets(kind, "")
-            update()
-        },
-        rollback = {
-            touchSecrets(kind, "")
-            rollback()
-        },
-        fail = fail,
-        work = { api ->
-            val confirm = work(api)
-            val done: () -> Unit = {
-                touchSecrets(kind, "")
-                confirm()
-            }
-            done
-        },
-    )
-
-    fun loadWebSearch() = loadRemote("web-search", { webSearch }, { webSearch = it }) { it.webSearch() }
-
-    fun loadJudgeModel() = loadRemote("judge", { judgeModel }, { judgeModel = it }) { it.judgeModel() }
-
-    fun loadVisionModel() = loadRemote("vision", { visionModel }, { visionModel = it }) { it.visionModel() }
-
-    fun loadPluginSettings() = loadRemote("plugin", { pluginSettings }, { pluginSettings = it }) { it.pluginSettings() }
-
-    fun loadGateways() = loadRemote("gateway", { gateways }, {
-        gateways = it
-        seedGatewayForm()
-    }) { it.messageGateways() }
-
-    fun loadRelay() = loadRemote("relay", { eventRelay }, { next ->
-        val saved = eventRelay.value?.url.orEmpty()
-        eventRelay = next
-        // A typed address survives a refresh; one the owner hasn't touched follows the server.
-        if (relayDraft == saved) relayDraft = next.value?.url.orEmpty()
-    }) { it.eventRelay() }
-
-    fun loadGitHub() {
-        loadRemote("github-app", { githubApps }, { githubApps = it }) { it.githubApps() }
-        loadRemote("github-account", { githubAccounts }, { githubAccounts = it }) { it.githubAccounts() }
-    }
-
-    private fun loadCoding() {
-        loadAgentsForPanel()
-        loadCapabilities()
-        loadPasswordManagers()
-        loadGitHub()
-        touchSecrets("server-settings", "")
-        val mark = secretMark("server-settings", "")
-        confirmed(
-            start = {},
-            work = { api -> api.serverSettings() },
-            finish = { result ->
-                result.fold(
-                    onSuccess = {
-                        isAdmin = true
-                        if (secretSettled("server-settings", "", mark)) serverSettings = Remote(it)
-                        loadOutdatedWorkspaces()
-                        loadAdminUsers()
-                    },
-                    onFailure = {
-                        if ((it as? APIError)?.statusCode == 403) {
-                            isAdmin = false
-                        } else {
-                            serverSettings = serverSettings.copy(error = friendlyError(it))
-                        }
-                    },
-                )
-            },
-        )
     }
 
     private fun loadAgentsForPanel() {
@@ -4942,540 +4177,11 @@ class AppModel(
         }
     }
 
-    // MARK: Model choices
-
-    fun chooseJudgeModel(value: String) {
-        val data = judgeModel.value ?: return
-        val choice = judgeChoice(data, value)
-        if (value == judgeValue(data) || (choice == null && value != JUDGE_DEFAULT)) return
-        val chosen = choice?.let { JudgeModelJudgeModel(it.provider, it.model) }
-        recordChange(
-            "judge", "model",
-            update = { judgeModel = Remote(data.copy(judgeModel = chosen, effective = choice ?: data.effective)) },
-            rollback = { judgeModel = Remote(data) },
-            fail = { judgeModel = judgeModel.copy(failure = it) },
-        ) { api ->
-            val saved = api.updateJudgeModel(chosen?.provider, chosen?.model)
-            return@recordChange { judgeModel = Remote(saved) }
-        }
-    }
-
-    fun chooseVisionModel(value: String) {
-        val data = visionModel.value ?: return
-        val choice = visionChoice(data, value)
-        if (value == visionValue(data) || (choice == null && value != VISION_OFF)) return
-        val chosen = choice?.let { VisionModelVisionModel(it.provider, it.model) }
-        recordChange(
-            "vision", "model",
-            update = { visionModel = Remote(data.copy(visionModel = chosen)) },
-            rollback = { visionModel = Remote(data) },
-            fail = { visionModel = visionModel.copy(failure = it) },
-        ) { api ->
-            val saved = api.updateVisionModel(chosen?.provider, chosen?.model)
-            return@recordChange { visionModel = Remote(saved) }
-        }
-    }
-
-    fun chooseWebSearchProvider(provider: String) {
-        val data = webSearch.value ?: return
-        if (provider == data.defaultProvider) return
-        recordChange(
-            "web-search", "default",
-            update = { webSearch = Remote(data.copy(defaultProvider = provider)) },
-            rollback = { webSearch = Remote(data) },
-            fail = { webSearch = webSearch.copy(failure = it) },
-        ) { api ->
-            val saved = api.updateWebSearch(provider)
-            return@recordChange { webSearch = Remote(saved) }
-        }
-    }
-
-    // MARK: Plugin settings
-
-    private fun editPluginSetting(pluginID: String, key: String, change: (PluginSetting) -> PluginSetting) {
-        val data = pluginSettings.value ?: return
-        val plugins = data.plugins.map { plugin ->
-            if (plugin.id != pluginID) plugin else plugin.copy(settings = plugin.settings.map { if (it.key == key) change(it) else it })
-        }
-        pluginSettings = pluginSettings.copy(value = data.copy(plugins = plugins))
-    }
-
-    // These pages' own status depends on the plugin's secrets.
-    private fun refreshAfterPluginChange() {
-        loadPluginSettings()
-        loadPasswordManagers()
-        when (route) {
-            Route.WebSearch -> loadWebSearch()
-            Route.EventRelay -> loadRelay()
-            is Route.MessageGateway -> loadGateways()
-            else -> Unit
-        }
-    }
-
-    fun openPluginSetting(row: PluginRow) {
-        pluginForm = PluginSecretForm(row.pluginID, row.setting, secretDraft(row.setting.secret))
-        loadPasswordManagers()
-    }
-
-    fun closePluginSetting() {
-        pluginForm = null
-    }
-
-    fun savePluginSetting() {
-        val form = pluginForm ?: return
-        val input = form.secret.input ?: return
-        val pluginID = form.pluginID
-        val setting = form.setting
-        val key = "$pluginID:${setting.key}"
-        if (!form.secret.changed || form.saving || !canSubmit("plugin:$key")) return
-        val waits = input is SecretInput.Reference
-        val from = route
-        pluginForm = if (waits) form.copy(saving = true, error = "") else null
-        val open = { pluginForm?.let { it.saving && it.pluginID == pluginID && it.setting.key == setting.key } == true }
-        recordChange(
-            "plugin", key,
-            update = { if (!waits) editPluginSetting(pluginID, setting.key) { it.copy(secret = STORED) } },
-            rollback = { if (!waits) editPluginSetting(pluginID, setting.key) { setting } },
-            fail = { message ->
-                val reopen = !waits && pluginForm == null && route == from
-                if (open() || reopen) pluginForm = form.copy(saving = false, error = message) else errorText = message
-            },
-        ) { api ->
-            val saved = api.setPluginSetting(pluginID, setting.key, input)
-            return@recordChange {
-                editPluginSetting(pluginID, setting.key) { saved }
-                if (open()) pluginForm = null
-                refreshAfterPluginChange()
-            }
-        }
-    }
-
-    fun removePluginSetting(row: PluginRow) {
-        val setting = row.setting
-        recordChange(
-            "plugin", "${row.pluginID}:${setting.key}",
-            update = { editPluginSetting(row.pluginID, setting.key) { it.copy(secret = SecretStatus(false, null, null)) } },
-            rollback = { editPluginSetting(row.pluginID, setting.key) { setting } },
-        ) { api ->
-            val saved = api.deletePluginSetting(row.pluginID, setting.key)
-            return@recordChange {
-                editPluginSetting(row.pluginID, setting.key) { saved }
-                refreshAfterPluginChange()
-            }
-        }
-    }
-
-    // MARK: Event relay
-
-    /** The relay decides whether the address works, so its answer is the only status shown. */
-    fun saveRelay() {
-        val next = relayDraft.trim().ifEmpty { null }
-        if (relaySaving || next == eventRelay.value?.url) return
-        confirmed(
-            start = {
-                relaySaving = true
-                eventRelay = eventRelay.copy(failure = "")
-            },
-            work = { api -> api.updateEventRelay(next) },
-            finish = { result ->
-                relaySaving = false
-                result.fold(
-                    onSuccess = { saved ->
-                        touchSecrets("relay", "")
-                        eventRelay = Remote(saved)
-                        if (relayDraft.trim().ifEmpty { null } == next) relayDraft = saved.url.orEmpty()
-                    },
-                    onFailure = { eventRelay = eventRelay.copy(failure = friendlyError(it)) },
-                )
-            },
-        )
-    }
-
-    // MARK: Message gateways
-
-    private fun seedGatewayForm() {
-        val id = (route as? Route.MessageGateway)?.id ?: return
-        if (gatewayForm?.gatewayID == id) return
-        gateways.value?.firstOrNull { it.id == id }?.let { gatewayForm = gatewayForm(id, it.config) }
-    }
-
-    private fun editGateway(id: String, change: (MessageGateway) -> MessageGateway) {
-        val list = gateways.value ?: return
-        gateways = gateways.copy(value = list.map { if (it.id == id) change(it) else it })
-    }
-
-    fun resetGatewayForm() {
-        val form = gatewayForm ?: return
-        gateways.value?.firstOrNull { it.id == form.gatewayID }?.let { gatewayForm = gatewayForm(it.id, it.config) }
-    }
-
-    fun saveGateway() {
-        val form = gatewayForm ?: return
-        val id = form.gatewayID
-        val config = form.config()
-        val before = gateways.value?.firstOrNull { it.id == id } ?: return
-        if (form.saving) return
-        gatewayForm = form.copy(attempted = true, saved = false, error = "")
-        if (gatewayErrors(config, agents.map { it.id }.toSet()).isNotEmpty() || !canSubmit("gateway:$id")) return
-        val current = { gatewayForm?.takeIf { it.gatewayID == id } }
-        recordChange(
-            "gateway", id,
-            update = {
-                current()?.let { gatewayForm = it.copy(saving = true) }
-                editGateway(id) { it.copy(config = config) }
-            },
-            rollback = { editGateway(id) { before } },
-            fail = { message ->
-                val open = current()
-                if (open != null) gatewayForm = open.copy(saving = false, error = message) else errorText = message
-            },
-        ) { api ->
-            val saved = api.updateMessageGateway(id, config)
-            return@recordChange {
-                editGateway(id) { saved }
-                // Edits made while this was saving stay in the form.
-                current()?.let { open ->
-                    gatewayForm = if (open.config() == config) gatewayForm(id, saved.config).copy(saved = true) else open.copy(saving = false)
-                }
-                loadGateways()
-            }
-        }
-    }
-
-    // MARK: GitHub Apps
-
-    private fun apps() = githubApps.value.orEmpty()
-
-    private fun accounts() = githubAccounts.value.orEmpty()
-
-    private fun storeApp(app: GitHubApp) {
-        githubApps = githubApps.copy(value = upserted(apps(), app.id, app) { it.id })
-    }
-
-    private fun storeAccount(account: GitHubAccount) {
-        githubAccounts = githubAccounts.copy(value = upserted(accounts(), account.id, account) { it.id })
-    }
-
-    private fun appForm(id: String) = githubAppForm?.takeIf { it.appID == id }
-
-    private fun editAppForm(id: String, change: (GitHubAppForm) -> GitHubAppForm) {
-        appForm(id)?.let { githubAppForm = change(it) }
-    }
-
-    fun openCreateApp() {
-        createAppForm = CreateGitHubAppForm()
-    }
-
-    fun closeCreateApp() {
-        if (createAppForm?.saving != true) createAppForm = null
-    }
-
-    /** GitHub creates an App only from a form post with the manifest, so its page opens inside the app. */
-    fun createGitHubApp() {
-        val form = createAppForm ?: return
-        val origin = client?.baseURL?.let(::webOrigin) ?: return
-        if (!form.ready) return
-        confirmed(
-            start = { createAppForm = form.copy(saving = true, error = "") },
-            work = { api -> api.createGithubAppManifest(form.name.trim(), origin, form.organization.trim().nilIfEmpty) },
-            finish = { result ->
-                result.fold(
-                    onSuccess = {
-                        createAppForm = null
-                        githubFlow = GitHubFlow(GitHubStep.created, it.url, manifest = it.manifest)
-                    },
-                    onFailure = { createAppForm = createAppForm?.copy(saving = false, error = friendlyError(it)) },
-                )
-            },
-        )
-    }
-
-    fun installGitHubApp(app: GitHubApp) {
-        if (isWebLink(app.installUrl)) githubFlow = GitHubFlow(GitHubStep.installed, app.installUrl, appID = app.id)
-    }
-
-    fun signInToGitHubApp(app: GitHubApp) {
-        val origin = client?.baseURL?.let(::webOrigin) ?: return
-        confirmed(
-            start = { editAppForm(app.id) { it.copy(signingIn = true, signInError = "") } },
-            work = { api -> api.signInGithubApp(app.id, origin) },
-            finish = { result ->
-                editAppForm(app.id) { it.copy(signingIn = false, signInError = result.exceptionOrNull()?.let(::friendlyError).orEmpty()) }
-                result.onSuccess { url -> if (isWebLink(url)) githubFlow = GitHubFlow(GitHubStep.authorized, url, appID = app.id) }
-            },
-        )
-    }
-
-    fun closeGitHubFlow() {
-        githubFlow = null
-    }
-
-    /** GitHub sent the owner back; the App counts only once the server has confirmed it. */
-    fun finishGitHubFlow(url: String) {
-        val flow = githubFlow ?: return
-        if (flow.finishing) return
-        confirmed(
-            start = { githubFlow = flow.copy(finishing = true, error = "") },
-            work = { api ->
-                when (flow.step) {
-                    GitHubStep.installed -> api.connectGithubApp(checkNotNull(flow.appID))
-                    GitHubStep.created -> oauthResult(url).let { api.completeGithubApp(it.code, it.state) }
-                    GitHubStep.authorized -> oauthResult(url).let { api.completeGithubAppSignIn(it.code, it.state) }
-                }
-            },
-            finish = { result ->
-                result.onSuccess {
-                    storeApp(it)
-                    loadGitHub()
-                }
-                if (githubFlow?.id == flow.id) {
-                    githubFlow = result.fold({ null }, { flow.copy(error = friendlyError(it)) })
-                }
-            },
-        )
-    }
-
-    fun openGitHubApp(app: GitHubApp) {
-        githubAppForm = GitHubAppForm(app.id, app.botIds, secretDraft(app.clientSecret))
-        loadPasswordManagers()
-    }
-
-    fun closeGitHubApp() {
-        githubAppForm = null
-    }
-
-    fun saveGitHubAppBots() {
-        val form = githubAppForm ?: return
-        val before = apps().firstOrNull { it.id == form.appID } ?: return
-        val from = route
-        if (!canSubmit("github-app:${form.appID}")) return
-        githubAppForm = null
-        recordChange(
-            "github-app", form.appID,
-            update = { storeApp(before.copy(botIds = form.botIDs)) },
-            rollback = { storeApp(before) },
-            fail = { message ->
-                if (githubAppForm == null && route == from) githubAppForm = form.copy(error = message) else errorText = message
-            },
-        ) { api ->
-            val saved = api.setGithubAppBots(form.appID, form.botIDs)
-            return@recordChange {
-                storeApp(saved)
-                // A bot uses one App per GitHub account, so the server may have moved it off another.
-                loadGitHub()
-            }
-        }
-    }
-
-    fun deleteGitHubApp(app: GitHubApp) {
-        val before = apps()
-        recordChange(
-            "github-app", app.id,
-            update = { githubApps = githubApps.copy(value = before.filterNot { it.id == app.id }) },
-            rollback = { githubApps = githubApps.copy(value = recordRestored(apps(), before, app.id) { it.id }) },
-        ) { api ->
-            api.deleteGithubApp(app.id)
-            return@recordChange { loadGitHub() }
-        }
-    }
-
-    fun checkGitHubApp(id: String) {
-        confirmed(
-            start = { editAppForm(id) { it.copy(checking = true, checkError = "") } },
-            work = { api -> api.connectGithubApp(id) },
-            finish = { result ->
-                result.onSuccess(::storeApp)
-                editAppForm(id) { it.copy(checking = false, checkError = result.exceptionOrNull()?.let(::friendlyError).orEmpty()) }
-            },
-        )
-    }
-
-    fun saveGitHubClientSecret() {
-        val form = githubAppForm ?: return
-        val id = form.appID
-        val input = form.clientSecret.input?.takeIf { form.clientSecret.changed } ?: return
-        if (form.savingSecret) return
-        confirmed(
-            start = { githubAppForm = form.copy(savingSecret = true, secretError = "") },
-            work = { api -> api.setGithubAppClientSecret(id, input) },
-            finish = { result ->
-                result.onSuccess { saved ->
-                    storeApp(saved)
-                    loadPasswordManagers()
-                }
-                editAppForm(id) { open ->
-                    result.fold(
-                        { saved -> open.copy(savingSecret = false, clientSecret = secretDraft(saved.clientSecret)) },
-                        { open.copy(savingSecret = false, secretError = friendlyError(it)) },
-                    )
-                }
-            },
-        )
-    }
-
-    fun signOutOfGitHubApp(id: String) {
-        confirmed(
-            start = { editAppForm(id) { it.copy(signingOut = true, signInError = "") } },
-            work = { api -> api.signOutGithubApp(id) },
-            finish = { result ->
-                result.onSuccess(::storeApp)
-                editAppForm(id) { it.copy(signingOut = false, signInError = result.exceptionOrNull()?.let(::friendlyError).orEmpty()) }
-            },
-        )
-    }
-
-    // MARK: Machine accounts
-
-    fun openAddAccount() {
-        addAccountForm = AddGitHubAccountForm()
-        loadPasswordManagers()
-    }
-
-    fun closeAddAccount() {
-        addAccountForm = null
-    }
-
-    /** GitHub vouches for the token, so the account appears when the server has read it. */
-    fun addGitHubAccount() {
-        val form = addAccountForm ?: return
-        val input = form.token.input ?: return
-        if (form.saving) return
-        confirmed(
-            start = { addAccountForm = form.copy(saving = true, error = "") },
-            work = { api -> api.addGithubAccount(input) },
-            finish = { result ->
-                result.fold(
-                    onSuccess = {
-                        storeAccount(it)
-                        addAccountForm = null
-                        loadGitHub()
-                        loadPasswordManagers()
-                    },
-                    onFailure = { failure -> addAccountForm = addAccountForm?.copy(saving = false, error = friendlyError(failure)) },
-                )
-            },
-        )
-    }
-
-    fun openGitHubAccount(account: GitHubAccount) {
-        githubAccountForm = GitHubAccountForm(account.id, account.botIds, secretDraft(account.token))
-        loadPasswordManagers()
-    }
-
-    fun closeGitHubAccount() {
-        githubAccountForm = null
-    }
-
-    fun saveGitHubAccount() {
-        val form = githubAccountForm ?: return
-        val before = accounts().firstOrNull { it.id == form.accountID } ?: return
-        val token = form.token.input?.takeIf { form.token.changed }
-        if (form.saving) return
-        if (token == null) return saveAccountBots(form, before)
-        val id = form.accountID
-        confirmed(
-            start = { githubAccountForm = form.copy(saving = true, error = "") },
-            work = { api ->
-                val replaced = api.setGithubAccountToken(id, token)
-                replaced to attempt { api.setGithubAccountBots(id, form.botIDs) }
-            },
-            finish = { result ->
-                val replaced = result.getOrNull()?.first
-                replaced?.let(::storeAccount)
-                val failure = result.exceptionOrNull() ?: result.getOrNull()?.second?.exceptionOrNull()
-                val open = githubAccountForm?.takeIf { it.accountID == id }
-                when {
-                    failure == null -> {
-                        result.getOrNull()?.second?.getOrNull()?.let(::storeAccount)
-                        if (open != null) githubAccountForm = null
-                        loadGitHub()
-                    }
-                    // A saved token isn't sent again when the owner retries the bots.
-                    open != null -> githubAccountForm = open.copy(
-                        saving = false,
-                        error = friendlyError(failure),
-                        token = replaced?.let { secretDraft(it.token) } ?: open.token,
-                    )
-                    else -> errorText = friendlyError(failure)
-                }
-                if (replaced != null) loadPasswordManagers()
-            },
-        )
-    }
-
-    private fun saveAccountBots(form: GitHubAccountForm, before: GitHubAccount) {
-        val from = route
-        if (!canSubmit("github-account:${form.accountID}")) return
-        githubAccountForm = null
-        recordChange(
-            "github-account", form.accountID,
-            update = { storeAccount(before.copy(botIds = form.botIDs)) },
-            rollback = { storeAccount(before) },
-            fail = { message ->
-                if (githubAccountForm == null && route == from) githubAccountForm = form.copy(error = message) else errorText = message
-            },
-        ) { api ->
-            val saved = api.setGithubAccountBots(form.accountID, form.botIDs)
-            return@recordChange {
-                storeAccount(saved)
-                loadGitHub()
-            }
-        }
-    }
-
-    fun deleteGitHubAccount(account: GitHubAccount) {
-        val before = accounts()
-        recordChange(
-            "github-account", account.id,
-            update = { githubAccounts = githubAccounts.copy(value = before.filterNot { it.id == account.id }) },
-            rollback = { githubAccounts = githubAccounts.copy(value = recordRestored(accounts(), before, account.id) { it.id }) },
-        ) { api ->
-            api.deleteGithubAccount(account.id)
-            return@recordChange { loadGitHub() }
-        }
-    }
-
-    // MARK: Workspaces
-
-    fun openServerSettings(field: WorkspaceField) {
-        serverSettings.value?.let { serverSettingsForm = serverSettingsForm(field, it) }
-    }
-
-    fun saveServerSettings() {
-        val form = serverSettingsForm ?: return
-        val before = serverSettings.value ?: return
-        val patch = form.patch() ?: return
-        val from = route
-        if (!canSubmit("server-settings:patch")) return
-        serverSettingsForm = null
-        recordChange(
-            "server-settings", "patch",
-            update = { serverSettings = Remote(before.patched(form)) },
-            rollback = { serverSettings = Remote(before) },
-            fail = { message ->
-                if (serverSettingsForm == null && route == from) serverSettingsForm = form.copy(error = message) else errorText = message
-            },
-        ) { api ->
-            val saved = api.updateServerSettings(patch)
-            return@recordChange {
-                serverSettings = Remote(saved)
-                loadOutdatedWorkspaces()
-            }
-        }
-    }
-
-    // MARK: Users
+    // MARK: Account
 
     var accountMode by mutableStateOf(AccountMode.SignIn)
     var accountName by mutableStateOf("")
     var inviteCode by mutableStateOf("")
-    /** Null until the session answers; the rows of an unknown account offer no actions. */
-    var accountID by mutableStateOf<String?>(null)
-    var adminUsers by mutableStateOf(Remote<List<AdminUser>>())
-    var invites by mutableStateOf(Remote<List<Invite>>())
-    var outdatedWorkspaces by mutableStateOf(Remote<List<ListOutdatedWorkspacesResponseWorkspacesItem>>())
-    var inviteSheet by mutableStateOf<InviteSheet?>(null)
-    private var inviteAttempt = 0
 
     fun switchAccountMode() {
         accountMode = if (accountMode == AccountMode.SignIn) AccountMode.SignUp else AccountMode.SignIn
@@ -5488,321 +4194,21 @@ class AppModel(
         inviteCode = ""
     }
 
-    private fun loadAccount(then: () -> Unit = {}) {
+    private fun loadAccount() {
         if (client == null) return
         val changes = themeChanges
         confirmed(
             start = {},
             work = { api -> api.accountSession() },
             finish = { result ->
-                result.fold(
-                    onSuccess = {
-                        accountID = it.id
-                        isAdmin = it.admin
-                        // The account's theme wins unless the owner chose one since this read began.
-                        ThemeChoice.of(it.theme)?.takeIf { changes == themeChanges && !themeSaving }?.let { saved ->
-                            accountTheme = saved
-                            if (saved != theme) adoptTheme(saved)
-                        }
-                        then()
-                    },
-                    onFailure = { adminUsers = adminUsers.copy(error = friendlyError(it)) },
-                )
-            },
-        )
-    }
-
-    private fun loadUsers() = loadAccount {
-        if (isAdmin == true) {
-            loadAdminUsers()
-            loadInvites()
-            loadRemote("server-settings", { serverSettings }, { serverSettings = it }) { it.serverSettings() }
-        }
-    }
-
-    private fun loadAdminUsers() = loadRemote("admin-user", { adminUsers }, { adminUsers = it }) { it.adminUsers() }
-
-    private fun loadInvites() = loadRemote("admin-invite", { invites }, { invites = it }) { it.invites() }
-
-    private fun loadOutdatedWorkspaces() =
-        loadRemote("outdated-workspace", { outdatedWorkspaces }, { outdatedWorkspaces = it }) { it.outdatedWorkspaces() }
-
-    private fun editUsers(change: (List<AdminUser>) -> List<AdminUser>) {
-        adminUsers = Remote(adminUsers.value?.let(change), error = adminUsers.error)
-    }
-
-    private fun failUsers(message: String) {
-        adminUsers = adminUsers.copy(failure = message)
-        loadAdminUsers()
-    }
-
-    fun setUserRole(user: AdminUser, role: String) {
-        val assign = { next: String ->
-            editUsers { users -> users.map { if (it.id == user.id) it.copy(role = next) else it } }
-        }
-        recordChange(
-            "admin-user", user.id,
-            update = { assign(role) },
-            rollback = { assign(user.role) },
-            fail = ::failUsers,
-        ) { api ->
-            val saved = api.setUserRole(user.id, role)
-            return@recordChange { editUsers { users -> users.map { if (it.id == saved.id) saved else it } } }
-        }
-    }
-
-    fun removeUser(user: AdminUser) {
-        recordChange(
-            "admin-user", user.id,
-            update = { editUsers { users -> users.filter { it.id != user.id } } },
-            rollback = { editUsers { users -> (users + user).sortedBy { it.createdAt } } },
-            fail = ::failUsers,
-        ) { api ->
-            api.removeUser(user.id)
-            return@recordChange {}
-        }
-    }
-
-    fun revokeInvite(invite: Invite) {
-        val edit = { change: (List<Invite>) -> List<Invite> ->
-            invites = Remote(invites.value?.let(change), error = invites.error)
-        }
-        recordChange(
-            "admin-invite", invite.id,
-            update = { edit { rows -> rows.filter { it.id != invite.id } } },
-            rollback = { edit { rows -> (rows + invite).sortedByDescending { it.createdAt } } },
-            fail = { message ->
-                invites = invites.copy(failure = message)
-                loadInvites()
-            },
-        ) { api ->
-            api.revokeInvite(invite.id)
-            return@recordChange {}
-        }
-    }
-
-    /** Mints one link per request: the server shows it once, so nothing here retries on its own. */
-    fun createInvite() {
-        inviteAttempt += 1
-        val attempt = inviteAttempt
-        confirmed(
-            start = { inviteSheet = InviteSheet() },
-            work = { api -> api.createInvite() },
-            finish = { result ->
-                val waiting = attempt == inviteAttempt && inviteSheet != null
-                result.fold(
-                    onSuccess = {
-                        if (waiting) inviteSheet = InviteSheet(url = it.url)
-                        loadInvites()
-                    },
-                    onFailure = {
-                        val message = friendlyError(it)
-                        if (waiting) inviteSheet = InviteSheet(error = message) else invites = invites.copy(failure = message)
-                    },
-                )
-            },
-        )
-    }
-
-    fun closeInviteSheet() {
-        inviteSheet = null
-        loadInvites()
-    }
-
-    /** Shares the settings slot and key with the workspace sheet, so neither change overwrites the other. */
-    fun setSignUpOpen(open: Boolean) {
-        val before = serverSettings.value ?: return
-        recordChange(
-            "server-settings", "patch",
-            update = { serverSettings = Remote(before.copy(signUpOpen = open)) },
-            rollback = { serverSettings = Remote(before) },
-            fail = { serverSettings = serverSettings.copy(failure = it) },
-        ) { api ->
-            val saved = api.updateServerSettings(UpdateServerSettingsRequest(signUpOpen = OptionalField.Present(open)))
-            return@recordChange { serverSettings = Remote(saved) }
-        }
-    }
-
-    // MARK: Provider accounts
-
-    private fun refreshProviders() {
-        loadProviders()
-    }
-
-    private fun editProvider(id: String, change: (Provider) -> Provider) {
-        providerAccounts = providerAccounts.map { if (it.provider == id) change(it) else it }
-    }
-
-    fun openProviderKey(provider: Provider) {
-        providerKeyForm = ProviderKeyForm(provider, secretDraft(provider.apiKey))
-        loadPasswordManagers()
-    }
-
-    fun closeProviderKey() {
-        providerKeyForm = null
-    }
-
-    fun saveProviderAccountKey() {
-        val form = providerKeyForm ?: return
-        val input = form.key.input ?: return
-        val id = form.provider.provider
-        val key = "provider:$id"
-        if (!form.key.changed || form.saving || !canSubmit(key)) return
-        val waits = input is SecretInput.Reference
-        val from = route
-        val before = providerAccounts.firstOrNull { it.provider == id }
-        providerKeyForm = if (waits) form.copy(saving = true, error = "") else null
-        val open = { providerKeyForm?.let { it.saving && it.provider.provider == id } == true }
-        optimisticMutation(
-            key = key,
-            update = {
-                touchSecrets("provider", "")
-                if (!waits) editProvider(id) { it.withKey() }
-            },
-            rollback = {
-                touchSecrets("provider", "")
-                if (!waits && before != null) editProvider(id) { before }
-            },
-            fail = { message ->
-                val reopen = !waits && providerKeyForm == null && route == from
-                if (open() || reopen) providerKeyForm = form.copy(error = message) else errorText = message
-            },
-            work = { api ->
-                api.setProviderKey(id, input)
-                return@optimisticMutation {
-                    touchSecrets("provider", "")
-                    if (open()) providerKeyForm = null
-                    refreshProviders()
-                }
-            },
-        )
-    }
-
-    /** Removes the provider's key or signs it out; the server holds only one credential per provider. */
-    fun removeProviderCredential(provider: Provider) {
-        val id = provider.provider
-        optimisticMutation(
-            key = "provider:$id",
-            update = {
-                touchSecrets("provider", "")
-                editProvider(id) { it.withoutCredential() }
-            },
-            rollback = {
-                touchSecrets("provider", "")
-                editProvider(id) { provider }
-            },
-            work = { api ->
-                api.deleteProviderKey(id)
-                return@optimisticMutation {
-                    touchSecrets("provider", "")
-                    refreshProviders()
-                }
-            },
-        )
-    }
-
-    fun openProviderLogin(provider: Provider) {
-        providerLoginJob?.cancel()
-        providerLogin = ProviderLoginView(provider, sessionID = provider.activeLoginId)
-        provider.activeLoginId?.let(::followProviderLogin)
-    }
-
-    /** The sign-in keeps going on the server; the row offers to continue it. */
-    fun hideProviderLogin() {
-        providerLoginJob?.cancel()
-        providerLoginJob = null
-        providerLogin = null
-    }
-
-    private fun ProviderLoginView.showing(next: ProviderLoginSession) = copy(
-        session = next,
-        gone = false,
-        error = "",
-        answer = if (next.prompt?.id == session?.prompt?.id) answer else SecretDraft(),
-        answerError = if (next.prompt?.id == session?.prompt?.id) answerError else "",
-    )
-
-    // Sign-ins advance on the server, so read until they end.
-    private fun followProviderLogin(id: String) {
-        val api = client ?: return
-        val gen = generation
-        providerLoginJob?.cancel()
-        providerLoginJob = scope.launch {
-            while (isActive) {
-                val read = providerLoginReads
-                val session = attempt { api.providerLogin(id) }
-                val view = providerLogin?.takeIf { generation == gen && it.sessionID == id } ?: return@launch
-                val failure = session.exceptionOrNull()
-                if ((failure as? APIError)?.statusCode == 410) {
-                    providerLogin = view.copy(gone = true, error = "")
-                    return@launch
-                }
-                if (read == providerLoginReads && !view.answering) {
-                    providerLogin = session.fold({ view.showing(it) }, { view.copy(error = friendlyError(it)) })
-                    if (session.getOrNull()?.let { it.status != "pending" } == true) {
-                        refreshProviders()
-                        return@launch
+                result.onSuccess {
+                    // The account's theme wins unless the owner chose one since this read began.
+                    ThemeChoice.of(it.theme)?.takeIf { changes == themeChanges && !themeSaving }?.let { saved ->
+                        accountTheme = saved
+                        if (saved != theme) adoptTheme(saved)
                     }
                 }
-                delay(PROVIDER_LOGIN_POLL_MS)
-            }
-        }
-    }
-
-    fun startProviderLogin() {
-        val view = providerLogin ?: return
-        val api = client ?: return
-        if (view.starting) return
-        val id = view.provider.provider
-        val gen = generation
-        providerLogin = view.copy(starting = true, error = "")
-        scope.launch {
-            val started = attempt { api.startProviderLogin(id) }
-            if (generation != gen) return@launch
-            started.onSuccess { refreshProviders() }
-            val current = providerLogin?.takeIf { it.provider.provider == id && it.starting } ?: return@launch
-            started.fold(
-                onSuccess = {
-                    providerLogin = current.copy(starting = false, sessionID = it.id, session = it)
-                    followProviderLogin(it.id)
-                },
-                onFailure = { providerLogin = current.copy(starting = false, error = friendlyError(it)) },
-            )
-        }
-    }
-
-    fun answerProviderLogin(value: String) {
-        val view = providerLogin ?: return
-        val id = view.sessionID ?: return
-        val prompt = view.session?.prompt ?: return
-        val api = client ?: return
-        if (view.answering || value.isEmpty()) return
-        val gen = generation
-        providerLoginReads += 1
-        providerLogin = view.copy(answering = true, answerError = "")
-        scope.launch {
-            val answered = attempt { api.answerProviderLogin(id, prompt.id, value) }
-            val current = providerLogin?.takeIf { generation == gen && it.sessionID == id } ?: return@launch
-            providerLoginReads += 1
-            providerLogin = answered.fold(
-                onSuccess = { current.showing(it).copy(answering = false, answer = SecretDraft(), answerError = "") },
-                onFailure = { current.copy(answering = false, answerError = friendlyError(it)) },
-            )
-        }
-    }
-
-    fun cancelProviderLogin() {
-        val view = providerLogin ?: return
-        val id = view.sessionID ?: return
-        val api = client ?: return
-        if (view.cancelling) return
-        val gen = generation
-        providerLogin = view.copy(cancelling = true)
-        scope.launch {
-            attempt { api.cancelProviderLogin(id) }
-            if (generation != gen) return@launch
-            refreshProviders()
-            if (providerLogin?.sessionID == id) hideProviderLogin()
-        }
+            },
+        )
     }
 }

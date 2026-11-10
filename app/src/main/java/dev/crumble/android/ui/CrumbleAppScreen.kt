@@ -1,5 +1,27 @@
 package dev.crumble.android.ui
 
+import androidx.compose.foundation.layout.statusBarsPadding
+import dev.crumble.android.model.WORKSPACE_PAGES
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import dev.crumble.android.model.botListLine
+import dev.crumble.android.model.preview
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -9,10 +31,8 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.filled.Tune
 import androidx.activity.compose.BackHandler
-import dev.crumble.android.model.WORKSPACE_PAGES
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,69 +43,42 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Balance
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Timeline
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.Webhook
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationDrawerItem
-import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -96,13 +89,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.model.Agent
-import dev.crumble.android.model.botListLine
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.Route
 import dev.crumble.android.model.SKILLS_SHARED
 import dev.crumble.android.model.nilIfEmpty
-import dev.crumble.android.model.preview
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -174,9 +164,6 @@ fun CrumbleAppScreen(model: AppModel) {
     model.eventSourceDraft?.let { draft ->
         EventSourceDialog(model = model, draft = draft)
     }
-    model.mcpDraft?.let { draft ->
-        MCPFormDialog(model = model, draft = draft)
-    }
     model.skillDraft?.let { draft ->
         SkillFormDialog(model = model, draft = draft)
     }
@@ -198,19 +185,6 @@ fun CrumbleAppScreen(model: AppModel) {
     model.loginForm?.let { form ->
         LoginFormDialog(model = model, form = form)
     }
-    model.tokenForm?.let { form ->
-        ManagerTokenDialog(model = model, form = form)
-    }
-    model.providerKeyForm?.let { form ->
-        ProviderKeyDialog(model = model, form = form)
-    }
-    model.providerLogin?.let { view ->
-        ProviderLoginDialog(model = model, view = view)
-    }
-    model.secretUses?.let { view ->
-        SecretUsesDialog(model = model, view = view)
-    }
-    ConnectionDialogs(model)
     if (model.showingChanges) {
         ChangeHistoryDialog(model = model)
     }
@@ -299,8 +273,6 @@ private fun CrumbleTopBar(model: AppModel) {
                 }
             } else if (currentRoute is Route.GroupChat) {
                 GroupTitle(model = model, groupID = currentRoute.id)
-            } else if (currentRoute is Route.MessageGateway) {
-                Text(model.gateways.value?.firstOrNull { it.id == currentRoute.id }?.label ?: currentRoute.title)
             } else {
                 Text(currentRoute?.title ?: "Crumble")
             }
@@ -368,46 +340,12 @@ private fun CrumbleTopBar(model: AppModel) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                     }
                 }
-                Route.Integrations -> {
-                    IconButton(onClick = { model.openMCPForm("", agentID = null) }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add Shared MCP Server")
-                    }
-                    IconButton(onClick = { model.openPanel(Route.Integrations) }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                    }
-                }
                 Route.Activity -> {
                     IconButton(onClick = { model.openPanel(Route.Activity) }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                     }
                 }
-                Route.Avatars, Route.WebSearch, Route.JudgeModel, Route.VisionModel -> Unit
-                is Route.MessageGateway -> {
-                    IconButton(onClick = { model.loadGateways() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                    }
-                }
-                Route.Providers, Route.PasswordManagers, Route.Coding, Route.Users, Route.MessageGateways, Route.EventRelay -> {
-                    IconButton(onClick = { model.openPanel(currentRoute) }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                    }
-                }
-                Route.Credentials -> {
-                    IconButton(onClick = { model.openCredentialForm(null) }, enabled = model.agents.isNotEmpty()) {
-                        Icon(Icons.Default.Add, contentDescription = "New credential")
-                    }
-                    IconButton(onClick = { model.openPanel(Route.Credentials) }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                    }
-                }
-                Route.Logins -> {
-                    IconButton(onClick = { model.openLoginForm(null) }, enabled = model.agents.isNotEmpty()) {
-                        Icon(Icons.Default.Add, contentDescription = "New login")
-                    }
-                    IconButton(onClick = { model.openPanel(Route.Logins) }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                    }
-                }
+                Route.Avatars -> Unit
             }
         },
     )
@@ -419,19 +357,7 @@ fun routeIcon(route: Route): ImageVector = when (route) {
     Route.Skills -> Icons.AutoMirrored.Filled.MenuBook
     Route.Tasks -> Icons.Default.Schedule
     Route.Activity -> Icons.Default.Timeline
-    Route.Integrations -> Icons.Default.Extension
     Route.Avatars -> Icons.Default.Face
-    Route.Providers -> Icons.Default.Key
-    Route.PasswordManagers -> Icons.Default.Shield
-    Route.WebSearch -> Icons.Default.Language
-    Route.Credentials -> Icons.Default.Lock
-    Route.Logins -> Icons.AutoMirrored.Filled.Login
-    Route.JudgeModel -> Icons.Default.Balance
-    Route.VisionModel -> Icons.Default.Visibility
-    Route.Coding -> Icons.Default.Code
-    Route.Users -> Icons.Default.Group
-    Route.MessageGateways, is Route.MessageGateway -> Icons.AutoMirrored.Filled.Message
-    Route.EventRelay -> Icons.Default.Webhook
     Route.Settings -> Icons.Default.Settings
     Route.General -> Icons.Default.Tune
     Route.Account -> Icons.Default.Person
@@ -525,7 +451,6 @@ fun ErrorBanner(
     val noSheetOpen = model.agentDraft == null &&
         model.memoryDraft == null &&
         model.taskDraft == null &&
-        model.mcpDraft == null &&
         model.skillDraft == null &&
         model.groupDraft == null &&
         model.route != Route.General

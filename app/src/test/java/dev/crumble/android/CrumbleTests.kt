@@ -44,9 +44,7 @@ import dev.crumble.android.network.HttpStreamResponse
 import dev.crumble.android.network.HttpTransport
 import dev.crumble.android.network.SSEClosedError
 import dev.crumble.android.network.SSEParser
-import dev.crumble.android.network.SignInError
 import dev.crumble.android.network.friendlyError
-import dev.crumble.android.network.oauthResult
 import dev.crumble.android.ui.MarkdownBlock
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
@@ -345,25 +343,6 @@ class CrumbleTests {
         advanceUntilIdle()
         assertEquals(listOf("notes.txt"), model.attachments.map { it.name })
         assertTrue(model.errorText.contains("busy"))
-    }
-
-    @Test
-    fun mcpSignInRoundTrip() = runTest {
-        val (client, stub) = StubTransport.client { req ->
-            when (req.pathWithQuery) {
-                "/v1/mcp-servers/s1/oauth" -> 200 to """{"authorizationUrl":"https://auth.example.com/authorize?state=x"}"""
-                "/v1/mcp-servers/s1/oauth/callback" -> 200 to """{"id":"s1","name":"Linear","url":"https://mcp.linear.app/mcp","enabled":true,"agentId":null,"oauthClientId":null,"oauthClientSecret":{"configured":false,"passwordManager":null,"reference":null},"token":{"configured":false,"passwordManager":null,"reference":null},"error":null,"auth":"oauth","authenticated":true}"""
-                else -> 404 to ""
-            }
-        }
-        val start = client.startMCPSignIn("s1", redirectURI = AppModel.oauthRedirectURI)
-        assertTrue(start.authorizationUrl?.startsWith("https://auth.example.com/") == true)
-        val sent = String(stub.requests.last().body ?: ByteArray(0), StandardCharsets.UTF_8)
-        assertTrue(sent.contains(AppModel.oauthRedirectURI))
-        val server = client.finishMCPSignIn("s1", code = "c", state = "x", iss = "https://auth.example.com")
-        assertEquals("oauth", server.auth)
-        val finished = String(stub.requests.last().body ?: ByteArray(0), StandardCharsets.UTF_8)
-        assertTrue(finished.contains(""""iss":"https://auth.example.com""""))
     }
 
     @Test
@@ -1014,29 +993,6 @@ class CrumbleTests {
         assertEquals("Atlas", retained.communication?.fromName)
         assertEquals("Beacon", retained.communication?.toName)
         assertEquals("done", retained.communication?.status)
-    }
-
-    @Test
-    fun signInCallbacksCarryACodeOrAReason() {
-        val ok = oauthResult("${AppModel.oauthRedirectURI}?code=abc&state=xyz")
-        assertEquals("abc", ok.code)
-        assertEquals("xyz", ok.state)
-        assertNull(ok.iss)
-
-        val issued = oauthResult("${AppModel.oauthRedirectURI}?code=abc&state=xyz&iss=https%3A%2F%2Fexecutor.sh%2Fapi%2Fauth")
-        assertEquals("https://executor.sh/api/auth", issued.iss)
-
-        try {
-            oauthResult("${AppModel.oauthRedirectURI}?error=access_denied&error_description=User%20declined")
-            fail("expected SignInError")
-        } catch (_: SignInError) {
-        }
-
-        try {
-            oauthResult("${AppModel.oauthRedirectURI}")
-            fail("expected SignInError")
-        } catch (_: SignInError) {
-        }
     }
 
     @Test

@@ -1,5 +1,6 @@
 package dev.crumble.android.ui
 
+import androidx.compose.material.icons.filled.Add
 import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -38,7 +39,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
@@ -111,7 +111,6 @@ import dev.crumble.android.model.CallMarker
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.MessageDeliveryState
 import dev.crumble.android.model.PendingAttachment
-import dev.crumble.android.model.Route
 import dev.crumble.android.model.Sources
 import dev.crumble.android.model.SplitReply
 import dev.crumble.android.model.botReactions
@@ -315,7 +314,8 @@ fun ChatRowView(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    OutlinedButton(onClick = { model.navigate(Route.Providers) }) {
+                    val context = LocalContext.current
+                    OutlinedButton(onClick = { openWebSettings(context, model, "providers") }) {
                         Text("Provider Settings…")
                     }
                 }

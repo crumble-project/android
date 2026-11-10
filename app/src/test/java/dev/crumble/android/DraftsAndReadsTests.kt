@@ -4,8 +4,6 @@ import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
-import dev.crumble.android.model.MCPDraft
-import dev.crumble.android.model.MCPServer
 import dev.crumble.android.model.Memory
 import dev.crumble.android.model.MemoryDraft
 import dev.crumble.android.model.Message
@@ -37,7 +35,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -520,24 +517,6 @@ class DraftsAndReadsTests {
     }
 
     @Test
-    fun aFailedServerSaveKeepsTheServerInPlace() = scenario {
-        val transport = Scripted().apply { responses["PATCH /v1/mcp-servers/m1"] = 500 to BUSY }
-        val model = model(transport)
-        model.route = Route.Integrations
-        model.mcpServers = listOf(
-            MCPServer(id = "m1", name = "One", url = "https://one.example"),
-            MCPServer(id = "m2", name = "Two", url = "https://two.example"),
-        )
-        model.openMCPForm("m1")
-        model.mcpDraft = model.mcpDraft!!.copy(name = "Renamed")
-        model.saveMCP()
-        runCurrent()
-
-        assertEquals(listOf("m1", "m2"), model.mcpServers.map { it.id })
-        assertEquals("One", model.mcpServers.first().name)
-    }
-
-    @Test
     fun aFailedBotSaveKeepsChangesConfirmedMeanwhile() = scenario {
         val transport = Scripted().apply {
             responses["PATCH /v1/agents/a1"] = 500 to BUSY
@@ -584,25 +563,6 @@ class DraftsAndReadsTests {
 
         assertEquals(second, model.memoryDraft)
         assertTrue(model.errorText.isNotEmpty())
-    }
-
-    @Test
-    fun aBusyServerFormDoesNotStayWaiting() = scenario {
-        val transport = Scripted().apply { hold("PATCH /v1/mcp-servers/m1") }
-        val model = model(transport)
-        model.route = Route.Integrations
-        val server = MCPServer(id = "m1", name = "One", url = "https://one.example")
-        model.mcpServers = listOf(server)
-        model.openMCPForm("m1")
-        model.saveMCP()
-        runCurrent()
-
-        val form = MCPDraft(serverID = "m1", name = "Again", url = "https://one.example")
-        model.mcpDraft = form
-        model.saveMCP()
-
-        assertEquals(form, model.mcpDraft)
-        assertFalse(model.mcpDraft!!.saving)
     }
 
     // Bot defaults and mentions

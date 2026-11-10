@@ -1,5 +1,10 @@
 package dev.crumble.android.ui
 
+import android.content.Context
+import android.content.Intent
+import androidx.core.net.toUri
+import dev.crumble.android.model.AppModel
+import dev.crumble.android.model.webSettingsURL
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyListScope
@@ -327,4 +332,10 @@ fun SearchPill(
             Text(hint, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+/** Opens the web app's settings, or one of its pages, in the browser: the server is configured there. */
+internal fun openWebSettings(context: Context, model: AppModel, page: String? = null) {
+    val url = webSettingsURL(model.client?.baseURL ?: model.serverURL, page) ?: return
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }
