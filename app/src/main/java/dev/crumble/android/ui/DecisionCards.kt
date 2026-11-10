@@ -2,7 +2,13 @@ package dev.crumble.android.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +22,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -37,20 +44,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.generated.BotRequest
+import dev.crumble.android.generated.CallRequest
 import dev.crumble.android.generated.CodingJobQuestion
 import dev.crumble.android.generated.CredentialRequest
 import dev.crumble.android.generated.HeldAction
 import dev.crumble.android.generated.LoginRequest
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.BotRequestRef
+import dev.crumble.android.model.CallRequestRef
 import dev.crumble.android.model.HeldActionRef
 import dev.crumble.android.model.JobQuestionRef
 import dev.crumble.android.model.SecretRequestRef
 import dev.crumble.android.model.SecretRequestState
+import dev.crumble.android.model.callStateLabel
 import dev.crumble.android.model.credentialReadKey
 import dev.crumble.android.model.loginReadKey
 import dev.crumble.android.model.secretKey
@@ -422,6 +433,79 @@ private fun SecretRequestPending(
             if (busy) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             TextButton(enabled = !busy, onClick = onDecline) { Text("Decline") }
             Button(enabled = !busy, onClick = onAdd) { Text(addLabel) }
+        }
+    }
+}
+
+@Composable
+fun CallRequestCard(model: AppModel, ref: CallRequestRef) {
+    val request = model.callRequests.firstOrNull { it.id == ref.id }
+    when {
+        request == null -> SettledCard(Icons.Default.Phone, ref.callee, model.unresolvedOutcome())
+        request.status == "pending" -> CallRequestPending(model, request)
+        request.status == "declined" -> SettledCard(Icons.Default.Phone, request.callee, "Declined")
+        else -> PlacedCallCard(model, request)
+    }
+}
+
+@Composable
+private fun CallRequestPending(model: AppModel, request: CallRequest) {
+    val busy = request.id in model.decidingIDs
+    DecisionSurface {
+        DecisionHeader(Icons.Default.Phone, "Wants to call for you", request.callee)
+        Text(
+            request.number,
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(request.goal, style = MaterialTheme.typography.bodySmall)
+        Text(
+            "Check that the opening says it's an AI assistant, whom it calls for, that the call is transcribed, and why it calls.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(modifier = Modifier.width(2.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
+            Text(request.opening, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        DecisionError(model, request.id)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        ) {
+            DecisionPending(model, request.id)
+            TextButton(enabled = !busy, onClick = { model.decideCallRequest(request.id, approve = false) }) { Text("Decline") }
+            Button(enabled = !busy, onClick = { model.decideCallRequest(request.id, approve = true) }) { Text("Approve") }
+        }
+    }
+}
+
+/** A call the bot placed, as a row that opens the call; `detail` is a notice's text after the callee's name. */
+@Composable
+fun PlacedCallCard(model: AppModel, request: CallRequest, detail: String? = null) {
+    val second = detail?.replaceFirstChar { it.uppercase() }
+        ?: request.error.takeIf { request.outcome == "failed" && !it.isNullOrEmpty() }
+    Surface(
+        onClick = { model.openCallTranscript(request.id) },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (request.status == "calling") {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(request.callee, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(callStateLabel(request), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (!second.isNullOrEmpty()) {
+                Text(second, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 28.dp))
+            }
         }
     }
 }

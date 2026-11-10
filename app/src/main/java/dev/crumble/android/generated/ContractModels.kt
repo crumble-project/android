@@ -612,6 +612,24 @@ data class BrowseSkillRepositoryRequest(
 )
 
 @Serializable
+data class CallRequest(
+    val `id`: String,
+    val `agentId`: String,
+    val `number`: String,
+    val `callee`: String,
+    val `goal`: String,
+    val `opening`: String,
+    val `status`: String,
+    val `callId`: String?,
+    val `conversationId`: String?,
+    val `outcome`: String?,
+    val `error`: String?,
+    val `requestedAt`: String,
+    val `decidedAt`: String?,
+    val `endedAt`: String?,
+)
+
+@Serializable
 data class Capabilities(
     val `coding`: Boolean,
     val `desktop`: Boolean,
@@ -1225,6 +1243,7 @@ data class GetVoiceGatewayResponseConfigLinesItem(
     val `botId`: String,
     val `displayName`: String?,
     val `callsOwner`: Boolean,
+    val `callsOthers`: Boolean,
 )
 
 @Serializable
@@ -2687,26 +2706,28 @@ object SnapshotEventPayloadMessagesItemAttachmentsItemCodec : KSerializer<Snapsh
 data class SnapshotEventPayloadMessagesItemCall(
     val `callId`: String,
     val `direction`: String,
+    val `callee`: String? = null,
     val additionalProperties: Map<String, JsonElement> = emptyMap(),
 )
 @Serializable
 private data class SnapshotEventPayloadMessagesItemCallFields(
     val `callId`: String,
     val `direction`: String,
+    val `callee`: String? = null,
 )
 object SnapshotEventPayloadMessagesItemCallCodec : KSerializer<SnapshotEventPayloadMessagesItemCall> {
-    private val declared = setOf("callId", "direction")
+    private val declared = setOf("callId", "direction", "callee")
     override val descriptor: SerialDescriptor = buildClassSerialDescriptor("SnapshotEventPayloadMessagesItemCall")
     override fun deserialize(decoder: Decoder): SnapshotEventPayloadMessagesItemCall {
         val input = decoder as JsonDecoder
         val element = input.decodeJsonElement().jsonObject
         val fields = input.json.decodeFromJsonElement<SnapshotEventPayloadMessagesItemCallFields>(JsonObject(element.filterKeys { it in declared }))
         val additional = element.filterKeys { it !in declared }.mapValues { input.json.decodeFromJsonElement<JsonElement>(it.value) }
-        return SnapshotEventPayloadMessagesItemCall(fields.`callId`, fields.`direction`, additional)
+        return SnapshotEventPayloadMessagesItemCall(fields.`callId`, fields.`direction`, fields.`callee`, additional)
     }
     override fun serialize(encoder: Encoder, value: SnapshotEventPayloadMessagesItemCall) {
         val output = encoder as JsonEncoder
-        val fields = output.json.encodeToJsonElement(SnapshotEventPayloadMessagesItemCallFields(value.`callId`, value.`direction`)).jsonObject
+        val fields = output.json.encodeToJsonElement(SnapshotEventPayloadMessagesItemCallFields(value.`callId`, value.`direction`, value.`callee`)).jsonObject
         val additional = value.additionalProperties.mapValues { output.json.encodeToJsonElement<JsonElement>(it.value) }
         output.encodeJsonElement(JsonObject(additional + fields))
     }
@@ -2927,6 +2948,7 @@ data class TranscriptMessage(
 data class TranscriptMessageCall(
     val `callId`: String,
     val `direction`: String,
+    val `callee`: String? = null,
 )
 
 @Serializable
@@ -3303,6 +3325,7 @@ data class UpdateVoiceGatewayRequestLinesItem(
     val `botId`: String,
     val `displayName`: String?,
     val `callsOwner`: Boolean,
+    val `callsOthers`: Boolean,
 )
 
 @Serializable
@@ -3328,6 +3351,7 @@ data class UpdateVoiceGatewayResponseConfigLinesItem(
     val `botId`: String,
     val `displayName`: String?,
     val `callsOwner`: Boolean,
+    val `callsOthers`: Boolean,
 )
 
 @Serializable
@@ -3389,6 +3413,7 @@ data class VoiceCallEvent(
     val `username`: String,
     val `to`: String,
     val `greeting`: String,
+    val `party`: String? = null,
 )
 
 @Serializable(with = VoiceCallReportCodec::class)

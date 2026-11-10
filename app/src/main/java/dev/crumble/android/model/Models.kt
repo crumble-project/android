@@ -94,6 +94,7 @@ data class MessageOrigin(
 data class MessageCall(
     val callId: String = "",
     val direction: String = "",
+    val callee: String? = null,
 )
 
 /** A persisted request or reply exchanged between two bots. */
@@ -118,6 +119,10 @@ data class JobQuestionRef(val id: String = "", val job: String = "")
 /** A `request_bot` result in the transcript; its live state comes from the bot's requests. */
 @Serializable
 data class BotRequestRef(val id: String = "", val name: String = "")
+
+/** A `request_call` result in the transcript; its live state comes from the bot's call requests. */
+@Serializable
+data class CallRequestRef(val id: String = "", val callee: String = "")
 
 /** A page a group message's bot searched or read, stored with the message. */
 @Serializable
@@ -153,6 +158,7 @@ data class Message(
     val jobQuestion: JobQuestionRef? = null,
     val call: MessageCall? = null,
     val botRequest: BotRequestRef? = null,
+    val callRequest: CallRequestRef? = null,
     val credentialRequest: SecretRequestRef? = null,
     val loginRequest: SecretRequestRef? = null,
     val toolName: String? = null,
@@ -442,8 +448,9 @@ sealed class ChatRow {
         fun shownInChat(message: Message): Boolean {
             return when (message.role) {
                 "user" -> (message.text.isNotEmpty() || !message.attachments.isNullOrEmpty()) && !isJobOrigin(message.origin?.kind)
-                "event" -> message.text.isNotEmpty()
-                "toolResult" -> message.botRequest != null || message.credentialRequest != null || message.loginRequest != null ||
+                // An outside call shows as one card where its end notice is.
+                "event" -> message.text.isNotEmpty() && message.call?.callee == null
+                "toolResult" -> message.botRequest != null || message.callRequest != null || message.credentialRequest != null || message.loginRequest != null ||
                     jobOf(message) != null || displayOf(message) != null || isDesktopScreenshot(message)
                 "assistant" -> {
                     val blocks = message.blocks
@@ -604,6 +611,7 @@ fun noticeTitle(message: Message): String? {
         "credential" -> "Credential · $name"
         "bot" -> "From $name"
         "bot_request" -> "Bot request"
+        "call_request" -> "Call request"
         "call" -> "Call"
         else -> null
     }

@@ -187,10 +187,11 @@ class ContractOperations(private val boundary: ContractBoundary) {
         return boundary.json.decodeFromString<Execution>(bytes.toString(Charsets.UTF_8))
     }
 
-    suspend fun streamVoiceLineEvents(`username`: String, `limit`: Long? = null, `partial`: String? = null, timeoutMs: Int = 20_000): HttpRequestData {
+    suspend fun streamVoiceLineEvents(`username`: String, `limit`: Long? = null, `partial`: String? = null, `callId`: String? = null, timeoutMs: Int = 20_000): HttpRequestData {
         val query = mutableListOf<String>()
         `limit`?.let { query.add("limit=" + boundary.escape(it.toString())) }
         `partial`?.let { query.add("partial=" + boundary.escape(it)) }
+        `callId`?.let { query.add("callId=" + boundary.escape(it)) }
         val path = "/v1/voice/lines/${boundary.escape(`username`)}/events" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
         return boundary.request("GET", path, null, timeoutMs)
     }
@@ -659,6 +660,36 @@ class ContractOperations(private val boundary: ContractBoundary) {
         val path = "/v1/agents/${boundary.escape(`id`)}/bot-requests/${boundary.escape(`requestId`)}/decline" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
         val bytes = boundary.send("POST", path, null, timeoutMs)
         return boundary.json.decodeFromString<BotRequest>(bytes.toString(Charsets.UTF_8))
+    }
+
+    suspend fun listCallRequests(`id`: String, timeoutMs: Int = 20_000): List<CallRequest> {
+        val query = mutableListOf<String>()
+        val path = "/v1/agents/${boundary.escape(`id`)}/call-requests" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
+        val bytes = boundary.send("GET", path, null, timeoutMs)
+        return boundary.json.decodeFromString<List<CallRequest>>(bytes.toString(Charsets.UTF_8))
+    }
+
+    suspend fun approveCallRequest(`id`: String, `requestId`: String, timeoutMs: Int = 20_000): CallRequest {
+        val query = mutableListOf<String>()
+        val path = "/v1/agents/${boundary.escape(`id`)}/call-requests/${boundary.escape(`requestId`)}/approve" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
+        val bytes = boundary.send("POST", path, null, timeoutMs)
+        return boundary.json.decodeFromString<CallRequest>(bytes.toString(Charsets.UTF_8))
+    }
+
+    suspend fun declineCallRequest(`id`: String, `requestId`: String, timeoutMs: Int = 20_000): CallRequest {
+        val query = mutableListOf<String>()
+        val path = "/v1/agents/${boundary.escape(`id`)}/call-requests/${boundary.escape(`requestId`)}/decline" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
+        val bytes = boundary.send("POST", path, null, timeoutMs)
+        return boundary.json.decodeFromString<CallRequest>(bytes.toString(Charsets.UTF_8))
+    }
+
+    suspend fun getCallRequestTranscript(`id`: String, `requestId`: String, `limit`: Long? = null, `before`: String? = null, timeoutMs: Int = 20_000): TranscriptPage {
+        val query = mutableListOf<String>()
+        `limit`?.let { query.add("limit=" + boundary.escape(it.toString())) }
+        `before`?.let { query.add("before=" + boundary.escape(it)) }
+        val path = "/v1/agents/${boundary.escape(`id`)}/call-requests/${boundary.escape(`requestId`)}/transcript" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
+        val bytes = boundary.send("GET", path, null, timeoutMs)
+        return boundary.json.decodeFromString<TranscriptPage>(bytes.toString(Charsets.UTF_8))
     }
 
     suspend fun saveAgentCredential(body: SaveAgentCredentialRequest, `id`: String, `name`: String, timeoutMs: Int = 20_000): Credential {

@@ -79,6 +79,14 @@ private fun botRequestRef(toolName: String?, isError: Boolean?, details: JsonEle
     return BotRequestRef(id, name)
 }
 
+private fun callRequestRef(toolName: String?, isError: Boolean?, details: JsonElement?): CallRequestRef? {
+    if (toolName != "request_call" || isError == true) return null
+    val request = details as? JsonObject ?: return null
+    val id = (request["id"] as? JsonPrimitive)?.contentOrNull ?: return null
+    val callee = (request["callee"] as? JsonPrimitive)?.contentOrNull ?: return null
+    return CallRequestRef(id, callee)
+}
+
 private fun secretRequestRef(tool: String, toolName: String?, isError: Boolean?, details: JsonElement?): SecretRequestRef? {
     if (toolName != tool || isError == true) return null
     val request = details as? JsonObject ?: return null
@@ -96,8 +104,9 @@ internal fun TranscriptMessage.domain() = Message(
     requestId = requestId,
     heldAction = heldAction?.let { HeldActionRef(it.id, it.job) },
     jobQuestion = jobQuestion?.let { JobQuestionRef(it.id, it.job) },
-    call = call?.let { MessageCall(it.callId, it.direction) },
+    call = call?.let { MessageCall(it.callId, it.direction, it.callee) },
     botRequest = botRequestRef(toolName, isError, toolDetails),
+    callRequest = callRequestRef(toolName, isError, toolDetails),
     credentialRequest = secretRequestRef("request_credential", toolName, isError, toolDetails),
     loginRequest = secretRequestRef("request_login", toolName, isError, toolDetails),
     toolName = toolName, toolCallId = toolCallId, isError = isError, toolDetails = toolDetails,
@@ -113,8 +122,9 @@ internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
     requestId = requestId,
     heldAction = heldAction?.let { HeldActionRef(it.id, it.job) },
     jobQuestion = jobQuestion?.let { JobQuestionRef(it.id, it.job) },
-    call = call?.let { MessageCall(it.callId, it.direction) },
+    call = call?.let { MessageCall(it.callId, it.direction, it.callee) },
     botRequest = botRequestRef(toolName, isError, toolDetails),
+    callRequest = callRequestRef(toolName, isError, toolDetails),
     credentialRequest = secretRequestRef("request_credential", toolName, isError, toolDetails),
     loginRequest = secretRequestRef("request_login", toolName, isError, toolDetails),
     toolName = toolName, toolCallId = toolCallId, isError = isError, toolDetails = toolDetails,

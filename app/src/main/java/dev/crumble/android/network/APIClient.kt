@@ -375,6 +375,12 @@ class APIClient(
         operations.approveBotRequest(request(proposal?.let { mapOf("proposal" to JsonObject(it)) }.orEmpty()), agentID, id).agent.domain()
     suspend fun declineBotRequest(agentID: String, id: String) { operations.declineBotRequest(agentID, id) }
 
+    suspend fun callRequests(agentID: String) = operations.listCallRequests(agentID)
+    suspend fun approveCallRequest(agentID: String, id: String) = operations.approveCallRequest(agentID, id)
+    suspend fun declineCallRequest(agentID: String, id: String) = operations.declineCallRequest(agentID, id)
+    suspend fun callRequestTranscript(agentID: String, id: String, limit: Int): ChatHistoryResponse =
+        operations.getCallRequestTranscript(agentID, id, limit.toLong()).domain()
+
     suspend fun agents(): List<Agent> = operations.listAgents().map { it.domain() }
 
     suspend fun createAgent(agent: Agent): Agent = operations.createAgent(agent.wire()).domain()

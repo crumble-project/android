@@ -117,6 +117,8 @@ import dev.crumble.android.model.SplitReply
 import dev.crumble.android.model.botReactions
 import dev.crumble.android.model.displayOf
 import dev.crumble.android.model.callMarkerOf
+import dev.crumble.android.model.callNoticeDetail
+import dev.crumble.android.model.callRequestForNotice
 import dev.crumble.android.model.isDesktopScreenshot
 import dev.crumble.android.model.isNotice
 import dev.crumble.android.model.isWebLink
@@ -364,6 +366,11 @@ fun MessageView(
     var menuExpanded by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
 
+    val outsideCall = callRequestForNotice(message, model.callRequests)?.takeIf { it.status != "declined" }
+    if (outsideCall != null) {
+        PlacedCallCard(model, outsideCall, callNoticeDetail(message, outsideCall))
+        return
+    }
     val call = callMarkerOf(message, botName)
     if (call != null) {
         CallMarkerRow(call, reactions)
@@ -389,6 +396,7 @@ fun MessageView(
                 display != null -> DisplayCardView(display)
                 isDesktopScreenshot(message) -> DesktopScreenshotCard(model, message)
                 message.botRequest != null -> BotRequestCard(model, message.botRequest)
+                message.callRequest != null -> CallRequestCard(model, message.callRequest)
                 message.credentialRequest != null -> CredentialRequestCard(model, message.credentialRequest)
                 message.loginRequest != null -> LoginRequestCard(model, message.loginRequest)
                 job != null -> JobCard(model, job)
