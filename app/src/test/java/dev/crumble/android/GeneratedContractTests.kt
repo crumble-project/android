@@ -28,6 +28,33 @@ import org.junit.Test
 @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 class GeneratedContractTests {
     @Test
+    fun presentationSurvivesHttpAndEventDecodingWithoutChangingRawContent() = runTest {
+        val presentation = dev.crumble.android.generated.MessagePresentation("Clean reply", listOf(dev.crumble.android.generated.Citation("https://example.com", "Example", "example.com")))
+        val message = dev.crumble.android.model.Message(id = "m1", entryId = "e1", role = "assistant", content = JsonPrimitive("Raw [source](https://example.com)"), presentation = presentation)
+        val snapshot = ChatSnapshot(agentId = "a1", messages = listOf(message))
+        val payload = snapshotFixture(snapshot)
+        val (client, _) = StubTransport.client { 200 to payload }
+        val fromHttp = client.chat("a1").messages!!.single()
+        assertEquals(message.text, fromHttp.text)
+        assertEquals(presentation, fromHttp.presentation)
+        val event = CrumbleJson.decodeFromString<dev.crumble.android.generated.SnapshotEventPayload>(payload)
+        assertEquals(presentation, event.messages.single().presentation)
+    }
+
+    @Test
+    fun schedulePreviewUsesServerTextAndSendsTheDraft() = runTest {
+        val (client, transport) = StubTransport.client {
+            200 to """{"description":"Server description","text":"Server preview","isProblem":false,"nextRunAt":null}"""
+        }
+        val preview = client.previewSchedule("0 9 * * *", null, null, "Europe/Berlin")
+        assertEquals("Server preview", preview.text)
+        assertEquals("Server description", preview.description)
+        val body = Json.parseToJsonElement(transport.requests.single().body!!.toString(Charsets.UTF_8)).jsonObject
+        assertEquals("0 9 * * *", body.getValue("cron").jsonPrimitive.content)
+        assertEquals("Europe/Berlin", body.getValue("timezone").jsonPrimitive.content)
+    }
+
+    @Test
     fun patchRoundTripDistinguishesAbsentFromExplicitNull() {
         val absent = CrumblePatchJson.decodeFromString<UpdateScheduleRequest>("{}")
         assertEquals(OptionalField.Absent, absent.cron)

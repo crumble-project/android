@@ -12,7 +12,6 @@ import dev.crumble.android.generated.DesktopViewer
 import dev.crumble.android.generated.GroupChat
 import dev.crumble.android.generated.InstallSkillsRequest
 import dev.crumble.android.generated.LearnedChange
-import dev.crumble.android.generated.OptionalField
 import dev.crumble.android.generated.PendingSkillUpdate
 import dev.crumble.android.generated.PutDesktopControlRequest
 import dev.crumble.android.generated.ScriptRun
@@ -34,6 +33,9 @@ import dev.crumble.android.model.MCPServer
 import dev.crumble.android.model.Memory
 import dev.crumble.android.model.ModelSummary
 import dev.crumble.android.model.OutgoingAttachment
+import dev.crumble.android.generated.OptionalField
+import dev.crumble.android.generated.PreviewReasoningRequest
+import dev.crumble.android.generated.PreviewScheduleRequest
 import dev.crumble.android.model.EventSource
 import dev.crumble.android.model.Schedule
 import dev.crumble.android.model.SharedSkill
@@ -318,6 +320,16 @@ class APIClient(
     suspend fun declineHeldAction(agentID: String, id: String, reason: String) {
         operations.declineAgentHeldAction(request(if (reason.isEmpty()) emptyMap() else strings("reason" to reason)), agentID, id)
     }
+    suspend fun previewReasoning(provider: String, model: String, thinkingLevel: String) = operations.previewReasoning(
+        PreviewReasoningRequest(provider, model, OptionalField.Present(thinkingLevel)),
+    )
+    suspend fun previewSchedule(cron: String?, runAt: String?, eventSourceID: String?, timezone: String) = operations.previewSchedule(
+        PreviewScheduleRequest(
+            OptionalField.Present(cron),
+            OptionalField.Present(runAt),
+            OptionalField.Present(eventSourceID), timezone,
+        ),
+    )
     suspend fun codingJobs(agentID: String) = operations.listCodingJobs(agentID).jobs
     suspend fun answerCodingJob(agentID: String, job: String, questionID: String, text: String) {
         operations.answerCodingJob(request(strings("questionId" to questionID, "text" to text)), agentID, job)

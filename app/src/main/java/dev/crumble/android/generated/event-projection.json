@@ -6,6 +6,43 @@
   },
   "components": {
     "schemas": {
+      "Citation": {
+        "type": "object",
+        "properties": {
+          "href": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "site": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "href",
+          "title",
+          "site"
+        ]
+      },
+      "MessagePresentation": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "citations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            }
+          }
+        },
+        "required": [
+          "text",
+          "citations"
+        ]
+      },
       "TranscriptBlock": {
         "oneOf": [
           {
@@ -331,6 +368,9 @@
                   "type": "boolean"
                 },
                 "toolDetails": {},
+                "presentation": {
+                  "$ref": "#/components/schemas/MessagePresentation"
+                },
                 "sources": {
                   "type": "array",
                   "items": {

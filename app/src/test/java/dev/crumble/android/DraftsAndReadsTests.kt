@@ -80,7 +80,7 @@ private class Scripted : HttpTransport {
 }
 
 private fun scheduleJson(id: String, name: String) =
-    """{"id":"$id","agentId":"a1","name":"$name","kind":"prompt","prompt":"Hi","command":null,"timeoutSeconds":600,"notify":false,"eventSourceId":null,"enabled":true,"timezone":"UTC","runAt":null,"cron":"0 9 * * *","nextRunAt":null,"description":"Once","timing":"Once","createdAt":"2026-11-05T10:00:00Z","createdByAgentId":null}"""
+    """{"id":"$id","agentId":"a1","name":"$name","kind":"prompt","prompt":"Hi","command":null,"timeoutSeconds":600,"notify":false,"eventSourceId":null,"enabled":true,"timezone":"UTC","runAt":null,"cron":"0 9 * * *","nextRunAt":null,"nextRunLabel":"Soon","description":"Once","timing":"Once","createdAt":"2026-11-05T10:00:00Z","createdByAgentId":null}"""
 
 private fun scheduleOf(id: String, name: String = "Task") = CrumbleJson.decodeFromString(Schedule.serializer(), scheduleJson(id, name))
 
@@ -412,6 +412,7 @@ class DraftsAndReadsTests {
         model.schedules = listOf(scheduleOf("s1", "Before"))
         model.openTaskForm("s1")
         model.taskDraft = model.taskDraft!!.copy(name = "Mine")
+        model.allowTaskSave()
         model.saveTask()
         runCurrent()
 
@@ -509,6 +510,7 @@ class DraftsAndReadsTests {
         model.schedules = listOf(scheduleOf("s1"), scheduleOf("s2"))
         model.openTaskForm("s1")
         model.taskDraft = model.taskDraft!!.copy(name = "Renamed")
+        model.allowTaskSave()
         model.saveTask()
         runCurrent()
 

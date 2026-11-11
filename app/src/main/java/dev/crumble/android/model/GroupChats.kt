@@ -130,11 +130,7 @@ fun groupReactions(messages: List<Message>) = reactionsOf(messages) { message, _
 /** A bot reacts to the owner's last message. */
 fun botReactions(messages: List<Message>) = reactionsOf(messages) { _, lastOwner -> lastOwner }
 
-/** A group message's sources, which the server stores with the message. */
-fun groupSourcesOf(message: Message): Sources? {
-    val sources = message.sources.orEmpty().mapNotNull { source -> sourceKey(source.url)?.let { it to source.title } }
-    return sources.toMap().takeIf { it.isNotEmpty() }
-}
+
 
 fun groupReplyLabel(message: Message): String =
     if (message.role == "user") "You" else message.origin?.name ?: "a bot"

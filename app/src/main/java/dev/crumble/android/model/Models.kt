@@ -8,6 +8,7 @@ import java.time.temporal.ChronoUnit
 import java.util.Locale
 import java.util.UUID
 import dev.crumble.android.generated.TranscriptBlock
+import dev.crumble.android.generated.MessagePresentation
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
@@ -124,10 +125,6 @@ data class BotRequestRef(val id: String = "", val name: String = "")
 @Serializable
 data class CallRequestRef(val id: String = "", val callee: String = "")
 
-/** A page a group message's bot searched or read, stored with the message. */
-@Serializable
-data class MessageSource(val url: String = "", val title: String = "")
-
 /** Client-side delivery state for an optimistic owner message. */
 @Serializable
 enum class MessageDeliveryState {
@@ -165,7 +162,7 @@ data class Message(
     val toolCallId: String? = null,
     val isError: Boolean? = null,
     val toolDetails: JsonElement? = null,
-    val sources: List<MessageSource>? = null,
+    val presentation: MessagePresentation? = null,
 ) {
     val text: String
         get() = contentText(content)
@@ -251,6 +248,7 @@ data class Schedule(
     val notify: Boolean = true,
     val eventSourceId: String? = null,
     val nextRunAt: String? = null,
+    val nextRunLabel: String = "",
     val description: String = "",
     val timing: String = "",
 )
@@ -488,14 +486,9 @@ fun taskRunDate(value: String): Instant? {
 fun validateTask(
     name: String,
     prompt: String,
-    cron: String,
-    runAt: String,
-    timezone: String = ZoneId.systemDefault().id,
     kind: String = "prompt",
     command: String = "",
     timeoutSeconds: String = "600",
-    onEvent: Boolean = false,
-    eventSourceID: String = "",
 ): String? {
     if (kind == "script") {
         if (name.trim().isEmpty() || command.isBlank()) {
@@ -506,24 +499,6 @@ fun validateTask(
         }
     } else if (name.trim().isEmpty() || prompt.trim().isEmpty()) {
         return "Task name and prompt are required."
-    }
-    if (onEvent) {
-        return if (eventSourceID.isEmpty()) "Choose an event source." else null
-    }
-    if (cron.isEmpty() == runAt.isEmpty()) {
-        return "Choose either a recurring cron or a one-time run time."
-    }
-    val validZone = try {
-        ZoneId.of(timezone)
-        true
-    } catch (_: Exception) {
-        false
-    }
-    if (!validZone) {
-        return "Choose a valid time zone."
-    }
-    if (runAt.isNotEmpty() && taskRunDate(runAt) == null) {
-        return "Choose a valid date and time."
     }
     return null
 }

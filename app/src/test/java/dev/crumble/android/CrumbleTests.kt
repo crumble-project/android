@@ -367,7 +367,7 @@ class CrumbleTests {
     @Test
     fun taskPickersPreserveTheInstantAndSubmitOnlyTheSelectedMode() = runTest {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
-        val response = """{"id":"s1","agentId":"a1","name":"Greeting","kind":"prompt","prompt":"Say hi","command":null,"timeoutSeconds":600,"notify":true,"eventSourceId":null,"enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z","cron":null,"nextRunAt":null,"description":"Once","timing":"Once","createdAt":"2026-10-18T10:00:00Z","createdByAgentId":null}"""
+        val response = """{"id":"s1","agentId":"a1","name":"Greeting","kind":"prompt","prompt":"Say hi","command":null,"timeoutSeconds":600,"notify":true,"eventSourceId":null,"enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z","cron":null,"nextRunAt":null,"nextRunLabel":"Soon","description":"Once","timing":"Once","createdAt":"2026-10-18T10:00:00Z","createdByAgentId":null}"""
         val (client, stub) = StubTransport.client { req ->
             200 to if (req.method == "PATCH") response else "[]"
         }
@@ -384,6 +384,7 @@ class CrumbleTests {
             assertEquals(12, zdt.hour)
             assertEquals(10, zdt.minute)
             model.taskDraft = draft.copy(repeats = repeats)
+            model.allowTaskSave()
             model.saveTask()
             advanceUntilIdle()
             assertFalse(model.loading)
@@ -870,12 +871,9 @@ class CrumbleTests {
     }
 
     @Test
-    fun tasksNeedExactlyOneScheduleMode() {
-        assertNotNull(validateTask(name = "", prompt = "", cron = "", runAt = ""))
-        assertNotNull(validateTask(name = "Daily", prompt = "Check inbox", cron = "0 9 * * *", runAt = "2026-10-18T09:00:00Z"))
-        assertNull(validateTask(name = "Daily", prompt = "Check inbox", cron = "0 9 * * *", runAt = ""))
-        assertNull(validateTask(name = "Once", prompt = "Check inbox", cron = "", runAt = "2026-10-18T09:00:00Z"))
-        assertNotNull(validateTask(name = "Once", prompt = "Check inbox", cron = "", runAt = "tomorrow"))
+    fun tasksNeedNameAndPrompt() {
+        assertNotNull(validateTask(name = "", prompt = ""))
+        assertNull(validateTask(name = "Daily", prompt = "Check inbox"))
     }
 
     @Test
@@ -884,7 +882,6 @@ class CrumbleTests {
         val fractional = taskRunDate("2026-10-18T12:10:00.123Z")!!
         val whole = taskRunDate("2026-10-18T12:10:00Z")!!
         assertTrue(abs((fractional.toEpochMilli() - whole.toEpochMilli()) - 123L) <= 1L)
-        assertNotNull(validateTask(name = "Task", prompt = "Hi", cron = "0 9 * * *", runAt = "", timezone = "Not/AZone"))
     }
 
     @Test

@@ -45,7 +45,13 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import kotlinx.coroutines.ensureActive
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -104,6 +110,8 @@ internal fun TasksPanel(model: AppModel) {
 
 @Composable
 private fun TaskList(model: AppModel) {
+    val client = model.client
+    LaunchedEffect(model, client) { if (client != null) model.followTaskSchedules(client) }
     if (model.agents.isEmpty()) {
         EmptyWorkspacePlaceholder(
             icon = Icons.Default.Schedule,
@@ -185,7 +193,7 @@ private fun TaskRow(model: AppModel, schedule: Schedule, agent: Agent, shape: Sh
         RowSubtitle("${schedule.status.label} · ${schedule.description}")
         val nextRun = schedule.nextRunAt
         if (schedule.status == ScheduleStatus.Active && nextRun != null) {
-            RowSubtitle("Next run ${activityTime(nextRun)}")
+            RowSubtitle("Next run ${schedule.nextRunLabel}")
         }
         val creator = schedule.createdByAgentId
         if (creator != null && creator != agent.id) {
@@ -445,6 +453,25 @@ fun TaskFormDialog(
     val canScript = canRunScripts(model.capabilities, model.agents.firstOrNull { it.id == draft.agentID })
     val editingScript = model.schedules.firstOrNull { it.id == draft.scheduleID }?.kind == "script"
 
+    val client = model.client
+    var previewRetry by remember(draft.id) { mutableIntStateOf(0) }
+    val previewKey = listOf(client, draft.id, previewRetry, draft.agentID, draft.onEvent, draft.eventSourceID,
+        draft.repeats, draft.cron, draft.runDate, draft.timezone)
+    var previewFailed by remember(previewKey) { mutableStateOf(false) }
+    LaunchedEffect(previewKey) {
+        if (client != null) {
+            delay(250)
+            try {
+                model.refreshTaskPreview(client, draft)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                currentCoroutineContext().ensureActive()
+                previewFailed = true
+            }
+        }
+    }
+
     AlertDialog(
         onDismissRequest = {
             model.errorText = ""
@@ -547,12 +574,18 @@ fun TaskFormDialog(
                 } else {
                     TaskTimeFields(draft) { model.taskDraft = it }
                 }
+                val preview = model.taskPreview
+                when {
+                    preview != null -> Text(preview.text, style = MaterialTheme.typography.bodySmall, color = if (preview.isProblem) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                    previewFailed -> TextButton(onClick = { previewRetry++ }) { Text("Couldn't load schedule preview. Retry") }
+                    else -> Text("Checking schedule…", style = MaterialTheme.typography.bodySmall)
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = { model.saveTask() },
-                enabled = !model.loading,
+                enabled = !model.loading && model.taskPreview?.isProblem == false,
             ) {
                 Text("Save")
             }

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Refresh task run labels while the task list is open.
+
+- Use server previews for task timing and reasoning, and server-provided reply citations.
+
 - Share generated transcript blocks and job activity types across HTTP and event streams.
 
 - Use server projections for job activity, chat work state, and task timing.

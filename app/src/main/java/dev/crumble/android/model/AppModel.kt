@@ -40,6 +40,10 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import dev.crumble.android.generated.ReasoningPreview
+import dev.crumble.android.generated.SchedulePreview
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -516,7 +520,13 @@ class AppModel(
 
     var agentDraft by mutableStateOf<AgentDraft?>(null)
     var memoryDraft by mutableStateOf<MemoryDraft?>(null)
-    var taskDraft by mutableStateOf<TaskDraft?>(null)
+    private var taskDraftState by mutableStateOf<TaskDraft?>(null)
+    var taskDraft: TaskDraft?
+        get() = taskDraftState
+        set(value) {
+            if (taskDraftState?.let(::scheduleKey) != value?.let(::scheduleKey)) schedulePreviewState = null
+            taskDraftState = value
+        }
     var eventSourceDraft by mutableStateOf<EventSourceDraft?>(null)
     var skillDraft by mutableStateOf<SkillDraft?>(null)
     var showingPalette by mutableStateOf(false)
@@ -2265,12 +2275,22 @@ class AppModel(
         if (provider.isNotEmpty()) loadDesktopModels(provider)
     }
 
-    /** The levels the editor's model takes. The picked level stays in the draft, so changing back restores it. */
-    val editorLevels: List<String>
-        get() = levelsOf(models.firstOrNull { it.id == agentDraft?.model?.trim() })
+    private var reasoningPreviewState by mutableStateOf<Pair<APIClient, Pair<List<String>, ReasoningPreview>>?>(null)
+
+    private fun reasoningKey(draft: AgentDraft) = listOf(draft.id.toString(), draft.botRequestID.orEmpty(), draft.provider, draft.model.trim(), draft.thinking)
+
+    val editorReasoning: ReasoningPreview?
+        get() = agentDraft?.let { draft -> reasoningPreviewState?.takeIf { it.first === client && it.second.first == reasoningKey(draft) }?.second?.second }
 
     val editorLevel: String
-        get() = clampLevel(agentDraft?.thinking?.ifEmpty { "off" } ?: "off", editorLevels)
+        get() = editorReasoning?.effectiveLevel ?: agentDraft?.thinking.orEmpty()
+
+    suspend fun refreshEditorReasoning(api: APIClient, draft: AgentDraft) {
+        val key = reasoningKey(draft)
+        val result = api.previewReasoning(draft.provider, draft.model.trim(), draft.thinking)
+        currentCoroutineContext().ensureActive()
+        if (client === api && agentDraft?.let(::reasoningKey) == key) reasoningPreviewState = api to (key to result)
+    }
 
     val modelHint: String
         get() {
@@ -2573,11 +2593,37 @@ class AppModel(
                 if (settledSince(revision, SCHEDULE_RECORD)) {
                     loadSchedules()
                 } else {
-                    schedules = withLocalChanges(items, schedules, SCHEDULE_RECORD, Schedule::id)
-                    schedulesLoaded = true
-                    schedulesError = ""
-                    if (taskTab == TaskTab.Runs) loadTaskRuns()
+                    applySchedules(items)
                 }
+            }
+        }
+    }
+
+    private fun applySchedules(items: List<Schedule>) {
+        schedules = withLocalChanges(items, schedules, SCHEDULE_RECORD, Schedule::id)
+        schedulesLoaded = true
+        schedulesError = ""
+        if (taskTab == TaskTab.Runs) loadTaskRuns()
+    }
+
+    suspend fun followTaskSchedules(api: APIClient) {
+        val gen = generation
+        while (currentCoroutineContext().isActive) {
+            delay(60_000)
+            if (!appActive) continue
+            if (client !== api || generation != gen || route != Route.Tasks || taskTab != TaskTab.Tasks) return
+            val revision = mutationRevision
+            try {
+                val items = api.schedules()
+                currentCoroutineContext().ensureActive()
+                if (client !== api || generation != gen || route != Route.Tasks || taskTab != TaskTab.Tasks) return
+                if (!settledSince(revision, SCHEDULE_RECORD)) applySchedules(items)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                currentCoroutineContext().ensureActive()
+                if (client !== api || generation != gen || route != Route.Tasks || taskTab != TaskTab.Tasks) return
+                schedulesError = friendlyError(e)
             }
         }
     }
@@ -2862,6 +2908,32 @@ class AppModel(
         taskDraft = form
     }
 
+    private var schedulePreviewState by mutableStateOf<Pair<APIClient, Pair<List<String>, SchedulePreview>>?>(null)
+
+    private fun scheduleKey(draft: TaskDraft) = listOf(
+        draft.id.toString(), draft.agentID, draft.onEvent.toString(), draft.eventSourceID,
+        draft.repeats.toString(), draft.cron.trim(), draft.runDate.toString(), draft.timezone.trim(),
+    )
+
+    val taskPreview: SchedulePreview?
+        get() = taskDraft?.let { draft -> schedulePreviewState?.takeIf { it.first === client && it.second.first == scheduleKey(draft) }?.second?.second }
+
+    internal fun acceptSchedulePreview(api: APIClient, draft: TaskDraft, preview: SchedulePreview) {
+        val key = scheduleKey(draft)
+        if (client === api && taskDraft?.let(::scheduleKey) == key) schedulePreviewState = api to (key to preview)
+    }
+
+    suspend fun refreshTaskPreview(api: APIClient, draft: TaskDraft) {
+        val preview = api.previewSchedule(
+            cron = draft.cron.trim().takeIf { !draft.onEvent && draft.repeats },
+            runAt = draft.runDate.toIso8601SecondString().takeIf { !draft.onEvent && !draft.repeats },
+            eventSourceID = draft.eventSourceID.takeIf { draft.onEvent },
+            timezone = draft.timezone.trim(),
+        )
+        currentCoroutineContext().ensureActive()
+        acceptSchedulePreview(api, draft, preview)
+    }
+
     fun saveTask() {
         val form = taskDraft ?: return
         val name = form.name.trim()
@@ -2878,17 +2950,17 @@ class AppModel(
         val validationError = validateTask(
             name = name,
             prompt = prompt,
-            cron = cron,
-            runAt = runAt,
-            timezone = timezone,
             kind = form.kind,
             command = form.command,
             timeoutSeconds = form.timeoutSeconds,
-            onEvent = form.onEvent,
-            eventSourceID = sourceID,
         )
         if (validationError != null) {
             errorText = validationError
+            return
+        }
+        val preview = taskPreview ?: return
+        if (preview.isProblem) {
+            errorText = preview.text
             return
         }
         val timeoutSeconds = if (isScript) form.timeoutSeconds.trim().toLong() else 600L
@@ -2921,6 +2993,7 @@ class AppModel(
             timeoutSeconds = timeoutSeconds,
             notify = form.notify,
             eventSourceId = sourceID.ifEmpty { null },
+            nextRunLabel = "Saving…",
             description = "Saving…",
             timing = "Saving…",
             // Without a next run a one-off reads as finished and leaves the list before it is saved.
@@ -2978,7 +3051,7 @@ class AppModel(
         val enabled = !old.enabled
         optimisticMutation(
             key = "schedule:$id",
-            update = { replace(old.copy(enabled = enabled, timing = if (enabled) old.description else "Paused · ${old.description}")) },
+            update = { replace(old.copy(enabled = enabled, timing = if (enabled) old.description else "Paused · ${old.description}", nextRunLabel = if (enabled) "Saving…" else "—")) },
             rollback = { replace(old) },
             work = { api ->
                 val saved = api.updateSchedule(id, patch = mapOf("enabled" to JsonPrimitive(enabled)))

@@ -13,18 +13,11 @@ import dev.crumble.android.model.JobKind
 import dev.crumble.android.model.JobRef
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.ModelSummary
-import dev.crumble.android.model.SourceChip
-import dev.crumble.android.model.clampLevel
 import dev.crumble.android.model.costLine
 import dev.crumble.android.model.headline
 import dev.crumble.android.model.jobMarkdown
 import dev.crumble.android.model.jobOf
-import dev.crumble.android.model.levelsOf
 import dev.crumble.android.model.mergeJobPages
-import dev.crumble.android.model.siteOf
-import dev.crumble.android.model.sourceKey
-import dev.crumble.android.model.sourcesOf
-import dev.crumble.android.model.splitSources
 import dev.crumble.android.network.APIClient
 import dev.crumble.android.network.HttpRequestData
 import dev.crumble.android.network.HttpResponseData
@@ -97,70 +90,6 @@ private fun history(ids: List<String>, hasMore: Boolean = false, oldest: String?
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatParityTests {
-    private fun web(tool: String, vararg pages: String) = Message(
-        id = "tool", role = "toolResult", toolName = tool,
-        toolDetails = JsonArray(pages.map { json(it) }),
-    )
-
-    @Test
-    fun sourceKeyIgnoresFragmentTrailingSlashAndHostCase() {
-        assertEquals("example.com/a?b=1", sourceKey("https://EXAMPLE.com/a/?b=1#top"))
-        assertEquals("example.com", sourceKey("http://example.com/"))
-        assertEquals("example.com", sourceKey("https://example.com:443"))
-        assertEquals("example.com:8443/a", sourceKey("https://example.com:8443/a"))
-        assertEquals("example.com/a?q=x|y", sourceKey("https://example.com/a?q=x|y"))
-        assertNull(sourceKey("ftp://example.com/a"))
-        assertNull(sourceKey("not a url"))
-    }
-
-    @Test
-    fun sourcesBelongToTheTurnThatReadThem() {
-        val first = Message(id = "r1", role = "assistant")
-        val second = Message(id = "r2", role = "assistant")
-        val page = """{"url":"https://a.com/x","title":"A"}"""
-        val failed = web("web_extract", """{"url":"https://c.com","title":"C"}""").copy(isError = true)
-        val messages = listOf(
-            web("web_search", page, """{"url":"https://b.com","title":"B","error":"blocked"}"""),
-            failed,
-            first,
-            Message(id = "u", role = "user"),
-            second,
-        )
-        val sources = sourcesOf(messages)
-        assertEquals(mapOf("r1" to mapOf("a.com/x" to "A")), sources)
-    }
-
-    @Test
-    fun splitSourcesMovesCitationsToChipsAndLeavesCodeAlone() {
-        val sources = mapOf("a.com/x" to "A", "b.com" to "B")
-        val reply = splitSources(
-            """
-            Fact one ([source](https://a.com/x/), [source](https://b.com)). Again [source](https://a.com/x).
-            Unread [source](https://z.com) stays, `[source](https://a.com/x)` too.
-            ```
-            [source](https://a.com/x)
-            ```
-            """.trimIndent(),
-            sources,
-        )
-        assertEquals(listOf(SourceChip("https://a.com/x/", "A"), SourceChip("https://b.com", "B")), reply.chips)
-        assertEquals(
-            """
-            Fact one. Again.
-            Unread [source](https://z.com) stays, `[source](https://a.com/x)` too.
-            ```
-            [source](https://a.com/x)
-            ```
-            """.trimIndent(),
-            reply.text,
-        )
-    }
-
-    @Test
-    fun siteOfDropsWwwAndPort() {
-        assertEquals("example.com", siteOf("https://www.Example.com:8443/a"))
-    }
-
     @Test
     fun costLineSumsModelsAndHidesZero() {
         assertEquals("$3.0000", costLine(json("""{"models":{"a/one":{"cost":{"total":1.5}},"b/two":{"cost":{"total":1.5}}}}""")))
@@ -194,15 +123,6 @@ class ChatParityTests {
         fun rows(vararg ids: String) = ids.map { Message(id = it) }
         assertEquals(rows("1", "2", "3", "4"), mergeJobPages(rows("1", "2", "3"), rows("2", "3", "4")))
         assertEquals(rows("1"), mergeJobPages(rows("1"), emptyList()))
-    }
-
-    @Test
-    fun clampLevelPrefersTheNearestHigherLevel() {
-        assertEquals("high", clampLevel("medium", listOf("off", "high")))
-        assertEquals("low", clampLevel("max", listOf("off", "low")))
-        assertEquals("off", clampLevel("high", emptyList()))
-        assertEquals(7, levelsOf(null).size)
-        assertEquals(listOf("off"), levelsOf(ModelSummary(thinkingLevels = listOf("off"))))
     }
 
     @Test

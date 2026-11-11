@@ -973,6 +973,13 @@ class ContractOperations(private val boundary: ContractBoundary) {
         return boundary.json.decodeFromString<Schedule>(bytes.toString(Charsets.UTF_8))
     }
 
+    suspend fun previewSchedule(body: PreviewScheduleRequest, timeoutMs: Int = 20_000): SchedulePreview {
+        val query = mutableListOf<String>()
+        val path = "/v1/schedules/preview" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
+        val bytes = boundary.send("POST", path, boundary.json.encodeToString(body).toByteArray(Charsets.UTF_8), timeoutMs)
+        return boundary.json.decodeFromString<SchedulePreview>(bytes.toString(Charsets.UTF_8))
+    }
+
     suspend fun updateSchedule(body: UpdateScheduleRequest, `id`: String, timeoutMs: Int = 20_000): Schedule? {
         val query = mutableListOf<String>()
         val path = "/v1/schedules/${boundary.escape(`id`)}" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
@@ -1026,6 +1033,13 @@ class ContractOperations(private val boundary: ContractBoundary) {
         val path = "/v1/providers" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
         val bytes = boundary.send("GET", path, null, timeoutMs)
         return boundary.json.decodeFromString<List<Provider>>(bytes.toString(Charsets.UTF_8))
+    }
+
+    suspend fun previewReasoning(body: PreviewReasoningRequest, timeoutMs: Int = 20_000): ReasoningPreview {
+        val query = mutableListOf<String>()
+        val path = "/v1/reasoning/preview" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
+        val bytes = boundary.send("POST", path, boundary.json.encodeToString(body).toByteArray(Charsets.UTF_8), timeoutMs)
+        return boundary.json.decodeFromString<ReasoningPreview>(bytes.toString(Charsets.UTF_8))
     }
 
     suspend fun listModels(`provider`: String? = null, timeoutMs: Int = 20_000): List<Model> {

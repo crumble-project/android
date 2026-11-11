@@ -69,7 +69,6 @@ import dev.crumble.android.model.MAX_GROUP_MEMBERS
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.groupReactions
 import dev.crumble.android.model.groupReplyLabel
-import dev.crumble.android.model.groupSourcesOf
 import dev.crumble.android.model.groupStatusLine
 import dev.crumble.android.model.isGroupRunning
 import dev.crumble.android.model.isNotice
@@ -371,7 +370,7 @@ private fun GroupMessageView(
                         color = LocalContentColor.current,
                     )
                 } else {
-                    ReplyContent(message.text, groupSourcesOf(message))
+                    ReplyContent(message.text, message.presentation)
                 }
             }
             MessageContextMenu(

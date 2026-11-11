@@ -15,13 +15,11 @@ import dev.crumble.android.model.GroupSnapshot
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.MessageDeliveryState
 import dev.crumble.android.model.MessageOrigin
-import dev.crumble.android.model.MessageSource
 import dev.crumble.android.model.NotificationContext
 import dev.crumble.android.model.PendingAttachment
 import dev.crumble.android.model.Route
 import dev.crumble.android.model.groupReactions
 import dev.crumble.android.model.groupReplyLabel
-import dev.crumble.android.model.groupSourcesOf
 import dev.crumble.android.model.groupStatusLine
 import dev.crumble.android.model.isGroupRunning
 import dev.crumble.android.model.isValidGroup
@@ -743,10 +741,6 @@ class GroupChatTests {
             ),
         )
         assertEquals(mapOf("e1" to listOf("Ada 👍", "👍")), reactions)
-
-        val sources = groupSourcesOf(Message(sources = listOf(MessageSource("https://example.com/a/", "A"), MessageSource("ftp://x", "X"))))
-        assertEquals(mapOf("example.com/a" to "A"), sources)
-        assertNull(groupSourcesOf(Message()))
 
         assertEquals("You", groupReplyLabel(Message(role = "user")))
         assertEquals("Ada", groupReplyLabel(Message(role = "assistant", origin = MessageOrigin("bot", "Ada"))))

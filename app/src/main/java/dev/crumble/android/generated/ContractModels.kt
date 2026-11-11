@@ -679,6 +679,13 @@ data class ChatSnapshot(
 )
 
 @Serializable
+data class Citation(
+    val `href`: String,
+    val `title`: String,
+    val `site`: String,
+)
+
+@Serializable
 data class CodingJob(
     val `name`: String,
     val `conversationId`: String,
@@ -1851,6 +1858,12 @@ data class MessageOrigin(
 )
 
 @Serializable
+data class MessagePresentation(
+    val `text`: String,
+    val `citations`: List<Citation>,
+)
+
+@Serializable
 data class Model(
     val `provider`: String,
     val `id`: String,
@@ -1914,6 +1927,25 @@ data class PluginSettingsPluginsItem(
     val `id`: String,
     val `contributes`: List<String>,
     val `settings`: List<PluginSetting>,
+)
+
+@Serializable
+data class PreviewReasoningRequest(
+    val `provider`: String,
+    val `model`: String,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val `thinkingLevel`: OptionalField<String> = OptionalField.Absent,
+)
+
+@Serializable
+data class PreviewScheduleRequest(
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val `cron`: OptionalField<String?> = OptionalField.Absent,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val `runAt`: OptionalField<String?> = OptionalField.Absent,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val `eventSourceId`: OptionalField<String?> = OptionalField.Absent,
+    val `timezone`: String,
 )
 
 @Serializable
@@ -2108,6 +2140,18 @@ data class PutPushPresenceRequest(
 )
 
 @Serializable
+data class ReasoningOption(
+    val `value`: String,
+    val `label`: String,
+)
+
+@Serializable
+data class ReasoningPreview(
+    val `options`: List<ReasoningOption>,
+    val `effectiveLevel`: String,
+)
+
+@Serializable
 data class ReplyEvent(
     val `type`: String,
     val `eventId`: String,
@@ -2293,10 +2337,19 @@ data class Schedule(
     val `eventSourceId`: String?,
     val `enabled`: Boolean,
     val `nextRunAt`: String?,
+    val `nextRunLabel`: String,
     val `description`: String,
     val `timing`: String,
     val `createdAt`: String,
     val `createdByAgentId`: String?,
+)
+
+@Serializable
+data class SchedulePreview(
+    val `description`: String,
+    val `text`: String,
+    val `isProblem`: Boolean,
+    val `nextRunAt`: String?,
 )
 
 @Serializable
@@ -2691,6 +2744,7 @@ data class SnapshotEventPayloadMessagesItem(
     val `toolName`: String? = null,
     val `isError`: Boolean? = null,
     val `toolDetails`: JsonElement? = null,
+    val `presentation`: MessagePresentation? = null,
     val `sources`: List<SnapshotEventPayloadMessagesItemSourcesItem>? = null,
     val additionalProperties: Map<String, JsonElement> = emptyMap(),
 )
@@ -2717,21 +2771,22 @@ private data class SnapshotEventPayloadMessagesItemFields(
     val `toolName`: String? = null,
     val `isError`: Boolean? = null,
     val `toolDetails`: JsonElement? = null,
+    val `presentation`: MessagePresentation? = null,
     val `sources`: List<SnapshotEventPayloadMessagesItemSourcesItem>? = null,
 )
 object SnapshotEventPayloadMessagesItemCodec : KSerializer<SnapshotEventPayloadMessagesItem> {
-    private val declared = setOf("id", "entryId", "requestId", "role", "content", "blocks", "stopReason", "timestamp", "kind", "replyTo", "replyPreview", "origin", "communication", "jobQuestion", "heldAction", "call", "attachments", "toolCallId", "toolName", "isError", "toolDetails", "sources")
+    private val declared = setOf("id", "entryId", "requestId", "role", "content", "blocks", "stopReason", "timestamp", "kind", "replyTo", "replyPreview", "origin", "communication", "jobQuestion", "heldAction", "call", "attachments", "toolCallId", "toolName", "isError", "toolDetails", "presentation", "sources")
     override val descriptor: SerialDescriptor = buildClassSerialDescriptor("SnapshotEventPayloadMessagesItem")
     override fun deserialize(decoder: Decoder): SnapshotEventPayloadMessagesItem {
         val input = decoder as JsonDecoder
         val element = input.decodeJsonElement().jsonObject
         val fields = input.json.decodeFromJsonElement<SnapshotEventPayloadMessagesItemFields>(JsonObject(element.filterKeys { it in declared }))
         val additional = element.filterKeys { it !in declared }.mapValues { input.json.decodeFromJsonElement<JsonElement>(it.value) }
-        return SnapshotEventPayloadMessagesItem(fields.`id`, fields.`entryId`, fields.`requestId`, fields.`role`, fields.`content`, fields.`blocks`, fields.`stopReason`, fields.`timestamp`, fields.`kind`, fields.`replyTo`, fields.`replyPreview`, fields.`origin`, fields.`communication`, fields.`jobQuestion`, fields.`heldAction`, fields.`call`, fields.`attachments`, fields.`toolCallId`, fields.`toolName`, fields.`isError`, fields.`toolDetails`, fields.`sources`, additional)
+        return SnapshotEventPayloadMessagesItem(fields.`id`, fields.`entryId`, fields.`requestId`, fields.`role`, fields.`content`, fields.`blocks`, fields.`stopReason`, fields.`timestamp`, fields.`kind`, fields.`replyTo`, fields.`replyPreview`, fields.`origin`, fields.`communication`, fields.`jobQuestion`, fields.`heldAction`, fields.`call`, fields.`attachments`, fields.`toolCallId`, fields.`toolName`, fields.`isError`, fields.`toolDetails`, fields.`presentation`, fields.`sources`, additional)
     }
     override fun serialize(encoder: Encoder, value: SnapshotEventPayloadMessagesItem) {
         val output = encoder as JsonEncoder
-        val fields = output.json.encodeToJsonElement(SnapshotEventPayloadMessagesItemFields(value.`id`, value.`entryId`, value.`requestId`, value.`role`, value.`content`, value.`blocks`, value.`stopReason`, value.`timestamp`, value.`kind`, value.`replyTo`, value.`replyPreview`, value.`origin`, value.`communication`, value.`jobQuestion`, value.`heldAction`, value.`call`, value.`attachments`, value.`toolCallId`, value.`toolName`, value.`isError`, value.`toolDetails`, value.`sources`)).jsonObject
+        val fields = output.json.encodeToJsonElement(SnapshotEventPayloadMessagesItemFields(value.`id`, value.`entryId`, value.`requestId`, value.`role`, value.`content`, value.`blocks`, value.`stopReason`, value.`timestamp`, value.`kind`, value.`replyTo`, value.`replyPreview`, value.`origin`, value.`communication`, value.`jobQuestion`, value.`heldAction`, value.`call`, value.`attachments`, value.`toolCallId`, value.`toolName`, value.`isError`, value.`toolDetails`, value.`presentation`, value.`sources`)).jsonObject
         val additional = value.additionalProperties.mapValues { output.json.encodeToJsonElement<JsonElement>(it.value) }
         output.encodeJsonElement(JsonObject(additional + fields))
     }
@@ -3048,6 +3103,7 @@ data class TranscriptMessage(
     val `toolName`: String? = null,
     val `isError`: Boolean? = null,
     val `toolDetails`: JsonElement? = null,
+    val `presentation`: MessagePresentation? = null,
     val `sources`: List<TranscriptMessageSourcesItem>? = null,
 )
 

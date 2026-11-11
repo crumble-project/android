@@ -1,5 +1,7 @@
 package dev.crumble.android
 
+import dev.crumble.android.generated.SchedulePreview
+import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
 import kotlinx.serialization.json.*
@@ -49,3 +51,7 @@ internal fun snapshotFixture(snapshot: ChatSnapshot): String =
     }.toString()
 
 internal const val executionFixture = """{"id":"e1","agentId":"a1","conversationId":"chat","scheduleId":null,"submissionId":null,"requestId":"req","status":"pending","prompt":"","error":null,"createdAt":"2026-10-18T10:00:00Z","updatedAt":"2026-10-18T10:00:00Z"}"""
+
+internal fun AppModel.allowTaskSave() {
+    acceptSchedulePreview(client!!, taskDraft!!, SchedulePreview("", "Ready", false, null))
+}

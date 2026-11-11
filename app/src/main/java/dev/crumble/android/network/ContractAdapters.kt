@@ -110,7 +110,7 @@ internal fun TranscriptMessage.domain() = Message(
     credentialRequest = secretRequestRef("request_credential", toolName, isError, toolDetails),
     loginRequest = secretRequestRef("request_login", toolName, isError, toolDetails),
     toolName = toolName, toolCallId = toolCallId, isError = isError, toolDetails = toolDetails,
-    sources = sources?.map { MessageSource(it.url, it.title) },
+    presentation = presentation,
 )
 
 internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
@@ -128,7 +128,7 @@ internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
     credentialRequest = secretRequestRef("request_credential", toolName, isError, toolDetails),
     loginRequest = secretRequestRef("request_login", toolName, isError, toolDetails),
     toolName = toolName, toolCallId = toolCallId, isError = isError, toolDetails = toolDetails,
-    sources = sources?.map { MessageSource(it.url, it.title) },
+    presentation = presentation,
 )
 
 internal fun dev.crumble.android.generated.ChatSnapshot.domain() = dev.crumble.android.model.ChatSnapshot(
@@ -155,7 +155,7 @@ internal fun ListedSkill.domain(): SharedSkill = when (this) {
 }
 internal fun dev.crumble.android.generated.Schedule.domain() = dev.crumble.android.model.Schedule(
     id, agentId, name, cron, prompt, timezone, runAt, enabled, createdByAgentId,
-    kind, command, timeoutSeconds, notify, eventSourceId, nextRunAt, description, timing,
+    kind, command, timeoutSeconds, notify, eventSourceId, nextRunAt, nextRunLabel, description, timing,
 )
 internal fun dev.crumble.android.generated.Execution.domain() = dev.crumble.android.model.Execution(
     id, agentId, conversationId, status, prompt, error, createdAt, updatedAt, scheduleId,
