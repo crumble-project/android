@@ -58,7 +58,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.crumble.android.model.AppModel
-import dev.crumble.android.model.JobItem
+import dev.crumble.android.generated.JobHistoryItem
+import dev.crumble.android.generated.JobStepItem
+import dev.crumble.android.model.id
 import dev.crumble.android.model.JobKind
 import dev.crumble.android.model.JobPanel
 import dev.crumble.android.model.JobRef
@@ -227,7 +229,7 @@ private fun JobDownloadButton(model: AppModel, panel: JobPanel) {
 }
 
 @Composable
-private fun JobStep(step: JobItem.Step, shape: Shape) {
+private fun JobStep(step: JobStepItem, shape: Shape) {
     var open by remember(step.id) { mutableStateOf(false) }
     val result = step.result
     GroupedItem(
@@ -261,7 +263,7 @@ private fun JobStep(step: JobItem.Step, shape: Shape) {
                         .padding(8.dp),
                 ) {
                     Text(
-                        text = result.text.trimEnd('\n').ifEmpty { "No output." },
+                        text = result.content.trimEnd('\n').ifEmpty { "No output." },
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     )
                 }
@@ -276,14 +278,14 @@ private fun JobStep(step: JobItem.Step, shape: Shape) {
 }
 
 @Composable
-private fun JobItemView(item: JobItem, shape: Shape) {
+private fun JobItemView(item: JobHistoryItem, shape: Shape) {
     when (item) {
-        is JobItem.Task -> Column(verticalArrangement = Arrangement.spacedBy(ROW_GAP)) {
+        is JobHistoryItem.Variant1 -> Column(verticalArrangement = Arrangement.spacedBy(ROW_GAP)) {
             GroupLabel("Task")
-            GroupCard { Text(item.text, style = MaterialTheme.typography.bodyMedium) }
+            GroupCard { Text(item.value.text, style = MaterialTheme.typography.bodyMedium) }
         }
-        is JobItem.Reply -> MarkdownText(text = item.text)
-        is JobItem.Step -> JobStep(item, shape)
+        is JobHistoryItem.Variant2 -> MarkdownText(text = item.value.text)
+        is JobHistoryItem.Variant3 -> JobStep(item.value, shape)
     }
 }
 
@@ -334,8 +336,8 @@ fun JobPanelDialog(model: AppModel, panel: JobPanel) {
                 }
                 itemsIndexed(items.asReversed(), key = { _, item -> item.id }) { reversedIndex, item ->
                     val index = items.lastIndex - reversedIndex
-                    val afterStep = item is JobItem.Step && items.getOrNull(index - 1) is JobItem.Step
-                    val beforeStep = item is JobItem.Step && items.getOrNull(index + 1) is JobItem.Step
+                    val afterStep = item is JobHistoryItem.Variant3 && items.getOrNull(index - 1) is JobHistoryItem.Variant3
+                    val beforeStep = item is JobHistoryItem.Variant3 && items.getOrNull(index + 1) is JobHistoryItem.Variant3
                     val position = if (afterStep) 1 else 0
                     Box(modifier = Modifier.fillMaxWidth().padding(top = if (afterStep) 0.dp else BLOCK_GAP)) {
                         JobItemView(item, groupedShape(position, position + if (beforeStep) 2 else 1))

@@ -7,7 +7,7 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import java.util.UUID
-import kotlinx.serialization.SerialName
+import dev.crumble.android.generated.TranscriptBlock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
@@ -134,14 +134,6 @@ enum class MessageDeliveryState {
     confirmed,
     sending,
     failed,
-}
-
-@Serializable
-sealed class TranscriptBlock {
-    @Serializable @SerialName("text") data class Text(val text: String) : TranscriptBlock()
-    @Serializable @SerialName("thinking") data class Thinking(val thinking: String, val redacted: Boolean? = null) : TranscriptBlock()
-    @Serializable @SerialName("image") data class Image(val mimeType: String) : TranscriptBlock()
-    @Serializable @SerialName("toolCall") data class ToolCall(val id: String, val name: String, val arguments: Map<String, JsonElement>) : TranscriptBlock()
 }
 
 @Serializable
@@ -450,7 +442,7 @@ sealed class ChatRow {
                 "toolResult" -> message.botRequest != null || message.callRequest != null || message.credentialRequest != null || message.loginRequest != null ||
                     jobOf(message) != null || displayOf(message) != null || isDesktopScreenshot(message)
                 "assistant" -> {
-                    message.blocks.orEmpty().any { it is TranscriptBlock.Text && it.text.isNotBlank() }
+                    message.blocks.orEmpty().any { it is TranscriptBlock.Variant1 && it.value.text.isNotBlank() }
                 }
                 else -> false
             }

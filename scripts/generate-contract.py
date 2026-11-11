@@ -28,21 +28,49 @@ def quoted(value):
     return json.dumps(value, ensure_ascii=False).replace("$", "\\$")
 
 
+def comparable(value):
+    if isinstance(value, list):
+        return [comparable(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {}
+    for key, item in value.items():
+        if key == "discriminator" or (key == "additionalProperties" and item is True):
+            continue
+        if key == "const" and "enum" not in value:
+            result["enum"] = [comparable(item)]
+        else:
+            result[key] = comparable(item)
+    return result
+
+
 def project(document, events):
     document = copy.deepcopy(document)
     schemas = document["components"]["schemas"]
+    canonical = set(schemas)
     for name, event in events.items():
         event = copy.deepcopy(event)
         definitions = event.pop("$defs", {})
-        mapping = {key: name + pascal(key) for key in definitions}
+        mapping = {key: key if key in canonical else name + pascal(key) for key in definitions}
+        def reference(value):
+            pointer = value.removeprefix("#/$defs/").split("/")
+            key = pointer[0].replace("~1", "/").replace("~0", "~")
+            target = mapping[key].replace("~", "~0").replace("/", "~1")
+            return "/".join(["#/components/schemas", target, *pointer[1:]])
+
         def refs(value):
             if isinstance(value, dict):
-                return {k: ("#/components/schemas/" + mapping[v.split("/")[-1]] if k == "$ref" and v.startswith("#/$defs/") else refs(v)) for k, v in value.items()}
+                return {k: (reference(v) if k == "$ref" and v.startswith("#/$defs/") else refs(v)) for k, v in value.items()}
             if isinstance(value, list):
                 return [refs(v) for v in value]
             return value
         for key, value in definitions.items():
-            schemas[mapping[key]] = refs(value)
+            rewritten = refs(value)
+            if key in canonical:
+                if comparable(schemas[key]) != comparable(rewritten):
+                    raise ValueError("event definition conflicts with HTTP schema: " + key)
+            else:
+                schemas[mapping[key]] = rewritten
         schemas[name] = refs(event)
     return document
 
@@ -331,11 +359,14 @@ def main():
     args = parser.parse_args()
     document = json.loads((args.assets / "openapi.json").read_text())
     events = {name: json.loads((args.assets / filename).read_text()) for name, filename in [("SnapshotEventPayload", "chat-snapshot.schema.json"), ("ActivityEventPayload", "activity-event.schema.json"), ("HeartbeatEventPayload", "heartbeat.schema.json")]}
-    event_projection = project({"openapi": "3.1.0", "info": {"title": "Crumble SSE payloads", "version": document["info"]["version"]}, "components": {"schemas": {}}, "paths": {}}, events)
+    canonical = document["components"]["schemas"]
+    event_definitions = {key for event in events.values() for key in event.get("$defs", {})}
+    shared = {key: canonical[key] for key in sorted(event_definitions) if key in canonical}
+    event_projection = project({"openapi": "3.1.0", "info": {"title": "Crumble SSE payloads", "version": document["info"]["version"]}, "components": {"schemas": shared}, "paths": {}}, events)
     for name, schema in event_projection["components"]["schemas"].items():
-        if name in document["components"]["schemas"]:
+        if name in canonical and canonical[name] != schema:
             raise ValueError("event projection collides with HTTP schema: " + name)
-        document["components"]["schemas"][name] = schema
+        canonical[name] = schema
     Generator(document).generate(args.output)
     (args.output / "event-projection.json").write_text(json.dumps(event_projection, indent=2, ensure_ascii=False) + "\n")
 

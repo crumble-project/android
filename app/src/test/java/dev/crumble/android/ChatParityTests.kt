@@ -8,7 +8,7 @@ import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
 import dev.crumble.android.model.Inference
-import dev.crumble.android.model.JobItem
+import dev.crumble.android.generated.JobHistoryItem
 import dev.crumble.android.model.JobKind
 import dev.crumble.android.model.JobRef
 import dev.crumble.android.model.Message
@@ -358,11 +358,11 @@ class ChatParityTests {
         model.selectAgent("a1")
         model.openJob(JobRef(JobKind.coding, "fix", "working"))
         testScheduler.runCurrent()
-        assertNull((model.jobPanel!!.items.first() as JobItem.Step).result)
+        assertNull((model.jobPanel!!.items.first() as JobHistoryItem.Variant3).value.result)
         shifted = true
         testScheduler.advanceTimeBy(3_100)
         testScheduler.runCurrent()
-        val result = (model.jobPanel!!.items.first() as JobItem.Step).result?.text
+        val result = (model.jobPanel!!.items.first() as JobHistoryItem.Variant3).value.result?.content
         model.closeJob()
         assertEquals("done", result)
     }
@@ -389,11 +389,11 @@ class ChatParityTests {
         testScheduler.runCurrent()
         model.loadEarlierJobActivity()
         testScheduler.runCurrent()
-        assertNull((model.jobPanel!!.items.first() as JobItem.Step).result)
+        assertNull((model.jobPanel!!.items.first() as JobHistoryItem.Variant3).value.result)
         finished = true
         testScheduler.advanceTimeBy(3_100)
         testScheduler.runCurrent()
-        assertEquals("done", (model.jobPanel!!.items.first() as JobItem.Step).result?.text)
+        assertEquals("done", (model.jobPanel!!.items.first() as JobHistoryItem.Variant3).value.result?.content)
         model.closeJob()
     }
 

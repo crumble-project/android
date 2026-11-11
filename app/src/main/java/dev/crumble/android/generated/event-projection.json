@@ -6,6 +6,115 @@
   },
   "components": {
     "schemas": {
+      "TranscriptBlock": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TranscriptTextBlock"
+          },
+          {
+            "$ref": "#/components/schemas/TranscriptThinkingBlock"
+          },
+          {
+            "$ref": "#/components/schemas/TranscriptImageBlock"
+          },
+          {
+            "$ref": "#/components/schemas/TranscriptToolCallBlock"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "text": "#/components/schemas/TranscriptTextBlock",
+            "thinking": "#/components/schemas/TranscriptThinkingBlock",
+            "image": "#/components/schemas/TranscriptImageBlock",
+            "toolCall": "#/components/schemas/TranscriptToolCallBlock"
+          }
+        }
+      },
+      "TranscriptImageBlock": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "image"
+            ]
+          },
+          "mimeType": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "mimeType"
+        ]
+      },
+      "TranscriptTextBlock": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "text"
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ]
+      },
+      "TranscriptThinkingBlock": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "thinking"
+            ]
+          },
+          "thinking": {
+            "type": "string"
+          },
+          "redacted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "thinking"
+        ]
+      },
+      "TranscriptToolCallBlock": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "toolCall"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "name",
+          "arguments"
+        ]
+      },
       "SnapshotEventPayload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -33,88 +142,7 @@
                 "blocks": {
                   "type": "array",
                   "items": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "const": "text"
-                          },
-                          "text": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "type",
-                          "text"
-                        ],
-                        "additionalProperties": true
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "const": "thinking"
-                          },
-                          "thinking": {
-                            "type": "string"
-                          },
-                          "redacted": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "type",
-                          "thinking"
-                        ],
-                        "additionalProperties": true
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "const": "image"
-                          },
-                          "mimeType": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "type",
-                          "mimeType"
-                        ],
-                        "additionalProperties": true
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "const": "toolCall"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "arguments": {
-                            "type": "object",
-                            "additionalProperties": {}
-                          }
-                        },
-                        "required": [
-                          "type",
-                          "id",
-                          "name",
-                          "arguments"
-                        ],
-                        "additionalProperties": true
-                      }
-                    ]
+                    "$ref": "#/components/schemas/TranscriptBlock"
                   }
                 },
                 "stopReason": {

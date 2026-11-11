@@ -177,8 +177,8 @@ class CrumbleTests {
         val partial = ChatSnapshot(status = "running", working = "thinking", partial = "draft text", agentId = "a1")
         assertEquals(listOf(ChatRow.Thinking), ChatRow.rows(emptyList(), partial, hasMore = false))
 
-        val first = Message(id = "m1", role = "assistant", blocks = listOf(dev.crumble.android.model.TranscriptBlock.Text("first")))
-        val second = Message(id = "m2", role = "assistant", blocks = listOf(dev.crumble.android.model.TranscriptBlock.Text("second")))
+        val first = Message(id = "m1", role = "assistant", blocks = listOf(dev.crumble.android.generated.TranscriptBlock.Variant1(dev.crumble.android.generated.TranscriptTextBlock("text", "first"))))
+        val second = Message(id = "m2", role = "assistant", blocks = listOf(dev.crumble.android.generated.TranscriptBlock.Variant1(dev.crumble.android.generated.TranscriptTextBlock("text", "second"))))
         val completed = ChatRow.rows(listOf(first, second), ChatSnapshot(status = "idle", partial = null), hasMore = false)
         assertEquals(listOf("m1", "m2"), completed.filterIsInstance<ChatRow.MessageRow>().map { it.message.id })
         assertTrue(completed.none { it is ChatRow.Partial || it is ChatRow.Thinking })
@@ -898,13 +898,13 @@ class CrumbleTests {
         val tool = Message(
             id = "a1:1:0",
             role = "assistant",
-            blocks = listOf(dev.crumble.android.model.TranscriptBlock.ToolCall("c", "tool", emptyMap())),
+            blocks = listOf(dev.crumble.android.generated.TranscriptBlock.Variant4(dev.crumble.android.generated.TranscriptToolCallBlock("toolCall", "c", "tool", emptyMap()))),
         )
         val reply = Message(
             id = "a1:1:1",
             role = "assistant",
             content = JsonPrimitive("Hi"),
-            blocks = listOf(dev.crumble.android.model.TranscriptBlock.Text("Hi")),
+            blocks = listOf(dev.crumble.android.generated.TranscriptBlock.Variant1(dev.crumble.android.generated.TranscriptTextBlock("text", "Hi"))),
         )
         assertFalse(ChatRow.shownInChat(tool))
         assertTrue(ChatRow.shownInChat(reply))

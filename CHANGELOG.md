@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Share generated transcript blocks and job activity types across HTTP and event streams.
+
 - Use server projections for job activity, chat work state, and task timing.
 
 ## 0.2.0

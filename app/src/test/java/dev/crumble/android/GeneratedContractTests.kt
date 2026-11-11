@@ -165,7 +165,7 @@ class GeneratedContractTests {
         }
         assertEquals("Hello", preview)
         val message = CrumblePatchJson.decodeFromString<dev.crumble.android.generated.TranscriptMessage>("""{"id":"m1","entryId":"e1","role":"assistant","content":"","blocks":[{"type":"thinking","thinking":"reason"}]}""")
-        assertTrue(message.blocks!!.single() is dev.crumble.android.generated.TranscriptMessageBlocksItem.Variant2)
+        assertTrue(message.blocks!!.single() is dev.crumble.android.generated.TranscriptBlock.Variant2)
     }
 
     @Test

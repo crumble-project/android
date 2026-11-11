@@ -1,6 +1,8 @@
 package dev.crumble.android.model
 
 import dev.crumble.android.generated.CodingJobQuestion
+import dev.crumble.android.generated.JobHistoryItem
+import dev.crumble.android.generated.TranscriptBlock
 import java.util.Locale
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
@@ -40,7 +42,7 @@ data class JobSummary(
 data class JobPanel(
     val job: JobRef,
     val messages: List<Message> = emptyList(),
-    val items: List<JobItem> = emptyList(),
+    val items: List<JobHistoryItem> = emptyList(),
     val hasMore: Boolean = false,
     val oldestEntryID: String? = null,
     val loaded: Boolean = false,
@@ -50,24 +52,16 @@ data class JobPanel(
     val downloadFailed: Boolean = false,
 )
 
-sealed class JobItem {
-    abstract val id: String
+val JobHistoryItem.id: String
+    get() = when (this) {
+        is JobHistoryItem.Variant1 -> value.id
+        is JobHistoryItem.Variant2 -> value.id
+        is JobHistoryItem.Variant3 -> value.id
+    }
 
-    data class Task(override val id: String, val text: String) : JobItem()
-    data class Reply(override val id: String, val text: String) : JobItem()
-    data class Step(
-        override val id: String,
-        val tool: String,
-        val subject: String?,
-        val result: Message? = null,
-        val label: String,
-        val icon: String,
-    ) : JobItem()
-}
+data class JobHistoryPage(val messages: List<Message>, val items: List<JobHistoryItem>, val hasMore: Boolean, val oldestEntryId: String?)
 
-data class JobHistoryPage(val messages: List<Message>, val items: List<JobItem>, val hasMore: Boolean, val oldestEntryId: String?)
-
-fun mergeJobItems(existing: List<JobItem>, newest: List<JobItem>): List<JobItem> {
+fun mergeJobItems(existing: List<JobHistoryItem>, newest: List<JobHistoryItem>): List<JobHistoryItem> {
     val first = newest.firstOrNull()?.id ?: return existing
     return existing.takeWhile { it.id != first } + newest
 }
@@ -123,10 +117,11 @@ private fun messageMarkdown(message: Message): List<String> = when (message.role
     "toolResult" -> listOf((if (message.isError == true) "Failed:\n\n" else "") + fenced(message.text))
     "assistant" -> message.blocks.orEmpty().mapNotNull { block ->
         when (block) {
-            is TranscriptBlock.Text -> block.text.takeIf { it.isNotBlank() }
-            is TranscriptBlock.ToolCall -> {
-                val arguments = PrettyJson.encodeToString(JsonElement.serializer(), JsonObject(block.arguments))
-                "### ${block.name}\n\n${fenced(arguments, "json")}"
+            is TranscriptBlock.Variant1 -> block.value.text.takeIf { it.isNotBlank() }
+            is TranscriptBlock.Variant4 -> {
+                val call = block.value
+                val arguments = PrettyJson.encodeToString(JsonElement.serializer(), JsonObject(call.arguments))
+                "### ${call.name}\n\n${fenced(arguments, "json")}"
             }
             else -> null
         }

@@ -1392,60 +1392,53 @@ data class IssueVoiceGatewayTokenResponse(
     val `issuedAt`: String,
 )
 
-@Serializable
-data class JobHistoryPage(
-    val `messages`: List<TranscriptMessage>,
-    val `hasMore`: Boolean,
-    val `oldestEntryId`: String?,
-    val `items`: List<JobHistoryPageItemsItem>,
-)
-
-@Serializable(with = JobHistoryPageItemsItemCodec::class)
-sealed class JobHistoryPageItemsItem {
-    data class Variant1(val value: JobHistoryPageItemsItemVariant1) : JobHistoryPageItemsItem()
-    data class Variant2(val value: JobHistoryPageItemsItemVariant2) : JobHistoryPageItemsItem()
-    data class Variant3(val value: JobHistoryPageItemsItemVariant3) : JobHistoryPageItemsItem()
+@Serializable(with = JobHistoryItemCodec::class)
+sealed class JobHistoryItem {
+    data class Variant1(val value: JobTaskItem) : JobHistoryItem()
+    data class Variant2(val value: JobReplyItem) : JobHistoryItem()
+    data class Variant3(val value: JobStepItem) : JobHistoryItem()
 }
-object JobHistoryPageItemsItemCodec : KSerializer<JobHistoryPageItemsItem> {
-    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("JobHistoryPageItemsItem")
-    override fun deserialize(decoder: Decoder): JobHistoryPageItemsItem {
+object JobHistoryItemCodec : KSerializer<JobHistoryItem> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("JobHistoryItem")
+    override fun deserialize(decoder: Decoder): JobHistoryItem {
         val input = decoder as JsonDecoder
         val element = input.decodeJsonElement()
         val matches = listOf((element is JsonObject && element["kind"] != null && (element["kind"] == Json.parseToJsonElement("\"task\"")) && element["id"] != null && element["text"] != null), (element is JsonObject && element["kind"] != null && (element["kind"] == Json.parseToJsonElement("\"reply\"")) && element["id"] != null && element["text"] != null), (element is JsonObject && element["kind"] != null && (element["kind"] == Json.parseToJsonElement("\"step\"")) && element["id"] != null && element["tool"] != null && element["label"] != null && element["icon"] != null && (element["icon"] == Json.parseToJsonElement("\"terminal\"") || element["icon"] == Json.parseToJsonElement("\"file\"") || element["icon"] == Json.parseToJsonElement("\"pencil\"") || element["icon"] == Json.parseToJsonElement("\"pointer\"") || element["icon"] == Json.parseToJsonElement("\"tool\""))))
-        require(matches.count { it } == 1) { "Expected exactly one JobHistoryPageItemsItem variant" }
+        require(matches.count { it } == 1) { "Expected exactly one JobHistoryItem variant" }
         return when {
-            (element is JsonObject && element["kind"] != null && (element["kind"] == Json.parseToJsonElement("\"task\"")) && element["id"] != null && element["text"] != null) -> JobHistoryPageItemsItem.Variant1(input.json.decodeFromJsonElement<JobHistoryPageItemsItemVariant1>(element))
-            (element is JsonObject && element["kind"] != null && (element["kind"] == Json.parseToJsonElement("\"reply\"")) && element["id"] != null && element["text"] != null) -> JobHistoryPageItemsItem.Variant2(input.json.decodeFromJsonElement<JobHistoryPageItemsItemVariant2>(element))
-            (element is JsonObject && element["kind"] != null && (element["kind"] == Json.parseToJsonElement("\"step\"")) && element["id"] != null && element["tool"] != null && element["label"] != null && element["icon"] != null && (element["icon"] == Json.parseToJsonElement("\"terminal\"") || element["icon"] == Json.parseToJsonElement("\"file\"") || element["icon"] == Json.parseToJsonElement("\"pencil\"") || element["icon"] == Json.parseToJsonElement("\"pointer\"") || element["icon"] == Json.parseToJsonElement("\"tool\""))) -> JobHistoryPageItemsItem.Variant3(input.json.decodeFromJsonElement<JobHistoryPageItemsItemVariant3>(element))
-            else -> throw SerializationException("Unknown JobHistoryPageItemsItem variant")
+            (element is JsonObject && element["kind"] != null && (element["kind"] == Json.parseToJsonElement("\"task\"")) && element["id"] != null && element["text"] != null) -> JobHistoryItem.Variant1(input.json.decodeFromJsonElement<JobTaskItem>(element))
+            (element is JsonObject && element["kind"] != null && (element["kind"] == Json.parseToJsonElement("\"reply\"")) && element["id"] != null && element["text"] != null) -> JobHistoryItem.Variant2(input.json.decodeFromJsonElement<JobReplyItem>(element))
+            (element is JsonObject && element["kind"] != null && (element["kind"] == Json.parseToJsonElement("\"step\"")) && element["id"] != null && element["tool"] != null && element["label"] != null && element["icon"] != null && (element["icon"] == Json.parseToJsonElement("\"terminal\"") || element["icon"] == Json.parseToJsonElement("\"file\"") || element["icon"] == Json.parseToJsonElement("\"pencil\"") || element["icon"] == Json.parseToJsonElement("\"pointer\"") || element["icon"] == Json.parseToJsonElement("\"tool\""))) -> JobHistoryItem.Variant3(input.json.decodeFromJsonElement<JobStepItem>(element))
+            else -> throw SerializationException("Unknown JobHistoryItem variant")
         }
     }
-    override fun serialize(encoder: Encoder, value: JobHistoryPageItemsItem) {
+    override fun serialize(encoder: Encoder, value: JobHistoryItem) {
         val output = encoder as JsonEncoder
         output.encodeJsonElement(when (value) {
-            is JobHistoryPageItemsItem.Variant1 -> output.json.encodeToJsonElement<JobHistoryPageItemsItemVariant1>(value.value)
-            is JobHistoryPageItemsItem.Variant2 -> output.json.encodeToJsonElement<JobHistoryPageItemsItemVariant2>(value.value)
-            is JobHistoryPageItemsItem.Variant3 -> output.json.encodeToJsonElement<JobHistoryPageItemsItemVariant3>(value.value)
+            is JobHistoryItem.Variant1 -> output.json.encodeToJsonElement<JobTaskItem>(value.value)
+            is JobHistoryItem.Variant2 -> output.json.encodeToJsonElement<JobReplyItem>(value.value)
+            is JobHistoryItem.Variant3 -> output.json.encodeToJsonElement<JobStepItem>(value.value)
         })
     }
 }
 
 @Serializable
-data class JobHistoryPageItemsItemVariant1(
+data class JobHistoryPage(
+    val `messages`: List<TranscriptMessage>,
+    val `hasMore`: Boolean,
+    val `oldestEntryId`: String?,
+    val `items`: List<JobHistoryItem>,
+)
+
+@Serializable
+data class JobReplyItem(
     val `kind`: String,
     val `id`: String,
     val `text`: String,
 )
 
 @Serializable
-data class JobHistoryPageItemsItemVariant2(
-    val `kind`: String,
-    val `id`: String,
-    val `text`: String,
-)
-
-@Serializable
-data class JobHistoryPageItemsItemVariant3(
+data class JobStepItem(
     val `kind`: String,
     val `id`: String,
     val `tool`: String,
@@ -1453,6 +1446,13 @@ data class JobHistoryPageItemsItemVariant3(
     val `icon`: String,
     val `subject`: String? = null,
     val `result`: TranscriptMessage? = null,
+)
+
+@Serializable
+data class JobTaskItem(
+    val `kind`: String,
+    val `id`: String,
+    val `text`: String,
 )
 
 @Serializable
@@ -2675,7 +2675,7 @@ data class SnapshotEventPayloadMessagesItem(
     val `requestId`: String? = null,
     val `role`: String,
     val `content`: String,
-    val `blocks`: List<SnapshotEventPayloadMessagesItemBlocksItem>? = null,
+    val `blocks`: List<TranscriptBlock>? = null,
     val `stopReason`: String? = null,
     val `timestamp`: Double? = null,
     val `kind`: String? = null,
@@ -2701,7 +2701,7 @@ private data class SnapshotEventPayloadMessagesItemFields(
     val `requestId`: String? = null,
     val `role`: String,
     val `content`: String,
-    val `blocks`: List<SnapshotEventPayloadMessagesItemBlocksItem>? = null,
+    val `blocks`: List<TranscriptBlock>? = null,
     val `stopReason`: String? = null,
     val `timestamp`: Double? = null,
     val `kind`: String? = null,
@@ -2765,161 +2765,6 @@ object SnapshotEventPayloadMessagesItemAttachmentsItemCodec : KSerializer<Snapsh
     override fun serialize(encoder: Encoder, value: SnapshotEventPayloadMessagesItemAttachmentsItem) {
         val output = encoder as JsonEncoder
         val fields = output.json.encodeToJsonElement(SnapshotEventPayloadMessagesItemAttachmentsItemFields(value.`name`, value.`mimeType`, value.`size`, value.`kind`)).jsonObject
-        val additional = value.additionalProperties.mapValues { output.json.encodeToJsonElement<JsonElement>(it.value) }
-        output.encodeJsonElement(JsonObject(additional + fields))
-    }
-}
-
-@Serializable(with = SnapshotEventPayloadMessagesItemBlocksItemCodec::class)
-sealed class SnapshotEventPayloadMessagesItemBlocksItem {
-    data class Variant1(val value: SnapshotEventPayloadMessagesItemBlocksItemVariant1) : SnapshotEventPayloadMessagesItemBlocksItem()
-    data class Variant2(val value: SnapshotEventPayloadMessagesItemBlocksItemVariant2) : SnapshotEventPayloadMessagesItemBlocksItem()
-    data class Variant3(val value: SnapshotEventPayloadMessagesItemBlocksItemVariant3) : SnapshotEventPayloadMessagesItemBlocksItem()
-    data class Variant4(val value: SnapshotEventPayloadMessagesItemBlocksItemVariant4) : SnapshotEventPayloadMessagesItemBlocksItem()
-}
-object SnapshotEventPayloadMessagesItemBlocksItemCodec : KSerializer<SnapshotEventPayloadMessagesItemBlocksItem> {
-    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("SnapshotEventPayloadMessagesItemBlocksItem")
-    override fun deserialize(decoder: Decoder): SnapshotEventPayloadMessagesItemBlocksItem {
-        val input = decoder as JsonDecoder
-        val element = input.decodeJsonElement()
-        val matches = listOf((element is JsonObject && element["type"] != null && element["type"] == Json.parseToJsonElement("\"text\"") && element["text"] != null), (element is JsonObject && element["type"] != null && element["type"] == Json.parseToJsonElement("\"thinking\"") && element["thinking"] != null), (element is JsonObject && element["type"] != null && element["type"] == Json.parseToJsonElement("\"image\"") && element["mimeType"] != null), (element is JsonObject && element["type"] != null && element["type"] == Json.parseToJsonElement("\"toolCall\"") && element["id"] != null && element["name"] != null && element["arguments"] != null))
-        require(matches.count { it } == 1) { "Expected exactly one SnapshotEventPayloadMessagesItemBlocksItem variant" }
-        return when {
-            (element is JsonObject && element["type"] != null && element["type"] == Json.parseToJsonElement("\"text\"") && element["text"] != null) -> SnapshotEventPayloadMessagesItemBlocksItem.Variant1(input.json.decodeFromJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant1>(element))
-            (element is JsonObject && element["type"] != null && element["type"] == Json.parseToJsonElement("\"thinking\"") && element["thinking"] != null) -> SnapshotEventPayloadMessagesItemBlocksItem.Variant2(input.json.decodeFromJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant2>(element))
-            (element is JsonObject && element["type"] != null && element["type"] == Json.parseToJsonElement("\"image\"") && element["mimeType"] != null) -> SnapshotEventPayloadMessagesItemBlocksItem.Variant3(input.json.decodeFromJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant3>(element))
-            (element is JsonObject && element["type"] != null && element["type"] == Json.parseToJsonElement("\"toolCall\"") && element["id"] != null && element["name"] != null && element["arguments"] != null) -> SnapshotEventPayloadMessagesItemBlocksItem.Variant4(input.json.decodeFromJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant4>(element))
-            else -> throw SerializationException("Unknown SnapshotEventPayloadMessagesItemBlocksItem variant")
-        }
-    }
-    override fun serialize(encoder: Encoder, value: SnapshotEventPayloadMessagesItemBlocksItem) {
-        val output = encoder as JsonEncoder
-        output.encodeJsonElement(when (value) {
-            is SnapshotEventPayloadMessagesItemBlocksItem.Variant1 -> output.json.encodeToJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant1>(value.value)
-            is SnapshotEventPayloadMessagesItemBlocksItem.Variant2 -> output.json.encodeToJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant2>(value.value)
-            is SnapshotEventPayloadMessagesItemBlocksItem.Variant3 -> output.json.encodeToJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant3>(value.value)
-            is SnapshotEventPayloadMessagesItemBlocksItem.Variant4 -> output.json.encodeToJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant4>(value.value)
-        })
-    }
-}
-
-@Serializable(with = SnapshotEventPayloadMessagesItemBlocksItemVariant1Codec::class)
-data class SnapshotEventPayloadMessagesItemBlocksItemVariant1(
-    val `type`: String,
-    val `text`: String,
-    val additionalProperties: Map<String, JsonElement> = emptyMap(),
-)
-@Serializable
-private data class SnapshotEventPayloadMessagesItemBlocksItemVariant1Fields(
-    val `type`: String,
-    val `text`: String,
-)
-object SnapshotEventPayloadMessagesItemBlocksItemVariant1Codec : KSerializer<SnapshotEventPayloadMessagesItemBlocksItemVariant1> {
-    private val declared = setOf("type", "text")
-    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("SnapshotEventPayloadMessagesItemBlocksItemVariant1")
-    override fun deserialize(decoder: Decoder): SnapshotEventPayloadMessagesItemBlocksItemVariant1 {
-        val input = decoder as JsonDecoder
-        val element = input.decodeJsonElement().jsonObject
-        val fields = input.json.decodeFromJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant1Fields>(JsonObject(element.filterKeys { it in declared }))
-        val additional = element.filterKeys { it !in declared }.mapValues { input.json.decodeFromJsonElement<JsonElement>(it.value) }
-        return SnapshotEventPayloadMessagesItemBlocksItemVariant1(fields.`type`, fields.`text`, additional)
-    }
-    override fun serialize(encoder: Encoder, value: SnapshotEventPayloadMessagesItemBlocksItemVariant1) {
-        val output = encoder as JsonEncoder
-        val fields = output.json.encodeToJsonElement(SnapshotEventPayloadMessagesItemBlocksItemVariant1Fields(value.`type`, value.`text`)).jsonObject
-        val additional = value.additionalProperties.mapValues { output.json.encodeToJsonElement<JsonElement>(it.value) }
-        output.encodeJsonElement(JsonObject(additional + fields))
-    }
-}
-
-@Serializable(with = SnapshotEventPayloadMessagesItemBlocksItemVariant2Codec::class)
-data class SnapshotEventPayloadMessagesItemBlocksItemVariant2(
-    val `type`: String,
-    val `thinking`: String,
-    val `redacted`: Boolean? = null,
-    val additionalProperties: Map<String, JsonElement> = emptyMap(),
-)
-@Serializable
-private data class SnapshotEventPayloadMessagesItemBlocksItemVariant2Fields(
-    val `type`: String,
-    val `thinking`: String,
-    val `redacted`: Boolean? = null,
-)
-object SnapshotEventPayloadMessagesItemBlocksItemVariant2Codec : KSerializer<SnapshotEventPayloadMessagesItemBlocksItemVariant2> {
-    private val declared = setOf("type", "thinking", "redacted")
-    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("SnapshotEventPayloadMessagesItemBlocksItemVariant2")
-    override fun deserialize(decoder: Decoder): SnapshotEventPayloadMessagesItemBlocksItemVariant2 {
-        val input = decoder as JsonDecoder
-        val element = input.decodeJsonElement().jsonObject
-        val fields = input.json.decodeFromJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant2Fields>(JsonObject(element.filterKeys { it in declared }))
-        val additional = element.filterKeys { it !in declared }.mapValues { input.json.decodeFromJsonElement<JsonElement>(it.value) }
-        return SnapshotEventPayloadMessagesItemBlocksItemVariant2(fields.`type`, fields.`thinking`, fields.`redacted`, additional)
-    }
-    override fun serialize(encoder: Encoder, value: SnapshotEventPayloadMessagesItemBlocksItemVariant2) {
-        val output = encoder as JsonEncoder
-        val fields = output.json.encodeToJsonElement(SnapshotEventPayloadMessagesItemBlocksItemVariant2Fields(value.`type`, value.`thinking`, value.`redacted`)).jsonObject
-        val additional = value.additionalProperties.mapValues { output.json.encodeToJsonElement<JsonElement>(it.value) }
-        output.encodeJsonElement(JsonObject(additional + fields))
-    }
-}
-
-@Serializable(with = SnapshotEventPayloadMessagesItemBlocksItemVariant3Codec::class)
-data class SnapshotEventPayloadMessagesItemBlocksItemVariant3(
-    val `type`: String,
-    val `mimeType`: String,
-    val additionalProperties: Map<String, JsonElement> = emptyMap(),
-)
-@Serializable
-private data class SnapshotEventPayloadMessagesItemBlocksItemVariant3Fields(
-    val `type`: String,
-    val `mimeType`: String,
-)
-object SnapshotEventPayloadMessagesItemBlocksItemVariant3Codec : KSerializer<SnapshotEventPayloadMessagesItemBlocksItemVariant3> {
-    private val declared = setOf("type", "mimeType")
-    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("SnapshotEventPayloadMessagesItemBlocksItemVariant3")
-    override fun deserialize(decoder: Decoder): SnapshotEventPayloadMessagesItemBlocksItemVariant3 {
-        val input = decoder as JsonDecoder
-        val element = input.decodeJsonElement().jsonObject
-        val fields = input.json.decodeFromJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant3Fields>(JsonObject(element.filterKeys { it in declared }))
-        val additional = element.filterKeys { it !in declared }.mapValues { input.json.decodeFromJsonElement<JsonElement>(it.value) }
-        return SnapshotEventPayloadMessagesItemBlocksItemVariant3(fields.`type`, fields.`mimeType`, additional)
-    }
-    override fun serialize(encoder: Encoder, value: SnapshotEventPayloadMessagesItemBlocksItemVariant3) {
-        val output = encoder as JsonEncoder
-        val fields = output.json.encodeToJsonElement(SnapshotEventPayloadMessagesItemBlocksItemVariant3Fields(value.`type`, value.`mimeType`)).jsonObject
-        val additional = value.additionalProperties.mapValues { output.json.encodeToJsonElement<JsonElement>(it.value) }
-        output.encodeJsonElement(JsonObject(additional + fields))
-    }
-}
-
-@Serializable(with = SnapshotEventPayloadMessagesItemBlocksItemVariant4Codec::class)
-data class SnapshotEventPayloadMessagesItemBlocksItemVariant4(
-    val `type`: String,
-    val `id`: String,
-    val `name`: String,
-    val `arguments`: Map<String, JsonElement>,
-    val additionalProperties: Map<String, JsonElement> = emptyMap(),
-)
-@Serializable
-private data class SnapshotEventPayloadMessagesItemBlocksItemVariant4Fields(
-    val `type`: String,
-    val `id`: String,
-    val `name`: String,
-    val `arguments`: Map<String, JsonElement>,
-)
-object SnapshotEventPayloadMessagesItemBlocksItemVariant4Codec : KSerializer<SnapshotEventPayloadMessagesItemBlocksItemVariant4> {
-    private val declared = setOf("type", "id", "name", "arguments")
-    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("SnapshotEventPayloadMessagesItemBlocksItemVariant4")
-    override fun deserialize(decoder: Decoder): SnapshotEventPayloadMessagesItemBlocksItemVariant4 {
-        val input = decoder as JsonDecoder
-        val element = input.decodeJsonElement().jsonObject
-        val fields = input.json.decodeFromJsonElement<SnapshotEventPayloadMessagesItemBlocksItemVariant4Fields>(JsonObject(element.filterKeys { it in declared }))
-        val additional = element.filterKeys { it !in declared }.mapValues { input.json.decodeFromJsonElement<JsonElement>(it.value) }
-        return SnapshotEventPayloadMessagesItemBlocksItemVariant4(fields.`type`, fields.`id`, fields.`name`, fields.`arguments`, additional)
-    }
-    override fun serialize(encoder: Encoder, value: SnapshotEventPayloadMessagesItemBlocksItemVariant4) {
-        val output = encoder as JsonEncoder
-        val fields = output.json.encodeToJsonElement(SnapshotEventPayloadMessagesItemBlocksItemVariant4Fields(value.`type`, value.`id`, value.`name`, value.`arguments`)).jsonObject
         val additional = value.additionalProperties.mapValues { output.json.encodeToJsonElement<JsonElement>(it.value) }
         output.encodeJsonElement(JsonObject(additional + fields))
     }
@@ -3141,6 +2986,45 @@ data class StartProviderLoginRequest(
 @Serializable
 class StartVoiceCallRequest
 
+@Serializable(with = TranscriptBlockCodec::class)
+sealed class TranscriptBlock {
+    data class Variant1(val value: TranscriptTextBlock) : TranscriptBlock()
+    data class Variant2(val value: TranscriptThinkingBlock) : TranscriptBlock()
+    data class Variant3(val value: TranscriptImageBlock) : TranscriptBlock()
+    data class Variant4(val value: TranscriptToolCallBlock) : TranscriptBlock()
+}
+object TranscriptBlockCodec : KSerializer<TranscriptBlock> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("TranscriptBlock")
+    override fun deserialize(decoder: Decoder): TranscriptBlock {
+        val input = decoder as JsonDecoder
+        val element = input.decodeJsonElement()
+        val matches = listOf((element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"text\"")) && element["text"] != null), (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"thinking\"")) && element["thinking"] != null), (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"image\"")) && element["mimeType"] != null), (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"toolCall\"")) && element["id"] != null && element["name"] != null && element["arguments"] != null))
+        require(matches.count { it } == 1) { "Expected exactly one TranscriptBlock variant" }
+        return when {
+            (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"text\"")) && element["text"] != null) -> TranscriptBlock.Variant1(input.json.decodeFromJsonElement<TranscriptTextBlock>(element))
+            (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"thinking\"")) && element["thinking"] != null) -> TranscriptBlock.Variant2(input.json.decodeFromJsonElement<TranscriptThinkingBlock>(element))
+            (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"image\"")) && element["mimeType"] != null) -> TranscriptBlock.Variant3(input.json.decodeFromJsonElement<TranscriptImageBlock>(element))
+            (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"toolCall\"")) && element["id"] != null && element["name"] != null && element["arguments"] != null) -> TranscriptBlock.Variant4(input.json.decodeFromJsonElement<TranscriptToolCallBlock>(element))
+            else -> throw SerializationException("Unknown TranscriptBlock variant")
+        }
+    }
+    override fun serialize(encoder: Encoder, value: TranscriptBlock) {
+        val output = encoder as JsonEncoder
+        output.encodeJsonElement(when (value) {
+            is TranscriptBlock.Variant1 -> output.json.encodeToJsonElement<TranscriptTextBlock>(value.value)
+            is TranscriptBlock.Variant2 -> output.json.encodeToJsonElement<TranscriptThinkingBlock>(value.value)
+            is TranscriptBlock.Variant3 -> output.json.encodeToJsonElement<TranscriptImageBlock>(value.value)
+            is TranscriptBlock.Variant4 -> output.json.encodeToJsonElement<TranscriptToolCallBlock>(value.value)
+        })
+    }
+}
+
+@Serializable
+data class TranscriptImageBlock(
+    val `type`: String,
+    val `mimeType`: String,
+)
+
 @Serializable
 data class TranscriptMessage(
     val `id`: String,
@@ -3148,7 +3032,7 @@ data class TranscriptMessage(
     val `requestId`: String? = null,
     val `role`: String,
     val `content`: String,
-    val `blocks`: List<TranscriptMessageBlocksItem>? = null,
+    val `blocks`: List<TranscriptBlock>? = null,
     val `stopReason`: String? = null,
     val `timestamp`: Double? = null,
     val `kind`: String? = null,
@@ -3165,66 +3049,6 @@ data class TranscriptMessage(
     val `isError`: Boolean? = null,
     val `toolDetails`: JsonElement? = null,
     val `sources`: List<TranscriptMessageSourcesItem>? = null,
-)
-
-@Serializable(with = TranscriptMessageBlocksItemCodec::class)
-sealed class TranscriptMessageBlocksItem {
-    data class Variant1(val value: TranscriptMessageBlocksItemVariant1) : TranscriptMessageBlocksItem()
-    data class Variant2(val value: TranscriptMessageBlocksItemVariant2) : TranscriptMessageBlocksItem()
-    data class Variant3(val value: TranscriptMessageBlocksItemVariant3) : TranscriptMessageBlocksItem()
-    data class Variant4(val value: TranscriptMessageBlocksItemVariant4) : TranscriptMessageBlocksItem()
-}
-object TranscriptMessageBlocksItemCodec : KSerializer<TranscriptMessageBlocksItem> {
-    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("TranscriptMessageBlocksItem")
-    override fun deserialize(decoder: Decoder): TranscriptMessageBlocksItem {
-        val input = decoder as JsonDecoder
-        val element = input.decodeJsonElement()
-        val matches = listOf((element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"text\"")) && element["text"] != null), (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"thinking\"")) && element["thinking"] != null), (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"image\"")) && element["mimeType"] != null), (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"toolCall\"")) && element["id"] != null && element["name"] != null && element["arguments"] != null))
-        require(matches.count { it } == 1) { "Expected exactly one TranscriptMessageBlocksItem variant" }
-        return when {
-            (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"text\"")) && element["text"] != null) -> TranscriptMessageBlocksItem.Variant1(input.json.decodeFromJsonElement<TranscriptMessageBlocksItemVariant1>(element))
-            (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"thinking\"")) && element["thinking"] != null) -> TranscriptMessageBlocksItem.Variant2(input.json.decodeFromJsonElement<TranscriptMessageBlocksItemVariant2>(element))
-            (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"image\"")) && element["mimeType"] != null) -> TranscriptMessageBlocksItem.Variant3(input.json.decodeFromJsonElement<TranscriptMessageBlocksItemVariant3>(element))
-            (element is JsonObject && element["type"] != null && (element["type"] == Json.parseToJsonElement("\"toolCall\"")) && element["id"] != null && element["name"] != null && element["arguments"] != null) -> TranscriptMessageBlocksItem.Variant4(input.json.decodeFromJsonElement<TranscriptMessageBlocksItemVariant4>(element))
-            else -> throw SerializationException("Unknown TranscriptMessageBlocksItem variant")
-        }
-    }
-    override fun serialize(encoder: Encoder, value: TranscriptMessageBlocksItem) {
-        val output = encoder as JsonEncoder
-        output.encodeJsonElement(when (value) {
-            is TranscriptMessageBlocksItem.Variant1 -> output.json.encodeToJsonElement<TranscriptMessageBlocksItemVariant1>(value.value)
-            is TranscriptMessageBlocksItem.Variant2 -> output.json.encodeToJsonElement<TranscriptMessageBlocksItemVariant2>(value.value)
-            is TranscriptMessageBlocksItem.Variant3 -> output.json.encodeToJsonElement<TranscriptMessageBlocksItemVariant3>(value.value)
-            is TranscriptMessageBlocksItem.Variant4 -> output.json.encodeToJsonElement<TranscriptMessageBlocksItemVariant4>(value.value)
-        })
-    }
-}
-
-@Serializable
-data class TranscriptMessageBlocksItemVariant1(
-    val `type`: String,
-    val `text`: String,
-)
-
-@Serializable
-data class TranscriptMessageBlocksItemVariant2(
-    val `type`: String,
-    val `thinking`: String,
-    val `redacted`: Boolean? = null,
-)
-
-@Serializable
-data class TranscriptMessageBlocksItemVariant3(
-    val `type`: String,
-    val `mimeType`: String,
-)
-
-@Serializable
-data class TranscriptMessageBlocksItemVariant4(
-    val `type`: String,
-    val `id`: String,
-    val `name`: String,
-    val `arguments`: Map<String, JsonElement>,
 )
 
 @Serializable
@@ -3260,6 +3084,27 @@ data class TranscriptPage(
     val `messages`: List<TranscriptMessage>,
     val `hasMore`: Boolean,
     val `oldestEntryId`: String?,
+)
+
+@Serializable
+data class TranscriptTextBlock(
+    val `type`: String,
+    val `text`: String,
+)
+
+@Serializable
+data class TranscriptThinkingBlock(
+    val `type`: String,
+    val `thinking`: String,
+    val `redacted`: Boolean? = null,
+)
+
+@Serializable
+data class TranscriptToolCallBlock(
+    val `type`: String,
+    val `id`: String,
+    val `name`: String,
+    val `arguments`: Map<String, JsonElement>,
 )
 
 @Serializable

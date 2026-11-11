@@ -1,6 +1,7 @@
 package dev.crumble.android.model
 
 import kotlinx.serialization.builtins.ListSerializer
+import dev.crumble.android.generated.JobHistoryItem
 import kotlinx.serialization.json.JsonObject
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -1152,7 +1153,7 @@ class AppModel(
     private suspend fun loadJobHistory(api: APIClient, agentID: String, job: JobRef, version: Int) {
         try {
             val pending = jobPanel?.takeIf { jobPanelVersion == version }?.items
-                ?.filterIsInstance<JobItem.Step>()?.filter { it.result == null }?.map { it.id }?.toMutableSet() ?: return
+                ?.filterIsInstance<JobHistoryItem.Variant3>()?.filter { it.value.result == null }?.map { it.value.id }?.toMutableSet() ?: return
             val page = api.jobHistory(agentID, job, before = null, limit = JOB_PAGE_SIZE)
             val refreshed = page.items.associateByTo(mutableMapOf()) { it.id }
             pending.removeAll(refreshed.keys)

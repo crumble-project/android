@@ -40,6 +40,29 @@ class ContractTests(unittest.TestCase):
             finally:
                 contract.GENERATED = original
 
+    def test_event_definitions_reuse_canonical_schemas(self):
+        canonical = {"type": "object", "properties": {"text": {"type": "string"}}}
+        document = {"components": {"schemas": {"TranscriptBlock": canonical}}}
+        event = {"$defs": {"TranscriptBlock": canonical, "Local": {"$ref": "#/$defs/TranscriptBlock"}}, "properties": {"block": {"$ref": "#/$defs/TranscriptBlock"}, "local": {"$ref": "#/$defs/Local"}}}
+        projected = generator.project(document, {"Snapshot": event})["components"]["schemas"]
+        self.assertEqual(canonical, projected["TranscriptBlock"])
+        self.assertEqual("#/components/schemas/TranscriptBlock", projected["Snapshot"]["properties"]["block"]["$ref"])
+        self.assertEqual("#/components/schemas/SnapshotLocal", projected["Snapshot"]["properties"]["local"]["$ref"])
+        self.assertEqual("#/components/schemas/TranscriptBlock", projected["SnapshotLocal"]["$ref"])
+        self.assertNotIn("SnapshotTranscriptBlock", projected)
+        conflicting = {"$defs": {"TranscriptBlock": {"type": "string"}}}
+        with self.assertRaisesRegex(ValueError, "event definition conflicts with HTTP schema: TranscriptBlock"):
+            generator.project(document, {"Snapshot": conflicting})
+        nested = generator.project(document, {"Snapshot": {"$defs": {"TranscriptBlock": canonical}, "properties": {"text": {"$ref": "#/$defs/TranscriptBlock/properties/text"}}}})
+        self.assertEqual("#/components/schemas/TranscriptBlock/properties/text", nested["components"]["schemas"]["Snapshot"]["properties"]["text"]["$ref"])
+
+    def test_snapshot_reuses_generated_transcript_block(self):
+        source = (contract.GENERATED / "ContractModels.kt").read_text()
+        snapshot_message = source.split("data class SnapshotEventPayloadMessagesItem(", 1)[1].split("\n)", 1)[0]
+        self.assertIn("val `blocks`: List<TranscriptBlock>? = null", snapshot_message)
+        self.assertNotIn("SnapshotEventPayloadTranscriptBlock", source)
+        self.assertIn("data class Variant3(val value: JobStepItem) : JobHistoryItem()", source)
+
     def test_unsupported_schema_fails_closed(self):
         instance = generator.Generator({"components": {"schemas": {}}, "paths": {}})
         for schema in ({"type": "object", "patternProperties": {}}, {"type": "object", "additionalProperties": False}, {"type": ["string", "number"]}):
