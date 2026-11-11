@@ -457,13 +457,13 @@ class ContractOperations(private val boundary: ContractBoundary) {
         boundary.send("POST", path, boundary.json.encodeToString(body).toByteArray(Charsets.UTF_8), timeoutMs)
     }
 
-    suspend fun getCodingJobHistory(`id`: String, `name`: String, `limit`: Long? = null, `before`: String? = null, timeoutMs: Int = 20_000): TranscriptPage {
+    suspend fun getCodingJobHistory(`id`: String, `name`: String, `limit`: Long? = null, `before`: String? = null, timeoutMs: Int = 20_000): JobHistoryPage {
         val query = mutableListOf<String>()
         `limit`?.let { query.add("limit=" + boundary.escape(it.toString())) }
         `before`?.let { query.add("before=" + boundary.escape(it)) }
         val path = "/v1/agents/${boundary.escape(`id`)}/coding-jobs/${boundary.escape(`name`)}/history" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
         val bytes = boundary.send("GET", path, null, timeoutMs)
-        return boundary.json.decodeFromString<TranscriptPage>(bytes.toString(Charsets.UTF_8))
+        return boundary.json.decodeFromString<JobHistoryPage>(bytes.toString(Charsets.UTF_8))
     }
 
     suspend fun listDesktopJobs(`id`: String, timeoutMs: Int = 20_000): DesktopJobs {
@@ -508,13 +508,13 @@ class ContractOperations(private val boundary: ContractBoundary) {
         return boundary.json.decodeFromString<DesktopViewer>(bytes.toString(Charsets.UTF_8))
     }
 
-    suspend fun getDesktopJobHistory(`id`: String, `name`: String, `limit`: Long? = null, `before`: String? = null, timeoutMs: Int = 20_000): TranscriptPage {
+    suspend fun getDesktopJobHistory(`id`: String, `name`: String, `limit`: Long? = null, `before`: String? = null, timeoutMs: Int = 20_000): JobHistoryPage {
         val query = mutableListOf<String>()
         `limit`?.let { query.add("limit=" + boundary.escape(it.toString())) }
         `before`?.let { query.add("before=" + boundary.escape(it)) }
         val path = "/v1/agents/${boundary.escape(`id`)}/desktop-jobs/${boundary.escape(`name`)}/history" + if (query.isEmpty()) "" else "?" + query.joinToString("&")
         val bytes = boundary.send("GET", path, null, timeoutMs)
-        return boundary.json.decodeFromString<TranscriptPage>(bytes.toString(Charsets.UTF_8))
+        return boundary.json.decodeFromString<JobHistoryPage>(bytes.toString(Charsets.UTF_8))
     }
 
     suspend fun sendMessage(body: SendMessageRequest, `id`: String, timeoutMs: Int = 20_000): Execution {

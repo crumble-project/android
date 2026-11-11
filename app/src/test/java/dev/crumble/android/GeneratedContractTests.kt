@@ -164,8 +164,8 @@ class GeneratedContractTests {
         } catch (_: SSEClosedError) {
         }
         assertEquals("Hello", preview)
-        val message = CrumblePatchJson.decodeFromString<dev.crumble.android.generated.TranscriptMessage>("""{"id":"m1","entryId":"e1","role":"assistant","content":"","blocks":{"provider":[null,true,1,"text"]}}""")
-        assertEquals(JsonPrimitive(true), message.blocks!!.jsonObject["provider"]!!.jsonArray[1])
+        val message = CrumblePatchJson.decodeFromString<dev.crumble.android.generated.TranscriptMessage>("""{"id":"m1","entryId":"e1","role":"assistant","content":"","blocks":[{"type":"thinking","thinking":"reason"}]}""")
+        assertTrue(message.blocks!!.single() is dev.crumble.android.generated.TranscriptMessageBlocksItem.Variant2)
     }
 
     @Test

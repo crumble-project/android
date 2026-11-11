@@ -327,7 +327,7 @@ class APIClient(
         JobKind.coding -> operations.listCodingJobs(agentID).jobs.map { it.domain() }
         JobKind.desktop -> operations.listDesktopJobs(agentID).jobs.map { it.domain() }
     }
-    suspend fun jobHistory(agentID: String, job: JobRef, before: String?, limit: Int): ChatHistoryResponse = when (job.kind) {
+    suspend fun jobHistory(agentID: String, job: JobRef, before: String?, limit: Int): dev.crumble.android.model.JobHistoryPage = when (job.kind) {
         JobKind.coding -> operations.getCodingJobHistory(agentID, job.name, limit.toLong(), before)
         JobKind.desktop -> operations.getDesktopJobHistory(agentID, job.name, limit.toLong(), before)
     }.domain()

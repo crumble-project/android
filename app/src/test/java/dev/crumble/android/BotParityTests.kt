@@ -18,7 +18,6 @@ import dev.crumble.android.model.ProviderStatus
 import dev.crumble.android.model.Schedule
 import dev.crumble.android.model.THINKING_LEVELS
 import dev.crumble.android.model.WEB_SEARCH_OPTIONS
-import dev.crumble.android.model.automationTiming
 import dev.crumble.android.model.automationsOf
 import dev.crumble.android.model.botListLine
 import dev.crumble.android.model.botReactions
@@ -574,7 +573,7 @@ class BotParityTests {
         model.workingBots = setOf("a")
         model.snapshot = ChatSnapshot(status = "idle")
         assertFalse(model.isWorking("a"))
-        model.snapshot = ChatSnapshot(status = "running")
+        model.snapshot = ChatSnapshot(status = "running", working = "thinking")
         model.workingBots = emptySet()
         assertTrue(model.isWorking("a"))
     }
@@ -585,7 +584,7 @@ class BotParityTests {
         val model = AppModel(client = APIClient(SERVER, "session", transport), scope = backgroundScope)
         model.agents = listOf(a, b)
         model.selectAgent("a")
-        model.snapshot = ChatSnapshot(status = "running")
+        model.snapshot = ChatSnapshot(status = "running", working = "thinking")
         model.selectAgent("b")
         runCurrent()
 
@@ -649,7 +648,6 @@ class BotParityTests {
     fun detailsListThisBotsTasksThatCanStillRun() {
         val list = listOf(schedule("mine"), schedule("other", agentId = "b"), schedule("done", cron = null), schedule("next", cron = null, nextRunAt = "2030-01-01T00:00:00Z"))
         assertEquals(listOf("mine", "next"), automationsOf("a", list).map { it.id })
-        assertTrue(automationTiming(schedule("off", enabled = false), emptyList()).startsWith("Paused · "))
     }
 
     @Test

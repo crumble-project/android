@@ -36,7 +36,7 @@ internal fun snapshotFixture(snapshot: ChatSnapshot): String =
             put("id", "chat"); put("agentId", snapshot.agentId ?: "a1"); put("title", "Chat")
             put("createdAt", "2026-10-18T10:00:00Z"); put("updatedAt", "2026-10-18T10:00:00Z")
         })
-        put("status", snapshot.status ?: "idle"); put("partial", snapshot.partial.orEmpty())
+        put("status", snapshot.status ?: "idle"); put("working", snapshot.working ?: if (snapshot.status == "running") "thinking" else "idle"); put("partial", snapshot.partial.orEmpty())
         put("error", snapshot.error?.let(::JsonPrimitive) ?: JsonNull); put("updatedAt", 0)
         put("hasMore", snapshot.hasMore ?: false)
         put("oldestEntryId", snapshot.oldestEntryId?.let(::JsonPrimitive) ?: JsonNull)

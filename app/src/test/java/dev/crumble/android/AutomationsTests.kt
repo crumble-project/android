@@ -21,7 +21,6 @@ import dev.crumble.android.model.recurrenceOf
 import dev.crumble.android.model.recurring
 import dev.crumble.android.model.runningAt
 import dev.crumble.android.model.canRunScripts
-import dev.crumble.android.model.describeTiming
 import dev.crumble.android.model.finished
 import dev.crumble.android.model.listedSchedules
 import dev.crumble.android.model.scriptRunDuration
@@ -85,7 +84,7 @@ private fun scheduleJson(
     fun quoted(value: String?) = value?.let { "\"$it\"" } ?: "null"
     val command = if (kind == "script") "\"./backup.sh\"" else "null"
     val prompt = if (kind == "script") "" else "Say hi"
-    return """{"id":"$id","agentId":"a1","name":"Backup","kind":"$kind","prompt":"$prompt","command":$command,"timeoutSeconds":120,"notify":false,"eventSourceId":${quoted(eventSourceId)},"enabled":$enabled,"timezone":"UTC","runAt":${quoted(runAt)},"cron":${quoted(cron)},"nextRunAt":${quoted(nextRunAt)},"createdAt":"2026-11-05T10:00:00Z","createdByAgentId":null}"""
+    return """{"id":"$id","agentId":"a1","name":"Backup","kind":"$kind","prompt":"$prompt","command":$command,"timeoutSeconds":120,"notify":false,"eventSourceId":${quoted(eventSourceId)},"enabled":$enabled,"timezone":"UTC","runAt":${quoted(runAt)},"cron":${quoted(cron)},"nextRunAt":${quoted(nextRunAt)},"description":"Once","timing":"Once","createdAt":"2026-11-05T10:00:00Z","createdByAgentId":null}"""
 }
 
 private fun schedule(json: String = scheduleJson()) = CrumbleJson.decodeFromString(Schedule.serializer(), json)
@@ -456,18 +455,13 @@ class AutomationsTests {
     @Test
     fun anEventTaskNamesItsSourceAndNeverCountsAsFinished() {
         val task = schedule()
-        assertEquals("On event · GitHub", describeTiming(task, listOf(SOURCE)))
-        assertEquals("On event", describeTiming(task, emptyList()))
         assertFalse(task.finished)
     }
 
     @Test
     fun aOneOffReadsRanOnlyAfterItFinished() {
-        val now = Instant.parse("2026-11-05T12:00:00Z")
         val done = schedule(scheduleJson(kind = "prompt", runAt = "2026-11-05T10:00:00Z", eventSourceId = null))
         val waiting = schedule(scheduleJson(kind = "prompt", runAt = "2026-11-05T14:00:00Z", eventSourceId = null, nextRunAt = "2026-11-05T14:00:00Z"))
-        assertTrue(describeTiming(done, emptyList(), now).startsWith("Ran "))
-        assertTrue(describeTiming(waiting, emptyList(), now).startsWith("Once, "))
         assertEquals(ScheduleStatus.Completed, done.status)
         assertEquals(ScheduleStatus.Active, waiting.status)
     }
@@ -508,13 +502,6 @@ class AutomationsTests {
         assertFalse(canRunScripts(CODING.copy(coding = false), coder))
         assertFalse(canRunScripts(null, coder))
         assertFalse(canRunScripts(CODING, Agent(id = "a2")))
-    }
-
-    @Test
-    fun aCronTaskShowsWordedTiming() {
-        val task = schedule(scheduleJson(kind = "prompt", cron = "0 9 * * 1-5", eventSourceId = null))
-        assertEquals("At 09:00, Monday through Friday", describeTiming(task, emptyList(), localZone = "UTC"))
-        assertEquals("At 09:00, Monday through Friday (UTC)", describeTiming(task, emptyList(), localZone = "Europe/Berlin"))
     }
 
     @Test

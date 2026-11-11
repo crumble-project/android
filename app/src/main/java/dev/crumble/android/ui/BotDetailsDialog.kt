@@ -29,7 +29,6 @@ import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.Route
 import dev.crumble.android.model.Schedule
-import dev.crumble.android.model.automationTiming
 import dev.crumble.android.model.automationsOf
 import dev.crumble.android.model.nilIfEmpty
 
@@ -111,6 +110,6 @@ private fun AutomationRow(model: AppModel, schedule: Schedule, shape: Shape) {
         },
     ) {
         RowTitle(schedule.name, maxLines = 1)
-        RowSubtitle(automationTiming(schedule, model.eventSources))
+        RowSubtitle(schedule.timing)
     }
 }

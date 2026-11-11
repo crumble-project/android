@@ -95,8 +95,22 @@ private fun secretRequestRef(tool: String, toolName: String?, isError: Boolean?,
     return SecretRequestRef(name, hosts, (request["requestedAt"] as? JsonPrimitive)?.contentOrNull?.nilIfEmpty)
 }
 
+private fun TranscriptMessageBlocksItem.domain(): TranscriptBlock = when (this) {
+    is TranscriptMessageBlocksItem.Variant1 -> TranscriptBlock.Text(value.text)
+    is TranscriptMessageBlocksItem.Variant2 -> TranscriptBlock.Thinking(value.thinking, value.redacted)
+    is TranscriptMessageBlocksItem.Variant3 -> TranscriptBlock.Image(value.mimeType)
+    is TranscriptMessageBlocksItem.Variant4 -> TranscriptBlock.ToolCall(value.id, value.name, value.arguments)
+}
+
+private fun SnapshotEventPayloadMessagesItemBlocksItem.domain(): TranscriptBlock = when (this) {
+    is SnapshotEventPayloadMessagesItemBlocksItem.Variant1 -> TranscriptBlock.Text(value.text)
+    is SnapshotEventPayloadMessagesItemBlocksItem.Variant2 -> TranscriptBlock.Thinking(value.thinking, value.redacted)
+    is SnapshotEventPayloadMessagesItemBlocksItem.Variant3 -> TranscriptBlock.Image(value.mimeType)
+    is SnapshotEventPayloadMessagesItemBlocksItem.Variant4 -> TranscriptBlock.ToolCall(value.id, value.name, value.arguments)
+}
+
 internal fun TranscriptMessage.domain() = Message(
-    id = id, entryId = entryId, role = role, content = JsonPrimitive(content), blocks = blocks,
+    id = id, entryId = entryId, role = role, content = JsonPrimitive(content), blocks = blocks?.map { it.domain() },
     kind = kind, replyTo = replyTo, replyPreview = replyPreview,
     origin = origin?.let { dev.crumble.android.model.MessageOrigin(it.kind, it.name, it.agentId, it.source, it.via) },
     communication = communication?.let { dev.crumble.android.model.BotCommunication(it.executionId, it.fromAgentId, it.fromName, it.toAgentId, it.toName, it.status) },
@@ -114,7 +128,7 @@ internal fun TranscriptMessage.domain() = Message(
 )
 
 internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
-    id = id, entryId = entryId, role = role, content = JsonPrimitive(content), blocks = blocks,
+    id = id, entryId = entryId, role = role, content = JsonPrimitive(content), blocks = blocks?.map { it.domain() },
     kind = kind, replyTo = replyTo, replyPreview = replyPreview,
     origin = origin?.let { dev.crumble.android.model.MessageOrigin(it.kind, it.name, it.agentId, it.source, it.via) },
     communication = communication?.let { dev.crumble.android.model.BotCommunication(it.executionId, it.fromAgentId, it.fromName, it.toAgentId, it.toName, it.status) },
@@ -132,18 +146,25 @@ internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
 )
 
 internal fun dev.crumble.android.generated.ChatSnapshot.domain() = dev.crumble.android.model.ChatSnapshot(
-    messages = messages.map { it.domain() }, status = status, partial = partial, error = error,
+    messages = messages.map { it.domain() }, status = status, working = working, partial = partial, error = error,
     agentId = agentId, hasMore = hasMore, oldestEntryId = oldestEntryId,
 )
 
 internal fun SnapshotEventPayload.domain() = dev.crumble.android.model.ChatSnapshot(
-    messages = messages.map { it.domain() }, status = status, partial = partial, error = error,
+    messages = messages.map { it.domain() }, status = status, working = working, partial = partial, error = error,
     agentId = agentId, hasMore = hasMore, oldestEntryId = oldestEntryId,
 )
 
 internal fun GroupChatSnapshot.domain() = GroupSnapshot(messages.map { it.domain() }, hasMore, oldestEntryId, groupChat, activity)
 
 internal fun TranscriptPage.domain() = ChatHistoryResponse(messages.map { it.domain() }, hasMore, oldestEntryId)
+internal fun dev.crumble.android.generated.JobHistoryPage.domain() = dev.crumble.android.model.JobHistoryPage(
+    messages.map { it.domain() }, items.map { item -> when (item) {
+        is JobHistoryPageItemsItem.Variant1 -> JobItem.Task(item.value.id, item.value.text)
+        is JobHistoryPageItemsItem.Variant2 -> JobItem.Reply(item.value.id, item.value.text)
+        is JobHistoryPageItemsItem.Variant3 -> item.value.let { JobItem.Step(it.id, it.tool, it.subject, it.result?.domain(), it.label, it.icon) }
+    } }, hasMore, oldestEntryId,
+)
 internal fun dev.crumble.android.generated.Memory.domain() = dev.crumble.android.model.Memory(id, content, createdAt, agentId, source, updatedAt)
 internal fun dev.crumble.android.generated.Skill.domain() = SharedSkill(id, name, instructions)
 internal fun ListedSkill.domain(): SharedSkill = when (this) {
@@ -152,7 +173,7 @@ internal fun ListedSkill.domain(): SharedSkill = when (this) {
 }
 internal fun dev.crumble.android.generated.Schedule.domain() = dev.crumble.android.model.Schedule(
     id, agentId, name, cron, prompt, timezone, runAt, enabled, createdByAgentId,
-    kind, command, timeoutSeconds, notify, eventSourceId, nextRunAt,
+    kind, command, timeoutSeconds, notify, eventSourceId, nextRunAt, description, timing,
 )
 internal fun dev.crumble.android.generated.Execution.domain() = dev.crumble.android.model.Execution(
     id, agentId, conversationId, status, prompt, error, createdAt, updatedAt, scheduleId,

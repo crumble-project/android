@@ -73,7 +73,6 @@ import dev.crumble.android.model.TaskRun
 import dev.crumble.android.model.TaskTab
 import dev.crumble.android.model.activityTime
 import dev.crumble.android.model.canRunScripts
-import dev.crumble.android.model.describeTiming
 import dev.crumble.android.model.finished
 import dev.crumble.android.model.listedSchedules
 import dev.crumble.android.model.scriptRunDuration
@@ -183,7 +182,7 @@ private fun TaskRow(model: AppModel, schedule: Schedule, agent: Agent, shape: Sh
             maxLines = 2,
             fontFamily = if (schedule.kind == "script") FontFamily.Monospace else null,
         )
-        RowSubtitle("${schedule.status.label} · ${describeTiming(schedule, model.eventSources)}")
+        RowSubtitle("${schedule.status.label} · ${schedule.description}")
         val nextRun = schedule.nextRunAt
         if (schedule.status == ScheduleStatus.Active && nextRun != null) {
             RowSubtitle("Next run ${activityTime(nextRun)}")

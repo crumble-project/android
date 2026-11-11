@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Use server projections for job activity, chat work state, and task timing.
+
 ## 0.2.0
 
 - Remove the pages that configure the server or the account: Providers, Judge model, Vision model, Web search, Credentials, Logins, Password managers, Integrations, Coding, Message gateways, Event relay, and Users. The web app is the only client that configures them. Settings gains a Server settings row that opens the web app's settings in the browser, and the links that led to a removed page, such as Provider Settings on a failed reply, the bot editor's web search, integrations, and credentials notes, and Connect a password manager, open the matching web page. The `oauth/callback` deep link is gone with MCP sign-in. Bots' requests for credentials and logins are still answered in the chat.

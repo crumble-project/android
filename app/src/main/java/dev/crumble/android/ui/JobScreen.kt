@@ -63,8 +63,6 @@ import dev.crumble.android.model.JobKind
 import dev.crumble.android.model.JobPanel
 import dev.crumble.android.model.JobRef
 import dev.crumble.android.model.JobSummary
-import dev.crumble.android.model.jobItems
-import dev.crumble.android.model.jobStepVerb
 import dev.crumble.android.model.jobWorking
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -72,10 +70,10 @@ import kotlinx.coroutines.withContext
 private fun JobKind.icon(): ImageVector = if (this == JobKind.coding) Icons.Default.Build else Icons.Default.DesktopWindows
 
 private fun stepIcon(tool: String): ImageVector = when (tool) {
-    "bash" -> Icons.Default.Terminal
-    "read" -> Icons.Default.Description
-    "write", "edit" -> Icons.Default.Edit
-    "computer_use" -> Icons.Default.TouchApp
+    "terminal" -> Icons.Default.Terminal
+    "file" -> Icons.Default.Description
+    "pencil" -> Icons.Default.Edit
+    "pointer" -> Icons.Default.TouchApp
     else -> Icons.Default.Build
 }
 
@@ -241,7 +239,7 @@ private fun JobStep(step: JobItem.Step, shape: Shape) {
                 if (result == null) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
                 } else {
-                    Icon(stepIcon(step.tool), contentDescription = null)
+                    Icon(stepIcon(step.icon), contentDescription = null)
                 }
             }
         },
@@ -272,7 +270,7 @@ private fun JobStep(step: JobItem.Step, shape: Shape) {
             null
         },
     ) {
-        RowTitle(jobStepVerb(step.tool), maxLines = 1)
+        RowTitle(step.label, maxLines = 1)
         step.subject?.takeIf { it.isNotEmpty() }?.let { RowSubtitle(it, maxLines = 1, fontFamily = FontFamily.Monospace) }
     }
 }
@@ -298,7 +296,7 @@ fun JobPanelDialog(model: AppModel, panel: JobPanel) {
     val job = panel.job
     val current = model.jobs.firstOrNull { it.ref == job }
     val working = jobWorking(current?.status)
-    val items = remember(panel.messages) { jobItems(panel.messages) }
+    val items = panel.items
     JobDialog(
         onClose = { model.closeJob() },
         title = { JobTitle(job, current) },

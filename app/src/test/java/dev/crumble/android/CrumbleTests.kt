@@ -174,11 +174,11 @@ class CrumbleTests {
 
     @Test
     fun runningPartialChatShowsOnlyThinkingUntilTurnCompletes() {
-        val partial = ChatSnapshot(status = "running", partial = "draft text", agentId = "a1")
+        val partial = ChatSnapshot(status = "running", working = "thinking", partial = "draft text", agentId = "a1")
         assertEquals(listOf(ChatRow.Thinking), ChatRow.rows(emptyList(), partial, hasMore = false))
 
-        val first = Message(id = "m1", role = "assistant", blocks = JsonPrimitive("first"))
-        val second = Message(id = "m2", role = "assistant", blocks = JsonPrimitive("second"))
+        val first = Message(id = "m1", role = "assistant", blocks = listOf(dev.crumble.android.model.TranscriptBlock.Text("first")))
+        val second = Message(id = "m2", role = "assistant", blocks = listOf(dev.crumble.android.model.TranscriptBlock.Text("second")))
         val completed = ChatRow.rows(listOf(first, second), ChatSnapshot(status = "idle", partial = null), hasMore = false)
         assertEquals(listOf("m1", "m2"), completed.filterIsInstance<ChatRow.MessageRow>().map { it.message.id })
         assertTrue(completed.none { it is ChatRow.Partial || it is ChatRow.Thinking })
@@ -367,7 +367,7 @@ class CrumbleTests {
     @Test
     fun taskPickersPreserveTheInstantAndSubmitOnlyTheSelectedMode() = runTest {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
-        val response = """{"id":"s1","agentId":"a1","name":"Greeting","kind":"prompt","prompt":"Say hi","command":null,"timeoutSeconds":600,"notify":true,"eventSourceId":null,"enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z","cron":null,"nextRunAt":null,"createdAt":"2026-10-18T10:00:00Z","createdByAgentId":null}"""
+        val response = """{"id":"s1","agentId":"a1","name":"Greeting","kind":"prompt","prompt":"Say hi","command":null,"timeoutSeconds":600,"notify":true,"eventSourceId":null,"enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z","cron":null,"nextRunAt":null,"description":"Once","timing":"Once","createdAt":"2026-10-18T10:00:00Z","createdByAgentId":null}"""
         val (client, stub) = StubTransport.client { req ->
             200 to if (req.method == "PATCH") response else "[]"
         }
@@ -898,13 +898,13 @@ class CrumbleTests {
         val tool = Message(
             id = "a1:1:0",
             role = "assistant",
-            blocks = JsonArray(listOf(JsonObject(mapOf("type" to JsonPrimitive("toolCall"))))),
+            blocks = listOf(dev.crumble.android.model.TranscriptBlock.ToolCall("c", "tool", emptyMap())),
         )
         val reply = Message(
             id = "a1:1:1",
             role = "assistant",
             content = JsonPrimitive("Hi"),
-            blocks = JsonArray(listOf(JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive("Hi"))))),
+            blocks = listOf(dev.crumble.android.model.TranscriptBlock.Text("Hi")),
         )
         assertFalse(ChatRow.shownInChat(tool))
         assertTrue(ChatRow.shownInChat(reply))

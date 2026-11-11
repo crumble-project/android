@@ -1151,10 +1151,23 @@ class AppModel(
 
     private suspend fun loadJobHistory(api: APIClient, agentID: String, job: JobRef, version: Int) {
         try {
+            val pending = jobPanel?.takeIf { jobPanelVersion == version }?.items
+                ?.filterIsInstance<JobItem.Step>()?.filter { it.result == null }?.map { it.id }?.toMutableSet() ?: return
             val page = api.jobHistory(agentID, job, before = null, limit = JOB_PAGE_SIZE)
+            val refreshed = page.items.associateByTo(mutableMapOf()) { it.id }
+            pending.removeAll(refreshed.keys)
+            var next = page.oldestEntryId.takeIf { page.hasMore }
+            val visited = mutableSetOf<String>()
+            while (pending.isNotEmpty() && next != null && visited.add(next)) {
+                val older = api.jobHistory(agentID, job, before = next, limit = JOB_PAGE_SIZE)
+                older.items.filter { it.id in pending }.forEach { refreshed[it.id] = it }
+                pending.removeAll(refreshed.keys)
+                next = older.oldestEntryId.takeIf { older.hasMore }
+            }
             val panel = jobPanel?.takeIf { jobPanelVersion == version } ?: return
             jobPanel = panel.copy(
-                messages = mergeJobPages(panel.messages, page.messages.orEmpty()),
+                messages = mergeJobPages(panel.messages, page.messages),
+                items = mergeJobItems(panel.items.map { refreshed[it.id] ?: it }, page.items),
                 hasMore = if (panel.loaded) panel.hasMore else page.hasMore == true,
                 oldestEntryID = if (panel.loaded) panel.oldestEntryID else page.oldestEntryId,
                 loaded = true,
@@ -1240,8 +1253,10 @@ class AppModel(
                 val page = api.jobHistory(agentID, panel.job, before, JOB_PAGE_SIZE)
                 val current = jobPanel?.takeIf { jobPanelVersion == version } ?: return@launch
                 val known = current.messages.map { it.id }.toSet()
+                val knownItems = current.items.map { it.id }.toSet()
                 jobPanel = current.copy(
-                    messages = page.messages.orEmpty().filterNot { it.id in known } + current.messages,
+                    messages = page.messages.filterNot { it.id in known } + current.messages,
+                    items = page.items.filterNot { it.id in knownItems } + current.items,
                     hasMore = page.hasMore == true,
                     oldestEntryID = page.oldestEntryId,
                     loadingEarlier = false,
@@ -2905,6 +2920,8 @@ class AppModel(
             timeoutSeconds = timeoutSeconds,
             notify = form.notify,
             eventSourceId = sourceID.ifEmpty { null },
+            description = "Saving…",
+            timing = "Saving…",
             // Without a next run a one-off reads as finished and leaves the list before it is saved.
             nextRunAt = runAt.ifEmpty { old?.nextRunAt.takeIf { cron.isNotEmpty() } },
         )
@@ -2960,7 +2977,7 @@ class AppModel(
         val enabled = !old.enabled
         optimisticMutation(
             key = "schedule:$id",
-            update = { replace(old.copy(enabled = enabled)) },
+            update = { replace(old.copy(enabled = enabled, timing = if (enabled) old.description else "Paused · ${old.description}")) },
             rollback = { replace(old) },
             work = { api ->
                 val saved = api.updateSchedule(id, patch = mapOf("enabled" to JsonPrimitive(enabled)))

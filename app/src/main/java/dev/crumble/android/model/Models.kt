@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import java.util.UUID
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
@@ -136,12 +137,20 @@ enum class MessageDeliveryState {
 }
 
 @Serializable
+sealed class TranscriptBlock {
+    @Serializable @SerialName("text") data class Text(val text: String) : TranscriptBlock()
+    @Serializable @SerialName("thinking") data class Thinking(val thinking: String, val redacted: Boolean? = null) : TranscriptBlock()
+    @Serializable @SerialName("image") data class Image(val mimeType: String) : TranscriptBlock()
+    @Serializable @SerialName("toolCall") data class ToolCall(val id: String, val name: String, val arguments: Map<String, JsonElement>) : TranscriptBlock()
+}
+
+@Serializable
 data class Message(
     val id: String = "",
     val entryId: String? = null,
     val role: String = "",
     val content: JsonElement? = null,
-    val blocks: JsonElement? = null,
+    val blocks: List<TranscriptBlock>? = null,
     val kind: String? = null,
     val replyTo: String? = null,
     val replyPreview: String? = null,
@@ -188,6 +197,7 @@ typealias OutgoingAttachment = dev.crumble.android.generated.SendMessageRequestA
 data class ChatSnapshot(
     val messages: List<Message>? = null,
     val status: String? = null,
+    val working: String? = null,
     val partial: String? = null,
     val error: String? = null,
     val agentId: String? = null,
@@ -195,7 +205,7 @@ data class ChatSnapshot(
     val oldestEntryId: String? = null,
 ) {
     val isRunning: Boolean
-        get() = status == "running"
+        get() = working != null && working != "idle" && working != "failed"
 }
 
 @Serializable
@@ -249,6 +259,8 @@ data class Schedule(
     val notify: Boolean = true,
     val eventSourceId: String? = null,
     val nextRunAt: String? = null,
+    val description: String = "",
+    val timing: String = "",
 )
 
 @Serializable
@@ -438,17 +450,7 @@ sealed class ChatRow {
                 "toolResult" -> message.botRequest != null || message.callRequest != null || message.credentialRequest != null || message.loginRequest != null ||
                     jobOf(message) != null || displayOf(message) != null || isDesktopScreenshot(message)
                 "assistant" -> {
-                    val blocks = message.blocks
-                    if (blocks is JsonArray) {
-                        blocks.any { block ->
-                            val obj = block as? JsonObject ?: return@any false
-                            val type = (obj["type"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
-                            val text = (obj["text"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull ?: ""
-                            type == "text" && text.trim().isNotEmpty()
-                        }
-                    } else {
-                        contentText(blocks).isNotEmpty()
-                    }
+                    message.blocks.orEmpty().any { it is TranscriptBlock.Text && it.text.isNotBlank() }
                 }
                 else -> false
             }

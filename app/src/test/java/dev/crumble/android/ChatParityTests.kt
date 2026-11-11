@@ -17,7 +17,6 @@ import dev.crumble.android.model.SourceChip
 import dev.crumble.android.model.clampLevel
 import dev.crumble.android.model.costLine
 import dev.crumble.android.model.headline
-import dev.crumble.android.model.jobItems
 import dev.crumble.android.model.jobMarkdown
 import dev.crumble.android.model.jobOf
 import dev.crumble.android.model.levelsOf
@@ -91,6 +90,8 @@ private fun jobFixture(name: String, status: String, usage: String = """{"models
 private fun history(ids: List<String>, hasMore: Boolean = false, oldest: String? = null) = buildString {
     append("""{"messages":[""")
     append(ids.joinToString(",") { """{"id":"$it","entryId":"$it","role":"user","content":"task $it"}""" })
+    append("""],"items":[""")
+    append(ids.joinToString(",") { """{"kind":"task","id":"$it","text":"task $it"}""" })
     append("""],"hasMore":$hasMore,"oldestEntryId":${oldest?.let { "\"$it\"" } ?: "null"}}""")
 }
 
@@ -174,20 +175,6 @@ class ChatParityTests {
         assertNull(jobOf(jobResult().copy(isError = true)))
         assertNull(jobOf(jobResult("web_search")))
         assertTrue(ChatRow.shownInChat(jobResult()))
-    }
-
-    @Test
-    fun jobItemsAttachResultsToSteps() {
-        val assistant = Message(
-            id = "m2", role = "assistant",
-            blocks = json("""[{"type":"text","text":"On it"},{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"ls"}},{"type":"toolCall","id":"c2","name":"read","arguments":{"path":"a.kt"}}]"""),
-        )
-        val result = Message(id = "m3", role = "toolResult", toolCallId = "c1", isError = true, content = JsonPrimitive("nope"))
-        val items = jobItems(listOf(Message(id = "m1", role = "user", content = JsonPrimitive("Fix it")), assistant, result))
-        assertEquals(JobItem.Task("m1", "Fix it"), items[0])
-        assertEquals(JobItem.Reply("m2:0", "On it"), items[1])
-        assertEquals(JobItem.Step("c1", "bash", "ls", result), items[2])
-        assertEquals(JobItem.Step("c2", "read", "a.kt", null), items[3])
     }
 
     @Test
@@ -348,6 +335,66 @@ class ChatParityTests {
         testScheduler.runCurrent()
         assertEquals(reads + 2, transport.requests.size)
         model.cancelStream()
+    }
+
+    @Test
+    fun newestJobStepRefreshesAfterSlidingToAnOlderPage() = runTest {
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        var shifted = false
+        val transport = ScriptedTransport { req ->
+            when (req.pathWithQuery) {
+                "/v1/agents/a1/coding-jobs" -> 200 to """{"jobs":[${jobFixture("fix", "working")}]}"""
+                "/v1/agents/a1/desktop-jobs" -> 200 to """{"jobs":[]}"""
+                "/v1/agents/a1/coding-jobs/fix/history?limit=100" -> if (shifted) {
+                    200 to history(listOf("2"), hasMore = true, oldest = "2")
+                } else {
+                    200 to """{"messages":[{"id":"1","entryId":"1","role":"assistant","content":""}],"items":[{"kind":"step","id":"call","tool":"bash","label":"Ran","icon":"terminal"}],"hasMore":false,"oldestEntryId":"1"}"""
+                }
+                "/v1/agents/a1/coding-jobs/fix/history?limit=100&before=2" -> 200 to """{"messages":[{"id":"1","entryId":"1","role":"assistant","content":""}],"items":[{"kind":"step","id":"call","tool":"bash","label":"Ran","icon":"terminal","result":{"id":"r","entryId":"r","role":"toolResult","content":"done"}}],"hasMore":false,"oldestEntryId":"1"}"""
+                else -> 503 to ""
+            }
+        }
+        val model = modelWith(transport, scope)
+        model.selectAgent("a1")
+        model.openJob(JobRef(JobKind.coding, "fix", "working"))
+        testScheduler.runCurrent()
+        assertNull((model.jobPanel!!.items.first() as JobItem.Step).result)
+        shifted = true
+        testScheduler.advanceTimeBy(3_100)
+        testScheduler.runCurrent()
+        val result = (model.jobPanel!!.items.first() as JobItem.Step).result?.text
+        model.closeJob()
+        assertEquals("done", result)
+    }
+
+    @Test
+    fun loadedEarlierJobStepRefreshesWhenItsResultArrives() = runTest {
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        var finished = false
+        val transport = ScriptedTransport { req ->
+            when (req.pathWithQuery) {
+                "/v1/agents/a1/coding-jobs" -> 200 to """{"jobs":[${jobFixture("fix", "working")}]}"""
+                "/v1/agents/a1/desktop-jobs" -> 200 to """{"jobs":[]}"""
+                "/v1/agents/a1/coding-jobs/fix/history?limit=100" -> 200 to history(listOf("2"), hasMore = true, oldest = "2")
+                "/v1/agents/a1/coding-jobs/fix/history?limit=100&before=2" -> {
+                    val result = if (finished) ""","result":{"id":"r","entryId":"r","role":"toolResult","content":"done"}""" else ""
+                    200 to """{"messages":[{"id":"1","entryId":"1","role":"assistant","content":""}],"items":[{"kind":"step","id":"call","tool":"bash","label":"Ran","icon":"terminal"$result}],"hasMore":false,"oldestEntryId":"1"}"""
+                }
+                else -> 503 to ""
+            }
+        }
+        val model = modelWith(transport, scope)
+        model.selectAgent("a1")
+        model.openJob(JobRef(JobKind.coding, "fix", "working"))
+        testScheduler.runCurrent()
+        model.loadEarlierJobActivity()
+        testScheduler.runCurrent()
+        assertNull((model.jobPanel!!.items.first() as JobItem.Step).result)
+        finished = true
+        testScheduler.advanceTimeBy(3_100)
+        testScheduler.runCurrent()
+        assertEquals("done", (model.jobPanel!!.items.first() as JobItem.Step).result?.text)
+        model.closeJob()
     }
 
     @Test
