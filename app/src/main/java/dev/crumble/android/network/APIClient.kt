@@ -32,7 +32,7 @@ import dev.crumble.android.model.JobSummary
 import dev.crumble.android.model.MCPServer
 import dev.crumble.android.model.Memory
 import dev.crumble.android.model.ModelSummary
-import dev.crumble.android.model.OutgoingAttachment
+import dev.crumble.android.model.PendingAttachment
 import dev.crumble.android.generated.OptionalField
 import dev.crumble.android.generated.PreviewReasoningRequest
 import dev.crumble.android.generated.PreviewScheduleRequest
@@ -59,7 +59,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -205,7 +204,7 @@ class APIClient(
         if (token.isNotEmpty()) {
             headers["Authorization"] = "Bearer $token"
         }
-        if (body != null) {
+        if (body != null && headers.keys.none { it.equals("Content-Type", ignoreCase = true) }) {
             headers["Content-Type"] = "application/json"
         }
         return HttpRequestData(
@@ -245,8 +244,8 @@ class APIClient(
     private val operations = dev.crumble.android.generated.ContractOperations(object : dev.crumble.android.generated.ContractBoundary {
         override val json = CrumblePatchJson
         override fun escape(value: String) = APIClient.escape(value)
-        override fun request(method: String, path: String, body: ByteArray?, timeoutMs: Int) = makeRequest(method, path, body, timeoutMs)
-        override suspend fun send(method: String, path: String, body: ByteArray?, timeoutMs: Int) = this@APIClient.send(method, path, body, timeoutMs)
+        override fun request(method: String, path: String, body: ByteArray?, timeoutMs: Int, headers: Map<String, String>) = makeRequest(method, path, body, timeoutMs, headers)
+        override suspend fun send(method: String, path: String, body: ByteArray?, timeoutMs: Int, headers: Map<String, String>) = this@APIClient.send(method, path, body, timeoutMs, headers)
     })
 
     private inline fun <reified T> request(fields: Map<String, JsonElement>): T =
@@ -366,17 +365,22 @@ class APIClient(
     suspend fun chatHistory(agentID: String, before: String, limit: Int): ChatHistoryResponse =
         operations.getChatHistory(agentID, before = before.nilIfEmpty, limit = limit.takeIf { it > 0 }?.toLong()).domain()
 
-    private fun messageFields(content: String, requestID: String, replyTo: String, attachments: List<OutgoingAttachment>): Map<String, JsonElement> {
+    private fun messageFields(content: String, requestID: String, replyTo: String, files: List<String>): Map<String, JsonElement> {
         val fields = strings("content" to content, "requestId" to requestID).toMutableMap()
         replyTo.nilIfEmpty?.let { fields["replyTo"] = JsonPrimitive(it) }
-        if (attachments.isNotEmpty()) fields["attachments"] = CrumbleJson.encodeToJsonElement(ListSerializer(OutgoingAttachment.serializer()), attachments)
+        if (files.isNotEmpty()) fields["files"] = kotlinx.serialization.json.JsonArray(files.map(::JsonPrimitive))
         return fields
     }
 
-    suspend fun sendChatMessage(agentID: String, content: String, requestID: String, replyTo: String, attachments: List<OutgoingAttachment> = emptyList()) {
-        val fields = messageFields(content, requestID, replyTo, attachments) + ("timezone" to JsonPrimitive(ZoneId.systemDefault().id))
-        operations.sendMessage(request(fields), agentID, timeoutMs = if (attachments.isEmpty()) 20_000 else 120_000)
+    suspend fun uploadFile(agentID: String, file: PendingAttachment): String =
+        operations.uploadFile(file.data, agentID, escape(file.name), file.mimeType, timeoutMs = 120_000).file.id
+
+    suspend fun sendChatMessage(agentID: String, content: String, requestID: String, replyTo: String, files: List<String> = emptyList()) {
+        val fields = messageFields(content, requestID, replyTo, files) + ("timezone" to JsonPrimitive(ZoneId.systemDefault().id))
+        operations.sendMessage(request(fields), agentID, timeoutMs = if (files.isEmpty()) 20_000 else 120_000)
     }
+
+    suspend fun file(agentID: String, fileID: String): ByteArray = operations.getFile(agentID, fileID)
 
     suspend fun attachment(agentID: String, entryID: String, index: Int): ByteArray = operations.getAttachment(agentID, entryID, index.toLong())
     suspend fun abortChat(agentID: String) = operations.abortChat(agentID)
@@ -396,10 +400,13 @@ class APIClient(
     suspend fun groupSnapshot(id: String): GroupSnapshot = operations.getGroupChatSnapshot(id).domain()
     suspend fun groupHistory(id: String, before: String, limit: Int): ChatHistoryResponse =
         operations.getGroupChatHistory(id, limit.toLong(), before).domain()
-    suspend fun sendGroupMessage(id: String, content: String, requestID: String, replyTo: String, attachments: List<OutgoingAttachment> = emptyList()) {
-        operations.sendGroupMessage(request(messageFields(content, requestID, replyTo, attachments)), id, timeoutMs = if (attachments.isEmpty()) 20_000 else 120_000)
+    suspend fun uploadGroupFile(id: String, file: PendingAttachment): String =
+        operations.uploadGroupFile(file.data, id, escape(file.name), file.mimeType, timeoutMs = 120_000).file.id
+
+    suspend fun sendGroupMessage(id: String, content: String, requestID: String, replyTo: String, files: List<String> = emptyList()) {
+        operations.sendGroupMessage(request(messageFields(content, requestID, replyTo, files)), id, timeoutMs = if (files.isEmpty()) 20_000 else 120_000)
     }
-    suspend fun groupAttachment(id: String, entryID: String, index: Int): ByteArray = operations.getGroupAttachment(id, entryID, index.toLong())
+    suspend fun groupFile(id: String, fileID: String): ByteArray = operations.getGroupFile(id, fileID)
     suspend fun stopGroupChat(id: String) = operations.stopGroupChat(id)
 
     suspend fun groupChatEvents(id: String, onEvent: suspend (GroupSnapshot) -> Unit): Nothing =
@@ -559,7 +566,9 @@ class APIClient(
         operations.putPushDevice(registration.wire(), pushInstallationPath(installationId)).domain()
     suspend fun unregisterPushDevice(installationId: String) = operations.deletePushDevice(pushInstallationPath(installationId))
     suspend fun updatePushPresence(installationId: String, presence: PushPresence) {
-        operations.putPushPresence(dev.crumble.android.generated.PutPushPresenceRequest(presence.active, presence.agentId), pushInstallationPath(installationId))
+        val fields = mapOf("active" to JsonPrimitive(presence.active), "agentId" to (presence.agentId?.let(::JsonPrimitive) ?: kotlinx.serialization.json.JsonNull))
+        val body = CrumbleJson.encodeToString(JsonObject(fields)).toByteArray(StandardCharsets.UTF_8)
+        send("PUT", "/v1/push/devices/${escape(pushInstallationPath(installationId))}/presence", body)
     }
     private fun pushInstallationPath(installationId: String): String {
         require(installationId.isNotBlank()) { "installationId must not be blank" }

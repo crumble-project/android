@@ -13,7 +13,6 @@ import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
-import java.util.Base64
 import java.util.UUID
 import kotlin.math.max
 import kotlin.math.min
@@ -28,13 +27,6 @@ data class PendingAttachment(
 ) {
     val isImage: Boolean
         get() = mimeType.startsWith("image/")
-
-    val outgoing: OutgoingAttachment
-        get() = OutgoingAttachment(
-            name = name,
-            mimeType = mimeType,
-            data = Base64.getEncoder().encodeToString(data),
-        )
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

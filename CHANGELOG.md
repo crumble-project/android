@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Align bot and group chat attachments with the server's file API: upload raw bytes, send file IDs, retain successful uploads for retry, and fetch transcript images by file ID. Deleted files display a placeholder and hide cached images.
+- Update the contract generator to 1.3.0 with upload headers, binary request bodies, binary downloads, and the group snapshot event schema. Notification migration remains separate; existing presence behavior is unchanged.
+
 - Refresh task run labels while the task list is open.
 
 - Use server previews for task timing and reasoning, and server-provided reply citations.

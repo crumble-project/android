@@ -6,7 +6,6 @@ import dev.crumble.android.generated.UpdateScheduleRequest
 import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
 import dev.crumble.android.model.CrumblePatchJson
-import dev.crumble.android.model.OutgoingAttachment
 import dev.crumble.android.network.APIClient
 import dev.crumble.android.network.APIError
 import dev.crumble.android.network.HttpRequestData
@@ -146,14 +145,18 @@ class GeneratedContractTests {
     }
 
     @Test
-    fun generatedMessageOperationPreservesAttachmentTimeoutAndOptionalOmission() = runTest {
+    fun generatedMessageOperationPreservesFileTimeoutAndOptionalOmission() = runTest {
         val (client, transport) = StubTransport.client { 202 to executionFixture }
         client.sendChatMessage("a1", "text", "request", "")
-        client.sendChatMessage("a1", "", "request", "", listOf(OutgoingAttachment("image", "image/png", "AAAA")))
+        client.sendChatMessage("a1", "", "request", "", listOf("33333333-3333-4333-8333-333333333333"))
         assertEquals(listOf(20_000, 120_000), transport.requests.map { it.timeoutMs })
         val body = Json.parseToJsonElement(transport.requests.first().body!!.toString(Charsets.UTF_8)).jsonObject
         assertFalse(body.containsKey("replyTo"))
         assertFalse(body.containsKey("attachments"))
+        assertFalse(body.containsKey("files"))
+        val withFile = Json.parseToJsonElement(transport.requests.last().body!!.toString(Charsets.UTF_8)).jsonObject
+        assertEquals(JsonArray(listOf(JsonPrimitive("33333333-3333-4333-8333-333333333333"))), withFile["files"])
+        assertFalse(withFile.containsKey("attachments"))
     }
 
     @Test
@@ -191,7 +194,7 @@ class GeneratedContractTests {
         } catch (_: SSEClosedError) {
         }
         assertEquals("Hello", preview)
-        val message = CrumblePatchJson.decodeFromString<dev.crumble.android.generated.TranscriptMessage>("""{"id":"m1","entryId":"e1","role":"assistant","content":"","blocks":[{"type":"thinking","thinking":"reason"}]}""")
+        val message = CrumblePatchJson.decodeFromString<dev.crumble.android.generated.TranscriptMessage>("""{"id":"m1","entryId":"e1","role":"assistant","content":"","replyReferences":[],"blocks":[{"type":"thinking","thinking":"reason"}]}""")
         assertTrue(message.blocks!!.single() is dev.crumble.android.generated.TranscriptBlock.Variant2)
     }
 

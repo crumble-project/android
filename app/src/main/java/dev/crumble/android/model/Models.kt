@@ -175,12 +175,12 @@ data class AttachmentInfo(
     val mimeType: String = "",
     val size: Int = 0,
     val kind: String = "",
+    val id: String = "",
+    val deleted: Boolean = false,
 ) {
     val isImage: Boolean
-        get() = kind == "image"
+        get() = !deleted && (mimeType.startsWith("image/") || kind == "image")
 }
-
-typealias OutgoingAttachment = dev.crumble.android.generated.SendMessageRequestAttachmentsItem
 
 @Serializable
 data class ChatSnapshot(

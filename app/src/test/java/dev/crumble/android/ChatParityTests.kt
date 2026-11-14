@@ -82,7 +82,7 @@ private fun jobFixture(name: String, status: String, usage: String = """{"models
 
 private fun history(ids: List<String>, hasMore: Boolean = false, oldest: String? = null) = buildString {
     append("""{"messages":[""")
-    append(ids.joinToString(",") { """{"id":"$it","entryId":"$it","role":"user","content":"task $it"}""" })
+    append(ids.joinToString(",") { """{"id":"$it","entryId":"$it","role":"user","content":"task $it","replyReferences":[]}""" })
     append("""],"items":[""")
     append(ids.joinToString(",") { """{"kind":"task","id":"$it","text":"task $it"}""" })
     append("""],"hasMore":$hasMore,"oldestEntryId":${oldest?.let { "\"$it\"" } ?: "null"}}""")
@@ -268,9 +268,9 @@ class ChatParityTests {
                 "/v1/agents/a1/coding-jobs/fix/history?limit=100" -> if (shifted) {
                     200 to history(listOf("2"), hasMore = true, oldest = "2")
                 } else {
-                    200 to """{"messages":[{"id":"1","entryId":"1","role":"assistant","content":""}],"items":[{"kind":"step","id":"call","tool":"bash","label":"Ran","icon":"terminal"}],"hasMore":false,"oldestEntryId":"1"}"""
+                    200 to """{"messages":[{"id":"1","entryId":"1","role":"assistant","content":"","replyReferences":[]}],"items":[{"kind":"step","id":"call","tool":"bash","label":"Ran","icon":"terminal"}],"hasMore":false,"oldestEntryId":"1"}"""
                 }
-                "/v1/agents/a1/coding-jobs/fix/history?limit=100&before=2" -> 200 to """{"messages":[{"id":"1","entryId":"1","role":"assistant","content":""}],"items":[{"kind":"step","id":"call","tool":"bash","label":"Ran","icon":"terminal","result":{"id":"r","entryId":"r","role":"toolResult","content":"done"}}],"hasMore":false,"oldestEntryId":"1"}"""
+                "/v1/agents/a1/coding-jobs/fix/history?limit=100&before=2" -> 200 to """{"messages":[{"id":"1","entryId":"1","role":"assistant","content":"","replyReferences":[]}],"items":[{"kind":"step","id":"call","tool":"bash","label":"Ran","icon":"terminal","result":{"id":"r","entryId":"r","role":"toolResult","content":"done","replyReferences":[]}}],"hasMore":false,"oldestEntryId":"1"}"""
                 else -> 503 to ""
             }
         }
@@ -297,8 +297,8 @@ class ChatParityTests {
                 "/v1/agents/a1/desktop-jobs" -> 200 to """{"jobs":[]}"""
                 "/v1/agents/a1/coding-jobs/fix/history?limit=100" -> 200 to history(listOf("2"), hasMore = true, oldest = "2")
                 "/v1/agents/a1/coding-jobs/fix/history?limit=100&before=2" -> {
-                    val result = if (finished) ""","result":{"id":"r","entryId":"r","role":"toolResult","content":"done"}""" else ""
-                    200 to """{"messages":[{"id":"1","entryId":"1","role":"assistant","content":""}],"items":[{"kind":"step","id":"call","tool":"bash","label":"Ran","icon":"terminal"$result}],"hasMore":false,"oldestEntryId":"1"}"""
+                    val result = if (finished) ""","result":{"id":"r","entryId":"r","role":"toolResult","content":"done","replyReferences":[]}""" else ""
+                    200 to """{"messages":[{"id":"1","entryId":"1","role":"assistant","content":"","replyReferences":[]}],"items":[{"kind":"step","id":"call","tool":"bash","label":"Ran","icon":"terminal"$result}],"hasMore":false,"oldestEntryId":"1"}"""
                 }
                 else -> 503 to ""
             }

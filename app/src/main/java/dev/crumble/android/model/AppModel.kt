@@ -413,6 +413,7 @@ class AppModel(
         val content: String,
         val replyTo: String,
         val attachments: List<PendingAttachment>,
+        val uploadedFiles: MutableMap<UUID, String> = mutableMapOf(),
     )
 
     private data class PendingPreview(
@@ -440,9 +441,10 @@ class AppModel(
     private var groupStream: Job? = null
     private var groupVersion = 0
 
-    /** Sent image bytes, keyed by "entryId/index"; they never change once sent. */
+    /** File bytes are scoped to the connection and chat; screenshots retain their entry/index key. */
     var attachmentBytes by mutableStateOf<Map<String, ByteArray>>(emptyMap())
         private set
+    private val deletedFileKeys = mutableSetOf<String>()
 
     private var activeRequests = 0
     var pendingMutations by mutableStateOf<Set<String>>(emptySet())
@@ -901,7 +903,7 @@ class AppModel(
                 incomingMessages,
             )
         }
-        messages = confirmed + local
+        messages = reconcileDeletedFiles("bot/$selectedAgentID", confirmed + local)
         snapshot = incoming.copy(messages = null)
         cacheRecentChat()
         followDecisions()
@@ -1568,7 +1570,7 @@ class AppModel(
                 return@request {
                     if (selectionVersion == version) {
                         loadingOlder = false
-                        messages = mergeMessages(messages, page.messages ?: emptyList())
+                        messages = reconcileDeletedFiles("bot/$id", mergeMessages(messages, page.messages ?: emptyList()))
                         hasMore = page.hasMore ?: false
                         oldestEntryID = page.oldestEntryId ?: ""
                     }
@@ -1670,22 +1672,56 @@ class AppModel(
         val gen = generation
         scope.launch {
             try {
+                val files = uploadFiles(record, { generation == gen && pendingSends[id]?.get(requestID) === record }) {
+                    api.uploadFile(id, it)
+                }
                 api.sendChatMessage(
                     agentID = id,
                     content = record.content,
                     requestID = requestID,
                     replyTo = record.replyTo,
-                    attachments = record.attachments.map { it.outgoing },
+                    files = files,
                 )
                 if (generation != gen) return@launch
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
                 if (generation != gen || !markMessage(id, requestID, MessageDeliveryState.failed)) return@launch
+                discardRejectedFiles(record, e)
                 if (selectedAgentID == id) errorText = "Message was not confirmed: ${friendlyError(e)}"
                 if (restoreDraft) restoreComposer(id, record)
             }
             if (pendingPreviews[id]?.requestID == requestID) pendingPreviews.remove(id)
+        }
+    }
+
+    private suspend fun uploadFiles(
+        record: PendingSend,
+        isCurrent: () -> Boolean,
+        upload: suspend (PendingAttachment) -> String,
+    ): List<String> {
+        fun checkCurrent() {
+            if (!isCurrent()) throw CancellationException("Send no longer belongs to this connection or chat")
+        }
+        checkCurrent()
+        val files = record.attachments.map { attachment ->
+            currentCoroutineContext().ensureActive()
+            checkCurrent()
+            record.uploadedFiles[attachment.id] ?: upload(attachment).also { id ->
+                currentCoroutineContext().ensureActive()
+                checkCurrent()
+                record.uploadedFiles[attachment.id] = id
+            }
+        }
+        checkCurrent()
+        return files
+    }
+
+    private fun discardRejectedFiles(record: PendingSend, error: Throwable) {
+        if (error !is APIError || error.statusCode != 400) return
+        val message = friendlyError(error)
+        if (message == "File not found in this library" || message.endsWith(" was deleted from the library")) {
+            record.uploadedFiles.clear()
         }
     }
 
@@ -1717,10 +1753,30 @@ class AppModel(
         attachments = attachments.filterNot { it.id == id }
     }
 
+    private fun reconcileDeletedFiles(chat: String, transcript: List<Message>): List<Message> {
+        for (message in transcript) {
+            for (file in message.attachments.orEmpty()) {
+                if (file.deleted && file.id.isNotEmpty()) deletedFileKeys.add("$generation/$chat/${file.id}")
+            }
+        }
+        if (deletedFileKeys.isEmpty()) return transcript
+        attachmentBytes = attachmentBytes.filterKeys { it !in deletedFileKeys }
+        return transcript.map { message ->
+            val files = message.attachments ?: return@map message
+            if (files.none { !it.deleted && "$generation/$chat/${it.id}" in deletedFileKeys }) return@map message
+            message.copy(attachments = files.map { file ->
+                if ("$generation/$chat/${file.id}" in deletedFileKeys) AttachmentInfo(id = file.id, deleted = true) else file
+            })
+        }
+    }
+
     fun attachmentImageBytes(message: Message, index: Int): ByteArray? {
         val entryID = message.entryId
         if (!entryID.isNullOrEmpty()) {
-            return attachmentBytes["$entryID/$index"]
+            val file = message.attachments?.getOrNull(index)
+            if (file?.deleted == true) return null
+            val key = file?.id?.nilIfEmpty?.let { "$generation/bot/$selectedAgentID/$it" } ?: "$entryID/$index"
+            return attachmentBytes[key]
         }
         val requestID = message.requestId ?: return null
         val files = pendingSends[selectedAgentID]?.get(requestID)?.attachments ?: return null
@@ -1729,18 +1785,28 @@ class AppModel(
     }
 
     suspend fun loadAttachmentImage(entryID: String, index: Int) {
-        val key = "$entryID/$index"
-        if (attachmentBytes.containsKey(key)) return
         val currentClient = client ?: return
         if (entryID.startsWith("local:")) return
         val agent = selectedAgentID
         val gen = generation
+        val message = messages.firstOrNull { it.entryId == entryID }
+        val file = message?.attachments?.getOrNull(index)
+        if (file?.deleted == true) return
+        val fileID = file?.id?.nilIfEmpty
+        val key = fileID?.let { "$gen/bot/$agent/$it" } ?: "$entryID/$index"
+        if (attachmentBytes.containsKey(key)) return
         try {
-            val bytes = currentClient.attachment(agent, entryID = entryID, index = index)
-            if (bytes.isNotEmpty() && generation == gen) {
+            val bytes = if (fileID != null) currentClient.file(agent, fileID)
+                else currentClient.attachment(agent, entryID = entryID, index = index)
+            val latest = messages.firstOrNull { it.entryId == entryID }?.attachments?.getOrNull(index)
+            val stillVisible = selectedAgentID == agent &&
+                (fileID == null || latest?.let { it.id == fileID && !it.deleted } == true)
+            if (bytes.isNotEmpty() && generation == gen && stillVisible) {
                 attachmentBytes = attachmentBytes + (key to bytes)
             }
-        } catch (_: Throwable) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
         }
     }
 
@@ -1863,7 +1929,9 @@ class AppModel(
         }
         val editing = "group:$id" in pendingMutations
         updateConversation(id) { current ->
-            val merged = current.merging(incoming)
+            val merged = current.merging(incoming).let {
+                it.copy(messages = reconcileDeletedFiles("group/$id", it.messages))
+            }
             if (editing) merged.copy(group = current.group) else merged
         }
         if (!editing) writeGroup(incoming.groupChat, adding = true)
@@ -1976,12 +2044,16 @@ class AppModel(
         updateConversation(id) { it.copy(sendError = null) }
         scope.launch {
             try {
-                api.sendGroupMessage(id, record.content, requestID, record.replyTo, record.attachments.map { it.outgoing })
+                val files = uploadFiles(record, { generation == gen && groupSends[requestID] === record }) {
+                    api.uploadGroupFile(id, it)
+                }
+                api.sendGroupMessage(id, record.content, requestID, record.replyTo, files)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
                 // A snapshot may already show the message, or the group may be gone.
                 if (generation != gen || groupOutgoing[id].orEmpty().none { it.requestId == requestID }) return@launch
+                discardRejectedFiles(record, e)
                 markGroupMessage(id, requestID, MessageDeliveryState.failed)
                 updateConversation(id) { it.copy(sendError = "Message was not confirmed: ${friendlyError(e)}") }
             }
@@ -2014,7 +2086,9 @@ class AppModel(
         scope.launch {
             try {
                 val page = api.groupHistory(id, before, GROUP_PAGE_SIZE)
-                if (groupVersion == version) updateConversation(id) { it.adding(page) }
+                if (groupVersion == version) updateConversation(id) { current ->
+                    current.adding(page).let { it.copy(messages = reconcileDeletedFiles("group/$id", it.messages)) }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -2027,21 +2101,32 @@ class AppModel(
 
     fun groupAttachmentImageBytes(message: Message, index: Int): ByteArray? {
         val entryID = message.entryId
-        if (!entryID.isNullOrEmpty()) return attachmentBytes["$entryID/$index"]
+        if (!entryID.isNullOrEmpty()) {
+            val file = message.attachments?.getOrNull(index) ?: return null
+            if (file.deleted || file.id.isEmpty()) return null
+            val id = groupConversation?.groupID ?: return null
+            return attachmentBytes["$generation/group/$id/${file.id}"]
+        }
         val file = groupSends[message.requestId]?.attachments?.getOrNull(index)
         return file?.takeIf { it.isImage }?.data
     }
 
-    // Group entry IDs embed the group's ID, so they cannot collide with a bot's in `attachmentBytes`.
     suspend fun loadGroupAttachmentImage(entryID: String, index: Int) {
-        val key = "$entryID/$index"
         val api = client ?: return
-        val id = groupConversation?.groupID ?: return
-        if (attachmentBytes.containsKey(key)) return
+        val conversation = groupConversation ?: return
+        val id = conversation.groupID
+        val file = conversation.messages.firstOrNull { it.entryId == entryID }?.attachments?.getOrNull(index) ?: return
+        if (file.deleted || file.id.isEmpty()) return
         val gen = generation
+        val key = "$gen/group/$id/${file.id}"
+        if (attachmentBytes.containsKey(key)) return
         try {
-            val bytes = api.groupAttachment(id, entryID, index)
-            if (bytes.isNotEmpty() && generation == gen) attachmentBytes = attachmentBytes + (key to bytes)
+            val bytes = api.groupFile(id, file.id)
+            val latest = groupConversation?.takeIf { it.groupID == id }?.messages
+                ?.firstOrNull { it.entryId == entryID }?.attachments?.getOrNull(index)
+            if (bytes.isNotEmpty() && generation == gen && latest?.let { it.id == file.id && !it.deleted } == true) {
+                attachmentBytes = attachmentBytes + (key to bytes)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -3947,6 +4032,7 @@ class AppModel(
         resetAccountForm()
         recentChats.clear()
         attachmentBytes = emptyMap()
+        deletedFileKeys.clear()
         credentials.deletePrefixed(RECENT_CHAT_PREFIX)
         forgetDrafts()
         awaitingInitialSnapshot = false

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import pathlib
 import shutil
 import tempfile
@@ -62,6 +63,70 @@ class ContractTests(unittest.TestCase):
         self.assertIn("val `blocks`: List<TranscriptBlock>? = null", snapshot_message)
         self.assertNotIn("SnapshotEventPayloadTranscriptBlock", source)
         self.assertIn("data class Variant3(val value: JobStepItem) : JobHistoryItem()", source)
+
+    def test_group_snapshot_is_copied_and_projected(self):
+        self.assertIn("group-chat-snapshot.schema.json", contract.ASSETS)
+        event = json.loads((ROOT / "contract/assets/group-chat-snapshot.schema.json").read_text())
+        projection = json.loads((contract.GENERATED / "event-projection.json").read_text())["components"]["schemas"]
+        snapshot = projection["GroupSnapshotEventPayload"]
+        self.assertEqual(event["required"], snapshot["required"])
+        self.assertEqual("#/components/schemas/TranscriptBlock", snapshot["properties"]["messages"]["items"]["properties"]["blocks"]["items"]["$ref"])
+        source = (contract.GENERATED / "ContractModels.kt").read_text()
+        message = source.split("data class GroupSnapshotEventPayloadMessagesItem(", 1)[1].split("\n)", 1)[0]
+        self.assertIn("val `blocks`: List<TranscriptBlock>? = null", message)
+        self.assertIn("val `files`: List<GroupSnapshotEventPayloadMessagesItemFilesItem>? = null", message)
+        self.assertNotIn("GroupSnapshotEventPayloadTranscriptBlock", source)
+        for name in ("TranscriptMessageFilesItem", "SnapshotEventPayloadMessagesItemFilesItem", "GroupSnapshotEventPayloadMessagesItemFilesItem"):
+            with self.subTest(name=name):
+                self.assertIn("sealed class " + name, source)
+                deleted = source.split("data class " + name + "Variant2(", 1)[1].split("\n)", 1)[0]
+                self.assertIn("val `id`: String", deleted)
+                self.assertIn("val `deleted`: Boolean", deleted)
+
+    def operation_source(self, operation):
+        document = {"components": {"schemas": {}}, "paths": {"/files": {"post": dict(operationId="uploadFile", **operation)}}}
+        return generator.Generator(document).operations()
+
+    def test_header_parameters_are_forwarded(self):
+        for media, boundary in ((None, "send"), ("text/event-stream", "request")):
+            with self.subTest(media=media):
+                response = {} if media is None else {"content": {media: {}}}
+                source = self.operation_source({
+                    "parameters": [
+                        {"in": "header", "name": "Content-Type", "required": True, "schema": {"type": "string"}},
+                        {"in": "header", "name": "X-File-Name", "schema": {"type": "string"}},
+                        {"in": "header", "name": "X-Count", "schema": {"type": "integer"}},
+                    ],
+                    "responses": {"200": response},
+                })
+                self.assertIn('`Content-Type`: String', source)
+                self.assertIn('`X-File-Name`: String? = null', source)
+                self.assertIn('`Content-Type`.let { headers["Content-Type"] = it }', source)
+                self.assertIn('`X-File-Name`?.let { headers["X-File-Name"] = it }', source)
+                self.assertIn('`X-Count`?.let { headers["X-Count"] = it.toString() }', source)
+                self.assertIn('boundary.' + boundary + '("POST", path, null, timeoutMs, headers)', source)
+
+    def test_raw_binary_request_preserves_bytes(self):
+        source = self.operation_source({
+            "requestBody": {"required": True, "content": {"*/*": {"schema": {"type": "string", "format": "binary"}}}},
+            "responses": {"204": {}},
+        })
+        self.assertIn('suspend fun uploadFile(body: ByteArray, timeoutMs: Int = 20_000): Unit', source)
+        self.assertIn('boundary.send("POST", path, body, timeoutMs)', source)
+        self.assertNotIn('encodeToString', source)
+        self.assertNotIn('headers', source)
+
+    def test_binary_request_requires_binary_schema(self):
+        for media, schema in (("*/*", {"type": "string"}), ("application/octet-stream", {"type": "object"}), ("text/plain", {"type": "string"})):
+            with self.subTest(media=media, schema=schema), self.assertRaises(ValueError):
+                self.operation_source({"requestBody": {"content": {media: {"schema": schema}}}, "responses": {"204": {}}})
+
+    def test_octet_stream_download_returns_bytes(self):
+        source = self.operation_source({"responses": {"200": {"content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}}})
+        self.assertIn('suspend fun uploadFile(timeoutMs: Int = 20_000): ByteArray', source)
+        self.assertIn('return boundary.send("POST", path, null, timeoutMs)', source)
+        self.assertNotIn('decodeFromString', source)
+        self.assertNotIn('headers', source)
 
     def test_unsupported_schema_fails_closed(self):
         instance = generator.Generator({"components": {"schemas": {}}, "paths": {}})

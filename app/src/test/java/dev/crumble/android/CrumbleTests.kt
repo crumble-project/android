@@ -23,7 +23,6 @@ import dev.crumble.android.model.MentionCompletion
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.MessageDeliveryState
 import dev.crumble.android.model.NotificationContext
-import dev.crumble.android.model.OutgoingAttachment
 import dev.crumble.android.model.PendingAttachment
 import dev.crumble.android.model.Route
 import dev.crumble.android.model.Schedule
@@ -295,7 +294,7 @@ class CrumbleTests {
         val (client, stub) = StubTransport.client { req ->
             when {
                 req.pathWithQuery.startsWith("/v1/agents/a1/chat/history") ->
-                    200 to """{"messages":[{"id":"a1:8:0","entryId":"a1:8","role":"user","content":"older"}],"hasMore":false,"oldestEntryId":"a1:8"}"""
+                    200 to """{"messages":[{"id":"a1:8:0","entryId":"a1:8","role":"user","content":"older","replyReferences":[]}],"hasMore":false,"oldestEntryId":"a1:8"}"""
                 req.pathWithQuery == "/v1/agents/a1/messages" -> 202 to executionFixture
                 else -> 404 to ""
             }
@@ -316,16 +315,16 @@ class CrumbleTests {
             content = "",
             requestID = "req",
             replyTo = "",
-            attachments = listOf(OutgoingAttachment(name = "dot.png", mimeType = "image/png", data = "AAAA")),
+            files = listOf("33333333-3333-4333-8333-333333333333"),
         )
         val bodyStr = String(stub.requests.last().body ?: ByteArray(0), StandardCharsets.UTF_8)
         val obj = CrumbleJson.parseToJsonElement(bodyStr) as JsonObject
         assertNull(obj["replyTo"])
-        val attachmentsArr = obj["attachments"] as JsonArray
-        assertEquals(JsonPrimitive("image/png"), (attachmentsArr.first() as JsonObject)["mimeType"])
+        assertNull(obj["attachments"])
+        assertEquals(JsonArray(listOf(JsonPrimitive("33333333-3333-4333-8333-333333333333"))), obj["files"])
         val msg = CrumbleJson.decodeFromString(
             Message.serializer(),
-            """{"id":"a1:5:0","role":"user","content":"","attachments":[{"name":"dot.png","mimeType":"image/png","size":70,"kind":"image"}]}""",
+            """{"id":"a1:5:0","role":"user","content":"","attachments":[{"id":"33333333-3333-4333-8333-333333333333","name":"dot.png","mimeType":"image/png","size":70}]}""",
         )
         assertTrue(msg.attachments?.first()?.isImage == true)
         assertTrue(ChatRow.shownInChat(msg))
@@ -334,7 +333,10 @@ class CrumbleTests {
     @Test
     fun failedSendsKeepTheirAttachments() = runTest {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
-        val (client, _) = StubTransport.client { 500 to """{"error":"busy"}""" }
+        val (client, stub) = StubTransport.client { request ->
+            if (request.pathWithQuery.endsWith("/files")) 201 to uploadedFileFixture()
+            else 500 to """{"error":"busy"}"""
+        }
         val model = AppModel(client = client, scope = testScope)
         model.snapshot = ChatSnapshot(status = "idle", agentId = "a1")
         model.attachments = listOf(PendingAttachment(name = "notes.txt", mimeType = "text/plain", data = "hi".toByteArray()))
@@ -343,6 +345,7 @@ class CrumbleTests {
         advanceUntilIdle()
         assertEquals(listOf("notes.txt"), model.attachments.map { it.name })
         assertTrue(model.errorText.contains("busy"))
+        assertEquals(listOf("/files", "/messages"), stub.requests.map { "/" + it.pathWithQuery.substringAfterLast("/") })
     }
 
     @Test
@@ -500,7 +503,7 @@ class CrumbleTests {
     @Test
     fun requestBotResultBecomesAChatRow() = runTest {
         val (client, _) = StubTransport.client {
-            200 to """{"messages":[{"id":"t1","entryId":"t","role":"toolResult","content":"","toolName":"request_bot","toolDetails":{"id":"r1","proposal":{"name":"Scout"}}},{"id":"t2","entryId":"t","role":"toolResult","content":"","toolName":"request_bot","isError":true}],"hasMore":false,"oldestEntryId":null}"""
+            200 to """{"messages":[{"id":"t1","entryId":"t","role":"toolResult","content":"","replyReferences":[],"toolName":"request_bot","toolDetails":{"id":"r1","proposal":{"name":"Scout"}}},{"id":"t2","entryId":"t","role":"toolResult","content":"","replyReferences":[],"toolName":"request_bot","isError":true}],"hasMore":false,"oldestEntryId":null}"""
         }
         val messages = client.chatHistory("a1", before = "t", limit = 10).messages.orEmpty()
         assertEquals(BotRequestRef("r1", "Scout"), messages[0].botRequest)

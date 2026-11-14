@@ -24,9 +24,15 @@ Open the navigation drawer › **Settings**, enter the server URL (`http://10.0.
 
 The app doesn't configure the server or the account. Providers, credentials, logins, password managers, integrations, coding, users, message gateways, and the event relay are set in the web app: **Settings** › **Server settings** opens it in the browser.
 
+## Chat files
+
+Bot and group chats upload attachments as raw bytes, then send their file IDs with the message. Failed sends retain attachments for retry. Retries reuse confirmed uploads and the message request ID. Deleted transcript files display **File deleted** instead of an image.
+
+Library browsing is not included. Notification compatibility is a separate migration; this update retains the existing presence behavior.
+
 ## Shared API contract
 
-`contract/assets/` holds a copy of the `bot` contract files from `bot/openapi/`. A running server also serves its document at `GET /openapi.json`. `scripts/generate-contract.py` generates Kotlin wire models and operations without external build-time dependencies.
+`contract/assets/` holds the HTTP contract and bot, group, activity, and heartbeat event schemas from `bot/openapi/`. A running server also serves its document at `GET /openapi.json`. `scripts/generate-contract.py` generates Kotlin wire models and operations without external build-time dependencies, including upload headers and binary bodies.
 
 ```bash
 python3 scripts/contract.py generate                         # Regenerate from contract/assets/

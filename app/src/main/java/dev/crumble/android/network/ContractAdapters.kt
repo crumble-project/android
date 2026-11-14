@@ -95,12 +95,22 @@ private fun secretRequestRef(tool: String, toolName: String?, isError: Boolean?,
     return SecretRequestRef(name, hosts, (request["requestedAt"] as? JsonPrimitive)?.contentOrNull?.nilIfEmpty)
 }
 
+private fun TranscriptMessageFilesItem.domain(): dev.crumble.android.model.AttachmentInfo = when (this) {
+    is TranscriptMessageFilesItem.Variant1 -> dev.crumble.android.model.AttachmentInfo(value.name, value.mimeType, value.size.toInt(), id = value.id)
+    is TranscriptMessageFilesItem.Variant2 -> dev.crumble.android.model.AttachmentInfo(id = value.id, deleted = value.deleted)
+}
+
+private fun SnapshotEventPayloadMessagesItemFilesItem.domain(): dev.crumble.android.model.AttachmentInfo = when (this) {
+    is SnapshotEventPayloadMessagesItemFilesItem.Variant1 -> dev.crumble.android.model.AttachmentInfo(value.name, value.mimeType, value.size.toInt(), id = value.id)
+    is SnapshotEventPayloadMessagesItemFilesItem.Variant2 -> dev.crumble.android.model.AttachmentInfo(id = value.id, deleted = value.deleted)
+}
+
 internal fun TranscriptMessage.domain() = Message(
     id = id, entryId = entryId, role = role, content = JsonPrimitive(content), blocks = blocks,
     kind = kind, replyTo = replyTo, replyPreview = replyPreview,
     origin = origin?.let { dev.crumble.android.model.MessageOrigin(it.kind, it.name, it.agentId, it.source, it.via) },
     communication = communication?.let { dev.crumble.android.model.BotCommunication(it.executionId, it.fromAgentId, it.fromName, it.toAgentId, it.toName, it.status) },
-    timestamp = timestamp?.toLong(), attachments = attachments?.map { dev.crumble.android.model.AttachmentInfo(it.name, it.mimeType, it.size.toInt(), it.kind) },
+    timestamp = timestamp?.toLong(), attachments = files?.map { it.domain() },
     requestId = requestId,
     heldAction = heldAction?.let { HeldActionRef(it.id, it.job) },
     jobQuestion = jobQuestion?.let { JobQuestionRef(it.id, it.job) },
@@ -118,7 +128,7 @@ internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
     kind = kind, replyTo = replyTo, replyPreview = replyPreview,
     origin = origin?.let { dev.crumble.android.model.MessageOrigin(it.kind, it.name, it.agentId, it.source, it.via) },
     communication = communication?.let { dev.crumble.android.model.BotCommunication(it.executionId, it.fromAgentId, it.fromName, it.toAgentId, it.toName, it.status) },
-    timestamp = timestamp?.toLong(), attachments = attachments?.map { dev.crumble.android.model.AttachmentInfo(it.name, it.mimeType, it.size.toInt(), it.kind) },
+    timestamp = timestamp?.toLong(), attachments = files?.map { it.domain() },
     requestId = requestId,
     heldAction = heldAction?.let { HeldActionRef(it.id, it.job) },
     jobQuestion = jobQuestion?.let { JobQuestionRef(it.id, it.job) },

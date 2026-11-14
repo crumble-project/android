@@ -57,6 +57,7 @@ import org.junit.Test
 
 private const val G1 = "11111111-1111-4111-8111-111111111111"
 private const val G2 = "22222222-2222-4222-8222-222222222222"
+private const val FILE = "33333333-3333-4333-8333-333333333333"
 private const val BASE = "/v1/group-chats"
 private const val RECONNECTING = "Reconnecting…"
 
@@ -64,7 +65,7 @@ private fun groupJson(id: String = G1, name: String = "Team", members: List<Stri
     """{"id":"$id","name":"$name","memberIds":[${members.joinToString(",") { "\"$it\"" }}],"createdAt":"t","updatedAt":"t"}"""
 
 private fun row(entry: Int, group: String = G1, role: String = "user", text: String = "m$entry", requestId: String? = null) =
-    """{"id":"$group:$entry:0","entryId":"$group:$entry","role":"$role","content":"$text"${requestId?.let { ",\"requestId\":\"$it\"" } ?: ""}}"""
+    """{"id":"$group:$entry:0","entryId":"$group:$entry","role":"$role","content":"$text","replyReferences":[]${requestId?.let { ",\"requestId\":\"$it\"" } ?: ""}}"""
 
 private fun snapshotJson(
     rows: List<String> = emptyList(),
@@ -84,6 +85,7 @@ private class GroupTransport : HttpTransport {
     val responses = mutableMapOf<String, Pair<Int, String>>(
         "GET $BASE" to (200 to "[${groupJson()}]"),
         "GET $BASE/$G1/chat" to (200 to snapshotJson()),
+        "POST $BASE/$G1/files" to (201 to uploadedFileFixture(FILE)),
         "POST $BASE/$G1/messages" to (201 to """{"requestId":"r","entryId":"e"}"""),
         "POST $BASE/$G1/stop" to (204 to ""),
         "DELETE $BASE/$G1" to (204 to ""),
@@ -99,7 +101,7 @@ private class GroupTransport : HttpTransport {
         requests.add(request)
         val key = key(request)
         held[key]?.await()
-        if (bytes.isNotEmpty() && "/attachments/" in key) return HttpResponseData(200, bytes)
+        if (bytes.isNotEmpty() && request.method == "GET" && "/files/" in key) return HttpResponseData(200, bytes)
         val (status, body) = responses[key] ?: (500 to """{"error":"unscripted $key"}""")
         return HttpResponseData(status, body.toByteArray(StandardCharsets.UTF_8))
     }
@@ -183,8 +185,8 @@ class GroupChatTests {
         val sent = bodyOf(transport.sent("POST $BASE/$G1/messages").single())
         assertEquals("r1", sent["requestId"]!!.jsonPrimitive.content)
         assertEquals("e1", sent["replyTo"]!!.jsonPrimitive.content)
-        assertArrayEquals(byteArrayOf(1, 2), api.groupAttachment(G1, "e:1", 0))
-        assertEquals("/v1/group-chats/$G1/attachments/e%3A1/0", transport.requests.last().pathWithQuery)
+        assertArrayEquals(byteArrayOf(1, 2), api.groupFile(G1, FILE))
+        assertEquals("$BASE/$G1/files/$FILE", transport.requests.last().pathWithQuery)
         api.stopGroupChat(G1)
         val failure = runCatching { api.groupChatEvents(G1) {} }.exceptionOrNull()
         assertEquals(404, (failure as dev.crumble.android.network.APIError).statusCode)
@@ -554,7 +556,11 @@ class GroupChatTests {
         val sends = transport.sent("POST $BASE/$G1/messages").map { bodyOf(it) }
         assertEquals(2, sends.size)
         assertEquals(sends[0]["requestId"], sends[1]["requestId"])
-        assertEquals("a.png", sends[1]["attachments"]!!.jsonArray[0].jsonObject["name"]!!.jsonPrimitive.content)
+        assertEquals(1, transport.sent("POST $BASE/$G1/files").size)
+        assertEquals(listOf(FILE), sends[0]["files"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(sends[0]["files"], sends[1]["files"])
+        assertFalse(sends[0].containsKey("attachments"))
+        assertFalse(sends[1].containsKey("attachments"))
     }
 
     @Test
@@ -692,12 +698,33 @@ class GroupChatTests {
     }
 
     @Test
-    fun groupImagesComeFromTheGroupAttachmentRoute() = runTest {
+    fun groupImagesComeFromTheGroupFileRoute() = runTest {
         val transport = GroupTransport().apply { bytes = byteArrayOf(9) }
-        val app = opened(transport)
+        val fileRow = row(1).dropLast(1) + ""","files":[{"id":"$FILE","name":"image.png","mimeType":"image/png","size":1}]}"""
+        val app = opened(transport, listOf(fileRow))
+        val message = app.groupConversation!!.messages.single()
         app.loadGroupAttachmentImage("$G1:1", 0)
-        assertEquals("/v1/group-chats/$G1/attachments/11111111-1111-4111-8111-111111111111%3A1/0", transport.requests.last().pathWithQuery)
-        assertArrayEquals(byteArrayOf(9), app.groupAttachmentImageBytes(Message(entryId = "$G1:1"), 0))
+        assertEquals("$BASE/$G1/files/$FILE", transport.requests.last().pathWithQuery)
+        assertArrayEquals(byteArrayOf(9), app.groupAttachmentImageBytes(message, 0))
+    }
+
+    @Test
+    fun aPartialSnapshotDeletesEveryGroupReferenceToTheSameFile() = runTest {
+        val transport = GroupTransport().apply { bytes = byteArrayOf(9) }
+        val files = ""","files":[{"id":"$FILE","name":"image.png","mimeType":"image/png","size":1}]}"""
+        val app = opened(transport, listOf(row(1).dropLast(1) + files, row(2).dropLast(1) + files))
+        app.loadGroupAttachmentImage("$G1:1", 0)
+        assertArrayEquals(byteArrayOf(9), app.groupAttachmentImageBytes(app.groupConversation!!.messages.first(), 0))
+        val deleted = row(2).dropLast(1) + ""","files":[{"id":"$FILE","deleted":true}]}"""
+        nextStream(app, transport, snapshotJson(listOf(deleted)))
+        val messages = app.groupConversation!!.messages
+        assertEquals(2, messages.size)
+        assertTrue(messages.all { it.attachments!!.single().deleted })
+        assertTrue(app.attachmentBytes.isEmpty())
+        assertNull(app.groupAttachmentImageBytes(messages.first(), 0))
+        val count = transport.requests.size
+        app.loadGroupAttachmentImage("$G1:1", 0)
+        assertEquals(count, transport.requests.size)
     }
 
     @Test

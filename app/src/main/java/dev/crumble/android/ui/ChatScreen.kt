@@ -1207,7 +1207,7 @@ fun SentAttachments(
                     val bitmap = remember(bytes) {
                         bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
                     }
-                    LaunchedEffect(message.entryId, index) {
+                    LaunchedEffect(message.entryId, file.id, index) {
                         val entryID = message.entryId
                         if (!entryID.isNullOrEmpty()) {
                             loadImage(entryID, index)
@@ -1237,7 +1237,7 @@ fun SentAttachments(
                         }
                     }
                 } else {
-                    FileLabel(name = file.name)
+                    FileLabel(name = if (file.deleted) "File deleted" else file.name)
                 }
             }
         }

@@ -81,7 +81,7 @@ class CallRequestTests {
     @Test
     fun requestCallResultBecomesARef() = runTest {
         val transport = CallTransport {
-            200 to """{"messages":[{"id":"t1","entryId":"t","role":"toolResult","content":"","toolName":"request_call","toolDetails":${callRequestFixture()}},{"id":"t2","entryId":"t","role":"toolResult","content":"","toolName":"request_call","isError":true}],"hasMore":false,"oldestEntryId":null}"""
+            200 to """{"messages":[{"id":"t1","entryId":"t","role":"toolResult","content":"","replyReferences":[],"toolName":"request_call","toolDetails":${callRequestFixture()}},{"id":"t2","entryId":"t","role":"toolResult","content":"","replyReferences":[],"toolName":"request_call","isError":true}],"hasMore":false,"oldestEntryId":null}"""
         }
         val client = APIClient(baseURL = "http://crumble.test/", token = "", transport = transport)
         val messages = client.chatHistory("a1", before = "t", limit = 10).messages.orEmpty()
@@ -93,7 +93,7 @@ class CallRequestTests {
     @Test
     fun calleeCarriesFromTheCallEvent() = runTest {
         val transport = CallTransport {
-            200 to """{"messages":[{"id":"e1","entryId":"e","role":"event","content":"started","kind":"call-started","call":{"callId":"v1","direction":"outbound","callee":"Dr. Weber"}}],"hasMore":false,"oldestEntryId":null}"""
+            200 to """{"messages":[{"id":"e1","entryId":"e","role":"event","content":"started","replyReferences":[],"kind":"call-started","call":{"callId":"v1","direction":"outbound","callee":"Dr. Weber"}}],"hasMore":false,"oldestEntryId":null}"""
         }
         val client = APIClient(baseURL = "http://crumble.test/", token = "", transport = transport)
         val event = client.chatHistory("a1", before = "e", limit = 10).messages.orEmpty().single()
@@ -219,7 +219,7 @@ class CallRequestTests {
         val transport = CallTransport { req ->
             when (req.pathWithQuery) {
                 calls -> 200 to "[${callRequestFixture(status)}]"
-                "$calls/c1/transcript?limit=200" -> 200 to """{"messages":[${(1..lines).joinToString(",") { """{"id":"m$it","entryId":"m$it","role":"user","content":"line $it"}""" }}],"hasMore":false,"oldestEntryId":null}"""
+                "$calls/c1/transcript?limit=200" -> 200 to """{"messages":[${(1..lines).joinToString(",") { """{"id":"m$it","entryId":"m$it","role":"user","content":"line $it","replyReferences":[]}""" }}],"hasMore":false,"oldestEntryId":null}"""
                 else -> 503 to ""
             }
         }
