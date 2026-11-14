@@ -2,7 +2,7 @@ package dev.crumble.android
 
 import dev.crumble.android.model.ActivityEvent
 import dev.crumble.android.network.APIClient
-import dev.crumble.android.push.PushPresence
+import dev.crumble.android.push.ChatAttentionChat
 import dev.crumble.android.push.PushRegistration
 import dev.crumble.android.push.parsePushReplyData
 import dev.crumble.android.push.parsePushReplyPayload
@@ -31,11 +31,11 @@ class PushContractTests {
     }
 
     @Test
-    fun pushApiUsesEscapedInstallationIdAndExplicitPresenceNull() = runTest {
+    fun pushApiUsesEscapedInstallationIdAndIndependentAttention() = runTest {
         val (client, stub) = StubTransport.client(token = "token") { request ->
             when (request.method) {
                 "GET" -> 200 to """{"serverId":"s1","transports":{"apns":false,"fcm":true}}"""
-                "PUT" -> if (request.pathWithQuery.endsWith("/presence")) 204 to "" else 200 to """{"serverId":"s1","remoteDelivery":true}"""
+                "PUT" -> if (request.pathWithQuery.startsWith("/v1/chat-attention/")) 204 to "" else 200 to """{"serverId":"s1","remoteDelivery":true}"""
                 "DELETE" -> 204 to ""
                 else -> 500 to ""
             }
@@ -47,11 +47,14 @@ class PushContractTests {
         assertEquals("/v1/push/devices/installation%2Fid", registration.pathWithQuery)
         assertEquals("Bearer token", registration.headers["Authorization"])
         assertTrue(String(registration.body!!, StandardCharsets.UTF_8).contains("\"platform\":\"android\""))
-        client.updatePushPresence("installation/id", PushPresence(active = false, agentId = null))
+        client.putChatAttentionView("installation/id", null)
+        assertEquals("/v1/chat-attention/views/installation%2Fid", stub.requests[2].pathWithQuery)
         val presenceBody = String(stub.requests[2].body!!, StandardCharsets.UTF_8)
-        assertTrue(presenceBody.contains("\"agentId\":null"))
+        assertTrue(presenceBody.contains("\"chat\":null"))
         client.unregisterPushDevice("installation/id")
         assertEquals("DELETE", stub.requests[3].method)
+        client.putChatAttentionView("view", ChatAttentionChat("group", "g1"))
+        assertEquals("""{"chat":{"kind":"group","id":"g1"}}""", String(stub.requests[4].body!!, StandardCharsets.UTF_8))
     }
 
     @Test(expected = IllegalArgumentException::class)

@@ -23,7 +23,6 @@ import dev.crumble.android.model.MentionCompletion
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.MessageDeliveryState
 import dev.crumble.android.model.NotificationContext
-import dev.crumble.android.model.OutgoingAttachment
 import dev.crumble.android.model.PendingAttachment
 import dev.crumble.android.model.Route
 import dev.crumble.android.model.Schedule
@@ -174,11 +173,11 @@ class CrumbleTests {
 
     @Test
     fun runningPartialChatShowsOnlyThinkingUntilTurnCompletes() {
-        val partial = ChatSnapshot(status = "running", partial = "draft text", agentId = "a1")
+        val partial = ChatSnapshot(status = "running", working = "thinking", partial = "draft text", agentId = "a1")
         assertEquals(listOf(ChatRow.Thinking), ChatRow.rows(emptyList(), partial, hasMore = false))
 
-        val first = Message(id = "m1", role = "assistant", blocks = JsonPrimitive("first"))
-        val second = Message(id = "m2", role = "assistant", blocks = JsonPrimitive("second"))
+        val first = Message(id = "m1", role = "assistant", blocks = listOf(dev.crumble.android.generated.TranscriptBlock.Variant1(dev.crumble.android.generated.TranscriptTextBlock("text", "first"))))
+        val second = Message(id = "m2", role = "assistant", blocks = listOf(dev.crumble.android.generated.TranscriptBlock.Variant1(dev.crumble.android.generated.TranscriptTextBlock("text", "second"))))
         val completed = ChatRow.rows(listOf(first, second), ChatSnapshot(status = "idle", partial = null), hasMore = false)
         assertEquals(listOf("m1", "m2"), completed.filterIsInstance<ChatRow.MessageRow>().map { it.message.id })
         assertTrue(completed.none { it is ChatRow.Partial || it is ChatRow.Thinking })
@@ -295,7 +294,7 @@ class CrumbleTests {
         val (client, stub) = StubTransport.client { req ->
             when {
                 req.pathWithQuery.startsWith("/v1/agents/a1/chat/history") ->
-                    200 to """{"messages":[{"id":"a1:8:0","entryId":"a1:8","role":"user","content":"older"}],"hasMore":false,"oldestEntryId":"a1:8"}"""
+                    200 to """{"messages":[{"id":"a1:8:0","entryId":"a1:8","role":"user","content":"older","replyReferences":[]}],"hasMore":false,"oldestEntryId":"a1:8"}"""
                 req.pathWithQuery == "/v1/agents/a1/messages" -> 202 to executionFixture
                 else -> 404 to ""
             }
@@ -316,16 +315,16 @@ class CrumbleTests {
             content = "",
             requestID = "req",
             replyTo = "",
-            attachments = listOf(OutgoingAttachment(name = "dot.png", mimeType = "image/png", data = "AAAA")),
+            files = listOf("33333333-3333-4333-8333-333333333333"),
         )
         val bodyStr = String(stub.requests.last().body ?: ByteArray(0), StandardCharsets.UTF_8)
         val obj = CrumbleJson.parseToJsonElement(bodyStr) as JsonObject
         assertNull(obj["replyTo"])
-        val attachmentsArr = obj["attachments"] as JsonArray
-        assertEquals(JsonPrimitive("image/png"), (attachmentsArr.first() as JsonObject)["mimeType"])
+        assertNull(obj["attachments"])
+        assertEquals(JsonArray(listOf(JsonPrimitive("33333333-3333-4333-8333-333333333333"))), obj["files"])
         val msg = CrumbleJson.decodeFromString(
             Message.serializer(),
-            """{"id":"a1:5:0","role":"user","content":"","attachments":[{"name":"dot.png","mimeType":"image/png","size":70,"kind":"image"}]}""",
+            """{"id":"a1:5:0","role":"user","content":"","attachments":[{"id":"33333333-3333-4333-8333-333333333333","name":"dot.png","mimeType":"image/png","size":70}]}""",
         )
         assertTrue(msg.attachments?.first()?.isImage == true)
         assertTrue(ChatRow.shownInChat(msg))
@@ -334,7 +333,10 @@ class CrumbleTests {
     @Test
     fun failedSendsKeepTheirAttachments() = runTest {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
-        val (client, _) = StubTransport.client { 500 to """{"error":"busy"}""" }
+        val (client, stub) = StubTransport.client { request ->
+            if (request.pathWithQuery.endsWith("/files")) 201 to uploadedFileFixture()
+            else 500 to """{"error":"busy"}"""
+        }
         val model = AppModel(client = client, scope = testScope)
         model.snapshot = ChatSnapshot(status = "idle", agentId = "a1")
         model.attachments = listOf(PendingAttachment(name = "notes.txt", mimeType = "text/plain", data = "hi".toByteArray()))
@@ -343,6 +345,7 @@ class CrumbleTests {
         advanceUntilIdle()
         assertEquals(listOf("notes.txt"), model.attachments.map { it.name })
         assertTrue(model.errorText.contains("busy"))
+        assertEquals(listOf("/files", "/messages"), stub.requests.map { "/" + it.pathWithQuery.substringAfterLast("/") })
     }
 
     @Test
@@ -367,7 +370,7 @@ class CrumbleTests {
     @Test
     fun taskPickersPreserveTheInstantAndSubmitOnlyTheSelectedMode() = runTest {
         val testScope = TestScope(StandardTestDispatcher(testScheduler))
-        val response = """{"id":"s1","agentId":"a1","name":"Greeting","kind":"prompt","prompt":"Say hi","command":null,"timeoutSeconds":600,"notify":true,"eventSourceId":null,"enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z","cron":null,"nextRunAt":null,"createdAt":"2026-10-18T10:00:00Z","createdByAgentId":null}"""
+        val response = """{"id":"s1","agentId":"a1","name":"Greeting","kind":"prompt","prompt":"Say hi","command":null,"timeoutSeconds":600,"notify":true,"eventSourceId":null,"enabled":true,"timezone":"Europe/Berlin","runAt":"2026-10-18T10:10:00Z","cron":null,"nextRunAt":null,"nextRunLabel":"Soon","description":"Once","timing":"Once","createdAt":"2026-10-18T10:00:00Z","createdByAgentId":null}"""
         val (client, stub) = StubTransport.client { req ->
             200 to if (req.method == "PATCH") response else "[]"
         }
@@ -384,6 +387,7 @@ class CrumbleTests {
             assertEquals(12, zdt.hour)
             assertEquals(10, zdt.minute)
             model.taskDraft = draft.copy(repeats = repeats)
+            model.allowTaskSave()
             model.saveTask()
             advanceUntilIdle()
             assertFalse(model.loading)
@@ -499,7 +503,7 @@ class CrumbleTests {
     @Test
     fun requestBotResultBecomesAChatRow() = runTest {
         val (client, _) = StubTransport.client {
-            200 to """{"messages":[{"id":"t1","entryId":"t","role":"toolResult","content":"","toolName":"request_bot","toolDetails":{"id":"r1","proposal":{"name":"Scout"}}},{"id":"t2","entryId":"t","role":"toolResult","content":"","toolName":"request_bot","isError":true}],"hasMore":false,"oldestEntryId":null}"""
+            200 to """{"messages":[{"id":"t1","entryId":"t","role":"toolResult","content":"","replyReferences":[],"toolName":"request_bot","toolDetails":{"id":"r1","proposal":{"name":"Scout"}}},{"id":"t2","entryId":"t","role":"toolResult","content":"","replyReferences":[],"toolName":"request_bot","isError":true}],"hasMore":false,"oldestEntryId":null}"""
         }
         val messages = client.chatHistory("a1", before = "t", limit = 10).messages.orEmpty()
         assertEquals(BotRequestRef("r1", "Scout"), messages[0].botRequest)
@@ -870,12 +874,9 @@ class CrumbleTests {
     }
 
     @Test
-    fun tasksNeedExactlyOneScheduleMode() {
-        assertNotNull(validateTask(name = "", prompt = "", cron = "", runAt = ""))
-        assertNotNull(validateTask(name = "Daily", prompt = "Check inbox", cron = "0 9 * * *", runAt = "2026-10-18T09:00:00Z"))
-        assertNull(validateTask(name = "Daily", prompt = "Check inbox", cron = "0 9 * * *", runAt = ""))
-        assertNull(validateTask(name = "Once", prompt = "Check inbox", cron = "", runAt = "2026-10-18T09:00:00Z"))
-        assertNotNull(validateTask(name = "Once", prompt = "Check inbox", cron = "", runAt = "tomorrow"))
+    fun tasksNeedNameAndPrompt() {
+        assertNotNull(validateTask(name = "", prompt = ""))
+        assertNull(validateTask(name = "Daily", prompt = "Check inbox"))
     }
 
     @Test
@@ -884,7 +885,6 @@ class CrumbleTests {
         val fractional = taskRunDate("2026-10-18T12:10:00.123Z")!!
         val whole = taskRunDate("2026-10-18T12:10:00Z")!!
         assertTrue(abs((fractional.toEpochMilli() - whole.toEpochMilli()) - 123L) <= 1L)
-        assertNotNull(validateTask(name = "Task", prompt = "Hi", cron = "0 9 * * *", runAt = "", timezone = "Not/AZone"))
     }
 
     @Test
@@ -898,13 +898,13 @@ class CrumbleTests {
         val tool = Message(
             id = "a1:1:0",
             role = "assistant",
-            blocks = JsonArray(listOf(JsonObject(mapOf("type" to JsonPrimitive("toolCall"))))),
+            blocks = listOf(dev.crumble.android.generated.TranscriptBlock.Variant4(dev.crumble.android.generated.TranscriptToolCallBlock("toolCall", "c", "tool", emptyMap()))),
         )
         val reply = Message(
             id = "a1:1:1",
             role = "assistant",
             content = JsonPrimitive("Hi"),
-            blocks = JsonArray(listOf(JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive("Hi"))))),
+            blocks = listOf(dev.crumble.android.generated.TranscriptBlock.Variant1(dev.crumble.android.generated.TranscriptTextBlock("text", "Hi"))),
         )
         assertFalse(ChatRow.shownInChat(tool))
         assertTrue(ChatRow.shownInChat(reply))

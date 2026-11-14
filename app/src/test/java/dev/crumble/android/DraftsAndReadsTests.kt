@@ -1,6 +1,7 @@
 package dev.crumble.android
 
 import dev.crumble.android.model.Agent
+import dev.crumble.android.model.AttachmentInfo
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
@@ -57,6 +58,7 @@ private class Scripted : HttpTransport {
         responses["GET /v1/agents/a1/memories"] = 200 to "[]"
         responses["GET /v1/agents/a2/memories"] = 200 to "[]"
         responses[SEND] = 202 to executionFixture
+        responses["POST /v1/agents/a1/files"] = 201 to uploadedFileFixture()
     }
 
     fun hold(key: String) = CompletableDeferred<Unit>().also { held[key] = it }
@@ -80,7 +82,7 @@ private class Scripted : HttpTransport {
 }
 
 private fun scheduleJson(id: String, name: String) =
-    """{"id":"$id","agentId":"a1","name":"$name","kind":"prompt","prompt":"Hi","command":null,"timeoutSeconds":600,"notify":false,"eventSourceId":null,"enabled":true,"timezone":"UTC","runAt":null,"cron":"0 9 * * *","nextRunAt":null,"createdAt":"2026-11-05T10:00:00Z","createdByAgentId":null}"""
+    """{"id":"$id","agentId":"a1","name":"$name","kind":"prompt","prompt":"Hi","command":null,"timeoutSeconds":600,"notify":false,"eventSourceId":null,"enabled":true,"timezone":"UTC","runAt":null,"cron":"0 9 * * *","nextRunAt":null,"nextRunLabel":"Soon","description":"Once","timing":"Once","createdAt":"2026-11-05T10:00:00Z","createdByAgentId":null}"""
 
 private fun scheduleOf(id: String, name: String = "Task") = CrumbleJson.decodeFromString(Schedule.serializer(), scheduleJson(id, name))
 
@@ -210,6 +212,12 @@ class DraftsAndReadsTests {
 
         assertEquals(1, transport.requestIDs().toSet().size)
         assertEquals(2, transport.requestIDs().size)
+        assertEquals(1, transport.sent("POST /v1/agents/a1/files").size)
+        transport.sent(SEND).forEach { request ->
+            val body = CrumbleJson.parseToJsonElement(request.body!!.toString(StandardCharsets.UTF_8)).jsonObject
+            assertEquals(listOf("33333333-3333-4333-8333-333333333333"), body["files"]!!.jsonArray.map { it.jsonPrimitive.content })
+            assertNull(body["attachments"])
+        }
         assertEquals(1, model.messages.count { it.text == "only once" })
         assertEquals(MessageDeliveryState.sending, model.messages.single().deliveryState)
         assertEquals("", model.draft)
@@ -412,6 +420,7 @@ class DraftsAndReadsTests {
         model.schedules = listOf(scheduleOf("s1", "Before"))
         model.openTaskForm("s1")
         model.taskDraft = model.taskDraft!!.copy(name = "Mine")
+        model.allowTaskSave()
         model.saveTask()
         runCurrent()
 
@@ -466,11 +475,18 @@ class DraftsAndReadsTests {
     @Test
     fun attachmentImagesDoNotOutliveTheSession() = scenario {
         val transport = Scripted().apply {
-            responses["GET /v1/agents/a1/attachments/a1%3A1/0"] = 200 to "image"
+            responses["GET /v1/agents/a1/files/33333333-3333-4333-8333-333333333333"] = 200 to "image"
+            responses["GET /v1/agents/a1/chat?limit=5"] = 200 to snapshotFixture(ChatSnapshot(
+                agentId = "a1", messages = listOf(Message(
+                    id = "a1:1:0", entryId = "a1:1", role = "user",
+                    attachments = listOf(AttachmentInfo(id = "33333333-3333-4333-8333-333333333333", name = "image.png", mimeType = "image/png", size = 5)),
+                )),
+            ))
         }
         val model = model(transport)
         openChat(model)
         model.loadAttachmentImage("a1:1", 0)
+        assertEquals("/v1/agents/a1/files/33333333-3333-4333-8333-333333333333", transport.requests.last().pathWithQuery)
         assertEquals(1, model.attachmentBytes.size)
         model.token = "session"
 
@@ -509,6 +525,7 @@ class DraftsAndReadsTests {
         model.schedules = listOf(scheduleOf("s1"), scheduleOf("s2"))
         model.openTaskForm("s1")
         model.taskDraft = model.taskDraft!!.copy(name = "Renamed")
+        model.allowTaskSave()
         model.saveTask()
         runCurrent()
 

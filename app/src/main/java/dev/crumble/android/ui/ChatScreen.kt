@@ -105,14 +105,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
+import dev.crumble.android.model.DisplayedReplySurface
+import dev.crumble.android.model.replyCardReady
+import dev.crumble.android.push.ChatAttentionChat
 import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.MentionCompletion
 import dev.crumble.android.model.CallMarker
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.MessageDeliveryState
 import dev.crumble.android.model.PendingAttachment
-import dev.crumble.android.model.Sources
-import dev.crumble.android.model.SplitReply
 import dev.crumble.android.model.botReactions
 import dev.crumble.android.model.displayOf
 import dev.crumble.android.model.callMarkerOf
@@ -127,10 +128,8 @@ import dev.crumble.android.model.mentionableBots
 import dev.crumble.android.model.messageLabel
 import dev.crumble.android.model.nilIfEmpty
 import dev.crumble.android.model.noticeTitle
+import dev.crumble.android.generated.MessagePresentation
 import dev.crumble.android.model.preview
-import dev.crumble.android.model.siteOf
-import dev.crumble.android.model.sourcesOf
-import dev.crumble.android.model.splitSources
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -148,7 +147,6 @@ fun ChatView(
     val rows = remember(model.messages, model.snapshot, model.hasMore) {
         ChatRow.rows(messages = model.messages, snapshot = model.snapshot, hasMore = model.hasMore)
     }
-    val sources = remember(model.messages) { sourcesOf(model.messages) }
     val reactions = remember(model.messages) { botReactions(model.messages) }
     // Keep each agent's scroll position isolated. Reverse layout means the
     // newest row is index 0 and is naturally anchored at the bottom.
@@ -175,34 +173,37 @@ fun ChatView(
         }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-        ) {
-            if (rows.isEmpty()) {
-                EmptyChatView(
-                    model = model,
-                    agent = agent,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    reverseLayout = true,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom),
-                ) {
-                    items(rows.asReversed(), key = { it.id }) { row ->
-                        ChatRowView(model = model, agent = agent, row = row, sources = sources, reactions = reactions)
+    AttentionChat(model, ChatAttentionChat("bot", agent.id), ready = model.snapshot != null) {
+        Column(modifier = modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .then(attentionViewport()),
+            ) {
+                if (rows.isEmpty()) {
+                    EmptyChatView(
+                        model = model,
+                        agent = agent,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        reverseLayout = true,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom),
+                    ) {
+                        items(rows.asReversed(), key = { it.id }) { row ->
+                            ChatRowView(model = model, agent = agent, row = row, reactions = reactions)
+                        }
                     }
                 }
             }
-        }
-        if (model.snapshot != null) {
-            Composer(model = model, agent = agent)
+            if (model.snapshot != null) {
+                Composer(model = model, agent = agent)
+            }
         }
     }
 }
@@ -251,7 +252,6 @@ fun ChatRowView(
     model: AppModel,
     agent: Agent,
     row: ChatRow,
-    sources: Map<String, Sources> = emptyMap(),
     reactions: Map<String, List<String>> = emptyMap(),
 ) {
     when (row) {
@@ -262,7 +262,6 @@ fun ChatRowView(
                 model = model,
                 message = row.message,
                 botName = agent.name,
-                sources = sources[row.message.id],
                 reactions = reactions[row.message.entryId].orEmpty(),
             )
         }
@@ -359,7 +358,6 @@ fun MessageView(
     model: AppModel,
     message: Message,
     botName: String,
-    sources: Sources? = null,
     reactions: List<String> = emptyList(),
 ) {
     val replyable = !message.entryId.isNullOrEmpty() && (message.role == "user" || message.role == "assistant")
@@ -383,7 +381,9 @@ fun MessageView(
     when (message.role) {
         "event" -> {
             when {
-                message.heldAction != null -> HeldActionCard(model, message.heldAction, message.text)
+                message.heldAction != null -> ReplyAttention(model, message, DisplayedReplySurface.HeldAction(message.heldAction.id), model.replyCardReady(message)) {
+                    HeldActionCard(model, message.heldAction, message.text)
+                }
                 message.jobQuestion != null -> JobQuestionCard(model, message.jobQuestion, message.text)
                 message.kind == "bot-message" -> BotMessageView(message = message)
                 else -> EventView(model = model, message = message)
@@ -395,10 +395,18 @@ fun MessageView(
             when {
                 display != null -> DisplayCardView(display)
                 isDesktopScreenshot(message) -> DesktopScreenshotCard(model, message)
-                message.botRequest != null -> BotRequestCard(model, message.botRequest)
-                message.callRequest != null -> CallRequestCard(model, message.callRequest)
-                message.credentialRequest != null -> CredentialRequestCard(model, message.credentialRequest)
-                message.loginRequest != null -> LoginRequestCard(model, message.loginRequest)
+                message.botRequest != null -> ReplyAttention(model, message, DisplayedReplySurface.ToolCard(message.toolCallId.orEmpty()), model.replyCardReady(message)) {
+                    BotRequestCard(model, message.botRequest)
+                }
+                message.callRequest != null -> ReplyAttention(model, message, DisplayedReplySurface.ToolCard(message.toolCallId.orEmpty()), model.replyCardReady(message)) {
+                    CallRequestCard(model, message.callRequest)
+                }
+                message.credentialRequest != null -> ReplyAttention(model, message, DisplayedReplySurface.ToolCard(message.toolCallId.orEmpty()), model.replyCardReady(message)) {
+                    CredentialRequestCard(model, message.credentialRequest)
+                }
+                message.loginRequest != null -> ReplyAttention(model, message, DisplayedReplySurface.ToolCard(message.toolCallId.orEmpty()), model.replyCardReady(message)) {
+                    LoginRequestCard(model, message.loginRequest)
+                }
                 job != null -> JobCard(model, job)
             }
         }
@@ -484,7 +492,10 @@ fun MessageView(
                                 onLongClick = { menuExpanded = true },
                             ),
                     ) {
-                        ReplyContent(message.text, sources)
+                        ReplyContent(
+                            message.text, message.presentation,
+                            replyAttentionModifier(model, message, DisplayedReplySurface.Text, ready = message.role == "assistant" && (message.presentation?.text ?: message.text).isNotBlank()),
+                        )
                     }
                     MessageContextMenu(
                         expanded = menuExpanded,
@@ -539,22 +550,19 @@ internal fun DeliveryStatus(message: Message, onRetry: () -> Unit) {
 
 /** A bot's Markdown; citations of pages its turn read show as chips after it. */
 @Composable
-internal fun ReplyContent(text: String, sources: Sources?) {
-    val reply = remember(text, sources) {
-        if (sources != null) splitSources(text, sources) else SplitReply(text, emptyList())
-    }
+internal fun ReplyContent(text: String, presentation: MessagePresentation?, textModifier: Modifier = Modifier) {
     val uriHandler = LocalUriHandler.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        MarkdownText(text = reply.text)
-        if (reply.chips.isNotEmpty()) {
+        MarkdownText(text = presentation?.text ?: text, modifier = textModifier)
+        if (!presentation?.citations.isNullOrEmpty()) {
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                for (chip in reply.chips) {
+                for (chip in presentation.citations) {
                     AssistChip(
                         onClick = { if (isWebLink(chip.href)) runCatching { uriHandler.openUri(chip.href) } },
-                        label = { Text(siteOf(chip.href), maxLines = 1) },
+                        label = { Text(chip.site, maxLines = 1) },
                         modifier = Modifier.semantics { contentDescription = chip.title.ifEmpty { chip.href } },
                     )
                 }
@@ -1218,7 +1226,7 @@ fun SentAttachments(
                     val bitmap = remember(bytes) {
                         bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
                     }
-                    LaunchedEffect(message.entryId, index) {
+                    LaunchedEffect(message.entryId, file.id, index) {
                         val entryID = message.entryId
                         if (!entryID.isNullOrEmpty()) {
                             loadImage(entryID, index)
@@ -1248,7 +1256,7 @@ fun SentAttachments(
                         }
                     }
                 } else {
-                    FileLabel(name = file.name)
+                    FileLabel(name = if (file.deleted) "File deleted" else file.name)
                 }
             }
         }

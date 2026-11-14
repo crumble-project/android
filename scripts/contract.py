@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-ASSETS = ("openapi.json", "chat-snapshot.schema.json", "activity-event.schema.json", "heartbeat.schema.json")
+ASSETS = ("openapi.json", "chat-snapshot.schema.json", "group-chat-snapshot.schema.json", "activity-event.schema.json", "heartbeat.schema.json")
 GENERATED = ROOT / "app/src/main/java/dev/crumble/android/generated"
 
 

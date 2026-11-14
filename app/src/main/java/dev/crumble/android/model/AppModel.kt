@@ -1,6 +1,7 @@
 package dev.crumble.android.model
 
 import kotlinx.serialization.builtins.ListSerializer
+import dev.crumble.android.generated.JobHistoryItem
 import kotlinx.serialization.json.JsonObject
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -30,6 +31,8 @@ import dev.crumble.android.network.UrlConnectionTransport
 import dev.crumble.android.network.domain
 import dev.crumble.android.network.edited
 import dev.crumble.android.network.friendlyError
+import dev.crumble.android.push.ChatAttention
+import dev.crumble.android.push.ChatAttentionChat
 import dev.crumble.android.storage.CredentialStore
 import dev.crumble.android.storage.InMemoryCredentialStore
 import dev.crumble.android.ui.BotState
@@ -39,6 +42,10 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import dev.crumble.android.generated.ReasoningPreview
+import dev.crumble.android.generated.SchedulePreview
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -243,6 +250,24 @@ class AppModel(
     private val onSessionReset: () -> Unit = {},
     private val onNotificationsChanged: () -> Unit = {},
 ) {
+    val chatAttention = ChatAttention(scope)
+    var attentionWindowID: String = ""
+        private set
+
+    fun newAttentionView(): String {
+        attentionWindowID = newRequestID()
+        chatAttention.newView()
+        return attentionWindowID
+    }
+
+    private var botSnapshotRevision = 0
+    private var groupSnapshotRevision = 0
+    private var attentionRefresh: Job? = null
+
+    fun updateChatAttention() {
+        chatAttention.update(client, appActive, route.attentionChat())
+    }
+
     var serverURL by mutableStateOf("http://127.0.0.1:7337")
     var token by mutableStateOf("")
     var email by mutableStateOf("")
@@ -408,6 +433,7 @@ class AppModel(
         val content: String,
         val replyTo: String,
         val attachments: List<PendingAttachment>,
+        val uploadedFiles: MutableMap<UUID, String> = mutableMapOf(),
     )
 
     private data class PendingPreview(
@@ -435,9 +461,10 @@ class AppModel(
     private var groupStream: Job? = null
     private var groupVersion = 0
 
-    /** Sent image bytes, keyed by "entryId/index"; they never change once sent. */
+    /** File bytes are scoped to the connection and chat; screenshots retain their entry/index key. */
     var attachmentBytes by mutableStateOf<Map<String, ByteArray>>(emptyMap())
         private set
+    private val deletedFileKeys = mutableSetOf<String>()
 
     private var activeRequests = 0
     var pendingMutations by mutableStateOf<Set<String>>(emptySet())
@@ -515,7 +542,13 @@ class AppModel(
 
     var agentDraft by mutableStateOf<AgentDraft?>(null)
     var memoryDraft by mutableStateOf<MemoryDraft?>(null)
-    var taskDraft by mutableStateOf<TaskDraft?>(null)
+    private var taskDraftState by mutableStateOf<TaskDraft?>(null)
+    var taskDraft: TaskDraft?
+        get() = taskDraftState
+        set(value) {
+            if (taskDraftState?.let(::scheduleKey) != value?.let(::scheduleKey)) schedulePreviewState = null
+            taskDraftState = value
+        }
     var eventSourceDraft by mutableStateOf<EventSourceDraft?>(null)
     var skillDraft by mutableStateOf<SkillDraft?>(null)
     var showingPalette by mutableStateOf(false)
@@ -574,7 +607,7 @@ class AppModel(
     var confirmingDelete by mutableStateOf(false)
 
 
-    var appActive: Boolean = true
+    var appActive by mutableStateOf(true)
 
     init {
         if (loadCredentials) {
@@ -861,6 +894,7 @@ class AppModel(
 
     /** Keeps older pages the owner already loaded; snapshots only carry the newest page. */
     fun applySnapshot(incoming: ChatSnapshot) {
+        botSnapshotRevision += 1
         val incomingMessages = incoming.messages ?: emptyList()
         val acknowledged = incomingMessages.mapNotNull { it.requestId }.toSet()
         if (acknowledged.isNotEmpty()) {
@@ -890,7 +924,7 @@ class AppModel(
                 incomingMessages,
             )
         }
-        messages = confirmed + local
+        messages = reconcileDeletedFiles("bot/$selectedAgentID", confirmed + local)
         snapshot = incoming.copy(messages = null)
         cacheRecentChat()
         followDecisions()
@@ -1151,10 +1185,23 @@ class AppModel(
 
     private suspend fun loadJobHistory(api: APIClient, agentID: String, job: JobRef, version: Int) {
         try {
+            val pending = jobPanel?.takeIf { jobPanelVersion == version }?.items
+                ?.filterIsInstance<JobHistoryItem.Variant3>()?.filter { it.value.result == null }?.map { it.value.id }?.toMutableSet() ?: return
             val page = api.jobHistory(agentID, job, before = null, limit = JOB_PAGE_SIZE)
+            val refreshed = page.items.associateByTo(mutableMapOf()) { it.id }
+            pending.removeAll(refreshed.keys)
+            var next = page.oldestEntryId.takeIf { page.hasMore }
+            val visited = mutableSetOf<String>()
+            while (pending.isNotEmpty() && next != null && visited.add(next)) {
+                val older = api.jobHistory(agentID, job, before = next, limit = JOB_PAGE_SIZE)
+                older.items.filter { it.id in pending }.forEach { refreshed[it.id] = it }
+                pending.removeAll(refreshed.keys)
+                next = older.oldestEntryId.takeIf { older.hasMore }
+            }
             val panel = jobPanel?.takeIf { jobPanelVersion == version } ?: return
             jobPanel = panel.copy(
-                messages = mergeJobPages(panel.messages, page.messages.orEmpty()),
+                messages = mergeJobPages(panel.messages, page.messages),
+                items = mergeJobItems(panel.items.map { refreshed[it.id] ?: it }, page.items),
                 hasMore = if (panel.loaded) panel.hasMore else page.hasMore == true,
                 oldestEntryID = if (panel.loaded) panel.oldestEntryID else page.oldestEntryId,
                 loaded = true,
@@ -1240,8 +1287,10 @@ class AppModel(
                 val page = api.jobHistory(agentID, panel.job, before, JOB_PAGE_SIZE)
                 val current = jobPanel?.takeIf { jobPanelVersion == version } ?: return@launch
                 val known = current.messages.map { it.id }.toSet()
+                val knownItems = current.items.map { it.id }.toSet()
                 jobPanel = current.copy(
-                    messages = page.messages.orEmpty().filterNot { it.id in known } + current.messages,
+                    messages = page.messages.filterNot { it.id in known } + current.messages,
+                    items = page.items.filterNot { it.id in knownItems } + current.items,
                     hasMore = page.hasMore == true,
                     oldestEntryID = page.oldestEntryId,
                     loadingEarlier = false,
@@ -1526,8 +1575,33 @@ class AppModel(
                 agents = updated
             }
         }
+        if (event.type == "reply") refreshAttentionReferences(event)
         val context = NotificationContext(appActive = appActive, route = route)
         notifier.handle(event, context)
+    }
+
+    private fun refreshAttentionReferences(event: ActivityEvent) {
+        val api = client ?: return
+        if (!appActive) return
+        val chat = if (!event.groupId.isNullOrEmpty()) ChatAttentionChat("group", event.groupId) else ChatAttentionChat("bot", event.agentId)
+        if (route.attentionChat() != chat) return
+        val version = if (chat.kind == "group") groupVersion else selectionVersion
+        val revision = if (chat.kind == "group") groupSnapshotRevision else botSnapshotRevision
+        attentionRefresh?.cancel()
+        attentionRefresh = scope.launch {
+            try {
+                if (chat.kind == "group") {
+                    val incoming = api.groupSnapshot(chat.id)
+                    if (client === api && route.attentionChat() == chat && groupVersion == version && groupSnapshotRevision == revision) applyGroupSnapshot(incoming)
+                } else {
+                    val incoming = api.chat(chat.id, limit = 5)
+                    if (client === api && route.attentionChat() == chat && selectionVersion == version && botSnapshotRevision == revision) applySnapshot(incoming)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
     }
 
     fun loadOlder() {
@@ -1542,7 +1616,7 @@ class AppModel(
                 return@request {
                     if (selectionVersion == version) {
                         loadingOlder = false
-                        messages = mergeMessages(messages, page.messages ?: emptyList())
+                        messages = reconcileDeletedFiles("bot/$id", mergeMessages(messages, page.messages ?: emptyList()))
                         hasMore = page.hasMore ?: false
                         oldestEntryID = page.oldestEntryId ?: ""
                     }
@@ -1644,22 +1718,56 @@ class AppModel(
         val gen = generation
         scope.launch {
             try {
+                val files = uploadFiles(record, { generation == gen && pendingSends[id]?.get(requestID) === record }) {
+                    api.uploadFile(id, it)
+                }
                 api.sendChatMessage(
                     agentID = id,
                     content = record.content,
                     requestID = requestID,
                     replyTo = record.replyTo,
-                    attachments = record.attachments.map { it.outgoing },
+                    files = files,
                 )
                 if (generation != gen) return@launch
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
                 if (generation != gen || !markMessage(id, requestID, MessageDeliveryState.failed)) return@launch
+                discardRejectedFiles(record, e)
                 if (selectedAgentID == id) errorText = "Message was not confirmed: ${friendlyError(e)}"
                 if (restoreDraft) restoreComposer(id, record)
             }
             if (pendingPreviews[id]?.requestID == requestID) pendingPreviews.remove(id)
+        }
+    }
+
+    private suspend fun uploadFiles(
+        record: PendingSend,
+        isCurrent: () -> Boolean,
+        upload: suspend (PendingAttachment) -> String,
+    ): List<String> {
+        fun checkCurrent() {
+            if (!isCurrent()) throw CancellationException("Send no longer belongs to this connection or chat")
+        }
+        checkCurrent()
+        val files = record.attachments.map { attachment ->
+            currentCoroutineContext().ensureActive()
+            checkCurrent()
+            record.uploadedFiles[attachment.id] ?: upload(attachment).also { id ->
+                currentCoroutineContext().ensureActive()
+                checkCurrent()
+                record.uploadedFiles[attachment.id] = id
+            }
+        }
+        checkCurrent()
+        return files
+    }
+
+    private fun discardRejectedFiles(record: PendingSend, error: Throwable) {
+        if (error !is APIError || error.statusCode != 400) return
+        val message = friendlyError(error)
+        if (message == "File not found in this library" || message.endsWith(" was deleted from the library")) {
+            record.uploadedFiles.clear()
         }
     }
 
@@ -1691,10 +1799,30 @@ class AppModel(
         attachments = attachments.filterNot { it.id == id }
     }
 
+    private fun reconcileDeletedFiles(chat: String, transcript: List<Message>): List<Message> {
+        for (message in transcript) {
+            for (file in message.attachments.orEmpty()) {
+                if (file.deleted && file.id.isNotEmpty()) deletedFileKeys.add("$generation/$chat/${file.id}")
+            }
+        }
+        if (deletedFileKeys.isEmpty()) return transcript
+        attachmentBytes = attachmentBytes.filterKeys { it !in deletedFileKeys }
+        return transcript.map { message ->
+            val files = message.attachments ?: return@map message
+            if (files.none { !it.deleted && "$generation/$chat/${it.id}" in deletedFileKeys }) return@map message
+            message.copy(attachments = files.map { file ->
+                if ("$generation/$chat/${file.id}" in deletedFileKeys) AttachmentInfo(id = file.id, deleted = true) else file
+            })
+        }
+    }
+
     fun attachmentImageBytes(message: Message, index: Int): ByteArray? {
         val entryID = message.entryId
         if (!entryID.isNullOrEmpty()) {
-            return attachmentBytes["$entryID/$index"]
+            val file = message.attachments?.getOrNull(index)
+            if (file?.deleted == true) return null
+            val key = file?.id?.nilIfEmpty?.let { "$generation/bot/$selectedAgentID/$it" } ?: "$entryID/$index"
+            return attachmentBytes[key]
         }
         val requestID = message.requestId ?: return null
         val files = pendingSends[selectedAgentID]?.get(requestID)?.attachments ?: return null
@@ -1703,18 +1831,28 @@ class AppModel(
     }
 
     suspend fun loadAttachmentImage(entryID: String, index: Int) {
-        val key = "$entryID/$index"
-        if (attachmentBytes.containsKey(key)) return
         val currentClient = client ?: return
         if (entryID.startsWith("local:")) return
         val agent = selectedAgentID
         val gen = generation
+        val message = messages.firstOrNull { it.entryId == entryID }
+        val file = message?.attachments?.getOrNull(index)
+        if (file?.deleted == true) return
+        val fileID = file?.id?.nilIfEmpty
+        val key = fileID?.let { "$gen/bot/$agent/$it" } ?: "$entryID/$index"
+        if (attachmentBytes.containsKey(key)) return
         try {
-            val bytes = currentClient.attachment(agent, entryID = entryID, index = index)
-            if (bytes.isNotEmpty() && generation == gen) {
+            val bytes = if (fileID != null) currentClient.file(agent, fileID)
+                else currentClient.attachment(agent, entryID = entryID, index = index)
+            val latest = messages.firstOrNull { it.entryId == entryID }?.attachments?.getOrNull(index)
+            val stillVisible = selectedAgentID == agent &&
+                (fileID == null || latest?.let { it.id == fileID && !it.deleted } == true)
+            if (bytes.isNotEmpty() && generation == gen && stillVisible) {
                 attachmentBytes = attachmentBytes + (key to bytes)
             }
-        } catch (_: Throwable) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
         }
     }
 
@@ -1828,6 +1966,7 @@ class AppModel(
     }
 
     private fun applyGroupSnapshot(incoming: GroupSnapshot) {
+        groupSnapshotRevision += 1
         val id = incoming.groupChat.id
         val acknowledged = incoming.messages.mapNotNull { it.requestId }.toSet()
         val waiting = groupOutgoing[id].orEmpty()
@@ -1837,7 +1976,9 @@ class AppModel(
         }
         val editing = "group:$id" in pendingMutations
         updateConversation(id) { current ->
-            val merged = current.merging(incoming)
+            val merged = current.merging(incoming).let {
+                it.copy(messages = reconcileDeletedFiles("group/$id", it.messages))
+            }
             if (editing) merged.copy(group = current.group) else merged
         }
         if (!editing) writeGroup(incoming.groupChat, adding = true)
@@ -1950,12 +2091,16 @@ class AppModel(
         updateConversation(id) { it.copy(sendError = null) }
         scope.launch {
             try {
-                api.sendGroupMessage(id, record.content, requestID, record.replyTo, record.attachments.map { it.outgoing })
+                val files = uploadFiles(record, { generation == gen && groupSends[requestID] === record }) {
+                    api.uploadGroupFile(id, it)
+                }
+                api.sendGroupMessage(id, record.content, requestID, record.replyTo, files)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
                 // A snapshot may already show the message, or the group may be gone.
                 if (generation != gen || groupOutgoing[id].orEmpty().none { it.requestId == requestID }) return@launch
+                discardRejectedFiles(record, e)
                 markGroupMessage(id, requestID, MessageDeliveryState.failed)
                 updateConversation(id) { it.copy(sendError = "Message was not confirmed: ${friendlyError(e)}") }
             }
@@ -1988,7 +2133,9 @@ class AppModel(
         scope.launch {
             try {
                 val page = api.groupHistory(id, before, GROUP_PAGE_SIZE)
-                if (groupVersion == version) updateConversation(id) { it.adding(page) }
+                if (groupVersion == version) updateConversation(id) { current ->
+                    current.adding(page).let { it.copy(messages = reconcileDeletedFiles("group/$id", it.messages)) }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -2001,21 +2148,32 @@ class AppModel(
 
     fun groupAttachmentImageBytes(message: Message, index: Int): ByteArray? {
         val entryID = message.entryId
-        if (!entryID.isNullOrEmpty()) return attachmentBytes["$entryID/$index"]
+        if (!entryID.isNullOrEmpty()) {
+            val file = message.attachments?.getOrNull(index) ?: return null
+            if (file.deleted || file.id.isEmpty()) return null
+            val id = groupConversation?.groupID ?: return null
+            return attachmentBytes["$generation/group/$id/${file.id}"]
+        }
         val file = groupSends[message.requestId]?.attachments?.getOrNull(index)
         return file?.takeIf { it.isImage }?.data
     }
 
-    // Group entry IDs embed the group's ID, so they cannot collide with a bot's in `attachmentBytes`.
     suspend fun loadGroupAttachmentImage(entryID: String, index: Int) {
-        val key = "$entryID/$index"
         val api = client ?: return
-        val id = groupConversation?.groupID ?: return
-        if (attachmentBytes.containsKey(key)) return
+        val conversation = groupConversation ?: return
+        val id = conversation.groupID
+        val file = conversation.messages.firstOrNull { it.entryId == entryID }?.attachments?.getOrNull(index) ?: return
+        if (file.deleted || file.id.isEmpty()) return
         val gen = generation
+        val key = "$gen/group/$id/${file.id}"
+        if (attachmentBytes.containsKey(key)) return
         try {
-            val bytes = api.groupAttachment(id, entryID, index)
-            if (bytes.isNotEmpty() && generation == gen) attachmentBytes = attachmentBytes + (key to bytes)
+            val bytes = api.groupFile(id, file.id)
+            val latest = groupConversation?.takeIf { it.groupID == id }?.messages
+                ?.firstOrNull { it.entryId == entryID }?.attachments?.getOrNull(index)
+            if (bytes.isNotEmpty() && generation == gen && latest?.let { it.id == file.id && !it.deleted } == true) {
+                attachmentBytes = attachmentBytes + (key to bytes)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -2249,12 +2407,22 @@ class AppModel(
         if (provider.isNotEmpty()) loadDesktopModels(provider)
     }
 
-    /** The levels the editor's model takes. The picked level stays in the draft, so changing back restores it. */
-    val editorLevels: List<String>
-        get() = levelsOf(models.firstOrNull { it.id == agentDraft?.model?.trim() })
+    private var reasoningPreviewState by mutableStateOf<Pair<APIClient, Pair<List<String>, ReasoningPreview>>?>(null)
+
+    private fun reasoningKey(draft: AgentDraft) = listOf(draft.id.toString(), draft.botRequestID.orEmpty(), draft.provider, draft.model.trim(), draft.thinking)
+
+    val editorReasoning: ReasoningPreview?
+        get() = agentDraft?.let { draft -> reasoningPreviewState?.takeIf { it.first === client && it.second.first == reasoningKey(draft) }?.second?.second }
 
     val editorLevel: String
-        get() = clampLevel(agentDraft?.thinking?.ifEmpty { "off" } ?: "off", editorLevels)
+        get() = editorReasoning?.effectiveLevel ?: agentDraft?.thinking.orEmpty()
+
+    suspend fun refreshEditorReasoning(api: APIClient, draft: AgentDraft) {
+        val key = reasoningKey(draft)
+        val result = api.previewReasoning(draft.provider, draft.model.trim(), draft.thinking)
+        currentCoroutineContext().ensureActive()
+        if (client === api && agentDraft?.let(::reasoningKey) == key) reasoningPreviewState = api to (key to result)
+    }
 
     val modelHint: String
         get() {
@@ -2557,11 +2725,37 @@ class AppModel(
                 if (settledSince(revision, SCHEDULE_RECORD)) {
                     loadSchedules()
                 } else {
-                    schedules = withLocalChanges(items, schedules, SCHEDULE_RECORD, Schedule::id)
-                    schedulesLoaded = true
-                    schedulesError = ""
-                    if (taskTab == TaskTab.Runs) loadTaskRuns()
+                    applySchedules(items)
                 }
+            }
+        }
+    }
+
+    private fun applySchedules(items: List<Schedule>) {
+        schedules = withLocalChanges(items, schedules, SCHEDULE_RECORD, Schedule::id)
+        schedulesLoaded = true
+        schedulesError = ""
+        if (taskTab == TaskTab.Runs) loadTaskRuns()
+    }
+
+    suspend fun followTaskSchedules(api: APIClient) {
+        val gen = generation
+        while (currentCoroutineContext().isActive) {
+            delay(60_000)
+            if (!appActive) continue
+            if (client !== api || generation != gen || route != Route.Tasks || taskTab != TaskTab.Tasks) return
+            val revision = mutationRevision
+            try {
+                val items = api.schedules()
+                currentCoroutineContext().ensureActive()
+                if (client !== api || generation != gen || route != Route.Tasks || taskTab != TaskTab.Tasks) return
+                if (!settledSince(revision, SCHEDULE_RECORD)) applySchedules(items)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                currentCoroutineContext().ensureActive()
+                if (client !== api || generation != gen || route != Route.Tasks || taskTab != TaskTab.Tasks) return
+                schedulesError = friendlyError(e)
             }
         }
     }
@@ -2846,6 +3040,32 @@ class AppModel(
         taskDraft = form
     }
 
+    private var schedulePreviewState by mutableStateOf<Pair<APIClient, Pair<List<String>, SchedulePreview>>?>(null)
+
+    private fun scheduleKey(draft: TaskDraft) = listOf(
+        draft.id.toString(), draft.agentID, draft.onEvent.toString(), draft.eventSourceID,
+        draft.repeats.toString(), draft.cron.trim(), draft.runDate.toString(), draft.timezone.trim(),
+    )
+
+    val taskPreview: SchedulePreview?
+        get() = taskDraft?.let { draft -> schedulePreviewState?.takeIf { it.first === client && it.second.first == scheduleKey(draft) }?.second?.second }
+
+    internal fun acceptSchedulePreview(api: APIClient, draft: TaskDraft, preview: SchedulePreview) {
+        val key = scheduleKey(draft)
+        if (client === api && taskDraft?.let(::scheduleKey) == key) schedulePreviewState = api to (key to preview)
+    }
+
+    suspend fun refreshTaskPreview(api: APIClient, draft: TaskDraft) {
+        val preview = api.previewSchedule(
+            cron = draft.cron.trim().takeIf { !draft.onEvent && draft.repeats },
+            runAt = draft.runDate.toIso8601SecondString().takeIf { !draft.onEvent && !draft.repeats },
+            eventSourceID = draft.eventSourceID.takeIf { draft.onEvent },
+            timezone = draft.timezone.trim(),
+        )
+        currentCoroutineContext().ensureActive()
+        acceptSchedulePreview(api, draft, preview)
+    }
+
     fun saveTask() {
         val form = taskDraft ?: return
         val name = form.name.trim()
@@ -2862,17 +3082,17 @@ class AppModel(
         val validationError = validateTask(
             name = name,
             prompt = prompt,
-            cron = cron,
-            runAt = runAt,
-            timezone = timezone,
             kind = form.kind,
             command = form.command,
             timeoutSeconds = form.timeoutSeconds,
-            onEvent = form.onEvent,
-            eventSourceID = sourceID,
         )
         if (validationError != null) {
             errorText = validationError
+            return
+        }
+        val preview = taskPreview ?: return
+        if (preview.isProblem) {
+            errorText = preview.text
             return
         }
         val timeoutSeconds = if (isScript) form.timeoutSeconds.trim().toLong() else 600L
@@ -2905,6 +3125,9 @@ class AppModel(
             timeoutSeconds = timeoutSeconds,
             notify = form.notify,
             eventSourceId = sourceID.ifEmpty { null },
+            nextRunLabel = "Saving…",
+            description = "Saving…",
+            timing = "Saving…",
             // Without a next run a one-off reads as finished and leaves the list before it is saved.
             nextRunAt = runAt.ifEmpty { old?.nextRunAt.takeIf { cron.isNotEmpty() } },
         )
@@ -2960,7 +3183,7 @@ class AppModel(
         val enabled = !old.enabled
         optimisticMutation(
             key = "schedule:$id",
-            update = { replace(old.copy(enabled = enabled)) },
+            update = { replace(old.copy(enabled = enabled, timing = if (enabled) old.description else "Paused · ${old.description}", nextRunLabel = if (enabled) "Saving…" else "—")) },
             rollback = { replace(old) },
             work = { api ->
                 val saved = api.updateSchedule(id, patch = mapOf("enabled" to JsonPrimitive(enabled)))
@@ -3802,9 +4025,12 @@ class AppModel(
                 }
                 val candidate = APIClient(rawURL, session, transport)
                 candidate.agents()
-                val replaced = client?.takeIf { it.token.isNotEmpty() && it.token != session }
+                val replaced = client?.takeIf { it.token.isNotEmpty() && (it.token != session || it.baseURL != candidate.baseURL) }
                 // The server keeps one device row per installation, so this must land before the new session registers.
-                replaced?.let { old -> quietly { onSignOut(old) } }
+                replaced?.let { old ->
+                    chatAttention.disconnect(old)
+                    quietly { onSignOut(old) }
+                }
                 credentials.write("server-token", session)
                 credentials.write("account-email", trimmedEmail)
                 credentials.write("server-url", rawURL)
@@ -3844,6 +4070,8 @@ class AppModel(
 
     /** Drops everything that belonged to the old session, so nothing carries over to the next one. */
     private fun resetConnectionState() {
+        chatAttention.update(null, false, null)
+        attentionRefresh?.cancel()
         cancelStream()
         generation += 1
         pendingMutations = emptySet()
@@ -3856,6 +4084,7 @@ class AppModel(
         resetAccountForm()
         recentChats.clear()
         attachmentBytes = emptyMap()
+        deletedFileKeys.clear()
         credentials.deletePrefixed(RECENT_CHAT_PREFIX)
         forgetDrafts()
         awaitingInitialSnapshot = false
@@ -3928,6 +4157,7 @@ class AppModel(
         scope.launch {
             try {
                 val revoked = try {
+                    chatAttention.disconnect(api)
                     onSignOut(api)
                     api.signOut()
                     true

@@ -61,6 +61,8 @@ import dev.crumble.android.generated.GroupActivity
 import dev.crumble.android.generated.GroupChat
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
+import dev.crumble.android.model.DisplayedReplySurface
+import dev.crumble.android.push.ChatAttentionChat
 import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.GROUP_NAME_LIMIT
 import dev.crumble.android.model.GroupConversation
@@ -69,7 +71,6 @@ import dev.crumble.android.model.MAX_GROUP_MEMBERS
 import dev.crumble.android.model.Message
 import dev.crumble.android.model.groupReactions
 import dev.crumble.android.model.groupReplyLabel
-import dev.crumble.android.model.groupSourcesOf
 import dev.crumble.android.model.groupStatusLine
 import dev.crumble.android.model.isGroupRunning
 import dev.crumble.android.model.isNotice
@@ -114,67 +115,69 @@ fun GroupChatView(
         if (rows.isNotEmpty() && wasNearBottom) listState.animateScrollToItem(0)
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            if (rows.none { it is ChatRow.MessageRow }) {
-                GroupEmpty(modifier = Modifier.align(Alignment.Center))
-            }
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                reverseLayout = true,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom),
-            ) {
-                groupActivityRows(conversation.activity, model.agents)
-                items(rows.asReversed(), key = { it.id }) { row ->
-                    when (row) {
-                        is ChatRow.Older -> OlderRow(conversation.loadingOlder) { model.loadEarlierGroupMessages() }
-                        is ChatRow.Time -> TimeRow(row.label)
-                        is ChatRow.MessageRow -> if (isNotice(row.message)) {
-                            NoticeRow(model, row.message)
-                        } else {
-                            GroupMessageView(
-                                model = model,
-                                conversation = conversation,
-                                message = row.message,
-                                reactions = reactions[row.message.entryId].orEmpty(),
-                            )
+    AttentionChat(model, ChatAttentionChat("group", group.id), ready = true) {
+        Column(modifier = modifier.fillMaxSize()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().then(attentionViewport())) {
+                if (rows.none { it is ChatRow.MessageRow }) {
+                    GroupEmpty(modifier = Modifier.align(Alignment.Center))
+                }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    reverseLayout = true,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom),
+                ) {
+                    groupActivityRows(conversation.activity, model.agents)
+                    items(rows.asReversed(), key = { it.id }) { row ->
+                        when (row) {
+                            is ChatRow.Older -> OlderRow(conversation.loadingOlder) { model.loadEarlierGroupMessages() }
+                            is ChatRow.Time -> TimeRow(row.label)
+                            is ChatRow.MessageRow -> if (isNotice(row.message)) {
+                                NoticeRow(model, row.message)
+                            } else {
+                                GroupMessageView(
+                                    model = model,
+                                    conversation = conversation,
+                                    message = row.message,
+                                    reactions = reactions[row.message.entryId].orEmpty(),
+                                )
+                            }
+                            else -> Unit
                         }
-                        else -> Unit
                     }
                 }
             }
-        }
-        conversation.sendError?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            conversation.sendError?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+            val reply = composer.replyTo
+            ComposerBar(
+                draft = composer.draft,
+                onDraftChange = { text -> model.updateGroupComposer(group.id) { it.copy(draft = text) } },
+                attachments = composer.attachments,
+                onAddAttachment = { model.addGroupAttachment(group.id, it) },
+                onRemoveAttachment = { id ->
+                    model.updateGroupComposer(group.id) { current -> current.copy(attachments = current.attachments.filterNot { it.id == id }) }
+                },
+                onAttachmentError = { model.errorText = it },
+                replyTitle = reply?.let { "Replying to ${groupReplyLabel(it)}" },
+                replyPreview = reply?.text.orEmpty(),
+                onCancelReply = { model.updateGroupComposer(group.id) { it.copy(replyTo = null) } },
+                mentionable = members.filter { it.enabled },
+                enabled = true,
+                placeholder = "Message ${group.name}",
+                running = isGroupRunning(conversation.activity),
+                stopEnabled = "group-stop:${group.id}" !in model.pendingMutations,
+                onStop = { model.stopGroupChat() },
+                onSend = { model.sendGroupMessage() },
             )
         }
-        val reply = composer.replyTo
-        ComposerBar(
-            draft = composer.draft,
-            onDraftChange = { text -> model.updateGroupComposer(group.id) { it.copy(draft = text) } },
-            attachments = composer.attachments,
-            onAddAttachment = { model.addGroupAttachment(group.id, it) },
-            onRemoveAttachment = { id ->
-                model.updateGroupComposer(group.id) { current -> current.copy(attachments = current.attachments.filterNot { it.id == id }) }
-            },
-            onAttachmentError = { model.errorText = it },
-            replyTitle = reply?.let { "Replying to ${groupReplyLabel(it)}" },
-            replyPreview = reply?.text.orEmpty(),
-            onCancelReply = { model.updateGroupComposer(group.id) { it.copy(replyTo = null) } },
-            mentionable = members.filter { it.enabled },
-            enabled = true,
-            placeholder = "Message ${group.name}",
-            running = isGroupRunning(conversation.activity),
-            stopEnabled = "group-stop:${group.id}" !in model.pendingMutations,
-            onStop = { model.stopGroupChat() },
-            onSend = { model.sendGroupMessage() },
-        )
     }
 }
 
@@ -371,7 +374,10 @@ private fun GroupMessageView(
                         color = LocalContentColor.current,
                     )
                 } else {
-                    ReplyContent(message.text, groupSourcesOf(message))
+                    ReplyContent(
+                        message.text, message.presentation,
+                        replyAttentionModifier(model, message, DisplayedReplySurface.Text, ready = message.role == "assistant" && (message.presentation?.text ?: message.text).isNotBlank()),
+                    )
                 }
             }
             MessageContextMenu(

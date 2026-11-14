@@ -3,6 +3,7 @@ package dev.crumble.android
 import dev.crumble.android.generated.BotRequest
 import dev.crumble.android.generated.Capabilities
 import dev.crumble.android.model.Agent
+import dev.crumble.android.model.AgentDraft
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.ChartInk
 import dev.crumble.android.model.ChartShape
@@ -16,9 +17,7 @@ import dev.crumble.android.model.MessageOrigin
 import dev.crumble.android.model.ModelChoice
 import dev.crumble.android.model.ProviderStatus
 import dev.crumble.android.model.Schedule
-import dev.crumble.android.model.THINKING_LEVELS
 import dev.crumble.android.model.WEB_SEARCH_OPTIONS
-import dev.crumble.android.model.automationTiming
 import dev.crumble.android.model.automationsOf
 import dev.crumble.android.model.botListLine
 import dev.crumble.android.model.botReactions
@@ -238,76 +237,47 @@ class BotParityTests {
         assertEquals("mixed", model.agentDraft!!.webSearchProvider)
     }
 
-    private fun levelTransport() = Replies { request ->
-        200 to when {
-            "/models?provider=openai" in request.pathWithQuery ->
-                """[{"provider":"openai","id":"deep","name":"D","contextWindow":1,"reasoning":true,"thinkingLevels":["off","low","medium","high","max"]},""" +
-                    """{"provider":"openai","id":"small","name":"S","contextWindow":1,"reasoning":true,"thinkingLevels":["off","low"]},""" +
-                    """{"provider":"openai","id":"flat","name":"F","contextWindow":1,"reasoning":false,"thinkingLevels":["off"]}]"""
-            request.method == "POST" -> agentFixture("created")
-            else -> "[]"
-        }
-    }
-
-    private fun Replies.savedLevel(): String? =
-        (CrumbleJson.parseToJsonElement(requests.last { it.method == "POST" }.body!!.toString(Charsets.UTF_8)) as JsonObject)["inference"]
-            ?.let { it as JsonObject }?.get("thinkingLevel")?.let { (it as JsonPrimitive).content }
-
     @Test
-    fun theEditorClampsReasoningToTheModelLikeTheWebsite() = runTest {
-        val transport = levelTransport()
-        val model = AppModel(client = APIClient(SERVER, "session", transport), scope = this)
-        model.createAgent()
-        model.agentDraft = model.agentDraft!!.copy(name = "Ada", provider = "openai", model = "deep")
-        model.changeEditorProvider("openai")
-        runCurrent()
-        model.agentDraft = model.agentDraft!!.copy(model = "deep", thinking = "max")
-        assertEquals(listOf("off", "low", "medium", "high", "max"), model.editorLevels)
-        assertEquals("max", model.editorLevel)
-
-        model.agentDraft = model.agentDraft!!.copy(model = "small")
-        assertEquals("low", model.editorLevel)
-
-        model.agentDraft = model.agentDraft!!.copy(model = "deep")
-        assertEquals("max", model.editorLevel)
-
-        model.agentDraft = model.agentDraft!!.copy(model = "small")
-        model.saveAgentEditor()
-        runCurrent()
-        assertEquals("low", transport.savedLevel())
-    }
-
-    @Test
-    fun aModelOutsideTheCatalogKeepsAnyLevel() = runTest {
-        val model = AppModel(client = APIClient(SERVER, "session", levelTransport()), scope = this)
-        model.createAgent()
-        model.changeEditorProvider("openai")
-        runCurrent()
-        model.agentDraft = model.agentDraft!!.copy(model = "typed-by-hand", thinking = "high")
-
-        assertEquals(THINKING_LEVELS.map { it.value }, model.editorLevels)
-        assertEquals("high", model.editorLevel)
-    }
-
-    @Test
-    fun aProviderChangeClampsOnceItsModelsArrive() = runTest {
-        val transport = levelTransport()
-        val model = AppModel(client = APIClient(SERVER, "session", transport), scope = this)
+    fun reasoningPreviewIgnoresAnOlderDraftAndUsesServerOptions() = runTest {
         val gate = CompletableDeferred<Unit>()
-        model.createAgent()
+        val transport = Replies { request ->
+            if (request.pathWithQuery == "/v1/reasoning/preview") {
+                200 to """{"options":[{"value":"off","label":"Disabled"},{"value":"high","label":"Deep"}],"effectiveLevel":"high"}"""
+            } else 200 to "[]"
+        }
+        transport.held["/v1/reasoning/preview"] = gate
+        val api = APIClient(SERVER, "session", transport)
+        val model = AppModel(client = api, scope = this)
+        val original = AgentDraft(isNew = true, agentID = "", provider = "openai", model = "first", thinking = "low")
+        model.agentDraft = original
+        val old = launch { model.refreshEditorReasoning(api, original) }
         runCurrent()
-        model.agentDraft = model.agentDraft!!.copy(thinking = "medium")
-        transport.held["/v1/models?provider=openai"] = gate
-        model.changeEditorProvider("openai")
-        runCurrent()
-        assertEquals("medium", model.editorLevel)
-
+        model.agentDraft = original.copy(model = "second", thinking = "high")
         gate.complete(Unit)
-        runCurrent()
-        model.agentDraft = model.agentDraft!!.copy(model = "flat")
+        old.join()
+        assertNull(model.editorReasoning)
+        transport.held.clear()
+        model.refreshEditorReasoning(api, model.agentDraft!!)
+        assertEquals("high", model.editorLevel)
+        assertEquals(listOf("Disabled", "Deep"), model.editorReasoning!!.options.map { it.label })
+        assertEquals("high", model.agentDraft!!.thinking)
+    }
 
-        assertEquals(listOf("off"), model.editorLevels)
-        assertEquals("off", model.editorLevel)
+    @Test
+    fun reasoningPreviewFailurePreservesDraftForRetry() = runTest {
+        var failing = true
+        val transport = Replies { if (failing) 503 to "" else 200 to """{"options":[{"value":"off","label":"Off"}],"effectiveLevel":"off"}""" }
+        val api = APIClient(SERVER, "session", transport)
+        val model = AppModel(client = api, scope = this)
+        val draft = AgentDraft(isNew = true, agentID = "", provider = "openai", model = "first", thinking = "high")
+        model.agentDraft = draft
+        assertTrue(runCatching { model.refreshEditorReasoning(api, draft) }.isFailure)
+        assertEquals("high", model.agentDraft!!.thinking)
+        assertNull(model.editorReasoning)
+        failing = false
+        model.refreshEditorReasoning(api, draft)
+        assertEquals("off", model.editorReasoning!!.effectiveLevel)
+        assertEquals("high", model.agentDraft!!.thinking)
     }
 
     @Test
@@ -574,7 +544,7 @@ class BotParityTests {
         model.workingBots = setOf("a")
         model.snapshot = ChatSnapshot(status = "idle")
         assertFalse(model.isWorking("a"))
-        model.snapshot = ChatSnapshot(status = "running")
+        model.snapshot = ChatSnapshot(status = "running", working = "thinking")
         model.workingBots = emptySet()
         assertTrue(model.isWorking("a"))
     }
@@ -585,7 +555,7 @@ class BotParityTests {
         val model = AppModel(client = APIClient(SERVER, "session", transport), scope = backgroundScope)
         model.agents = listOf(a, b)
         model.selectAgent("a")
-        model.snapshot = ChatSnapshot(status = "running")
+        model.snapshot = ChatSnapshot(status = "running", working = "thinking")
         model.selectAgent("b")
         runCurrent()
 
@@ -649,7 +619,6 @@ class BotParityTests {
     fun detailsListThisBotsTasksThatCanStillRun() {
         val list = listOf(schedule("mine"), schedule("other", agentId = "b"), schedule("done", cron = null), schedule("next", cron = null, nextRunAt = "2030-01-01T00:00:00Z"))
         assertEquals(listOf("mine", "next"), automationsOf("a", list).map { it.id })
-        assertTrue(automationTiming(schedule("off", enabled = false), emptyList()).startsWith("Paused · "))
     }
 
     @Test

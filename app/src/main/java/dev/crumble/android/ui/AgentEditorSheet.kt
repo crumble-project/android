@@ -48,6 +48,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
@@ -60,7 +70,6 @@ import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AgentDraft
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.ChoiceOption
-import dev.crumble.android.model.THINKING_LEVELS
 import dev.crumble.android.model.WEB_SEARCH_ACCOUNT_DEFAULT
 import dev.crumble.android.model.WEB_SEARCH_OPTIONS
 import dev.crumble.android.model.botProviderOptions
@@ -76,8 +85,24 @@ fun AgentEditorDialog(
     draft: AgentDraft,
 ) {
     val context = LocalContext.current
+    val client = model.client
+    var retry by remember(draft.id) { mutableIntStateOf(0) }
+    var previewFailed by remember(client, draft.id, draft.provider, draft.model, draft.thinking, retry) { mutableStateOf(false) }
+    LaunchedEffect(client, draft.id, draft.botRequestID, draft.provider, draft.model, draft.thinking, retry) {
+        if (client != null && draft.provider.isNotEmpty() && draft.model.isNotBlank()) {
+            delay(250)
+            try {
+                model.refreshEditorReasoning(client, draft)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                currentCoroutineContext().ensureActive()
+                previewFailed = true
+            }
+        }
+    }
     val requestID = draft.botRequestID
-    val complete = draft.name.isNotBlank() && draft.provider.isNotEmpty() && draft.model.isNotBlank()
+    val complete = draft.name.isNotBlank() && draft.provider.isNotEmpty() && draft.model.isNotBlank() && model.editorReasoning != null
 
     Dialog(
         onDismissRequest = {
@@ -243,10 +268,17 @@ fun AgentEditorDialog(
                                 }
                             }
                         }
-                        if (model.editorLevels.size > 1) {
+                        if (draft.provider.isNotEmpty() && draft.model.isNotBlank() && model.editorReasoning == null) {
+                            if (previewFailed) {
+                                TextButton(onClick = { retry++ }) { Text("Couldn't load reasoning options. Retry") }
+                            } else {
+                                Text("Checking reasoning…", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        if ((model.editorReasoning?.options?.size ?: 0) > 1) {
                             ChoiceField(
                                 label = "Reasoning",
-                                options = THINKING_LEVELS.filter { it.value in model.editorLevels }.map { ChoiceOption(it.value, it.label) },
+                                options = model.editorReasoning!!.options.map { ChoiceOption(it.value, it.label) },
                                 value = model.editorLevel,
                                 onChoose = { model.agentDraft = draft.copy(thinking = it) },
                             )

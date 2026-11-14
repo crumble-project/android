@@ -7,6 +7,8 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import java.util.UUID
+import dev.crumble.android.generated.TranscriptBlock
+import dev.crumble.android.generated.MessagePresentation
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
@@ -123,10 +125,6 @@ data class BotRequestRef(val id: String = "", val name: String = "")
 @Serializable
 data class CallRequestRef(val id: String = "", val callee: String = "")
 
-/** A page a group message's bot searched or read, stored with the message. */
-@Serializable
-data class MessageSource(val url: String = "", val title: String = "")
-
 /** Client-side delivery state for an optimistic owner message. */
 @Serializable
 enum class MessageDeliveryState {
@@ -141,7 +139,7 @@ data class Message(
     val entryId: String? = null,
     val role: String = "",
     val content: JsonElement? = null,
-    val blocks: JsonElement? = null,
+    val blocks: List<TranscriptBlock>? = null,
     val kind: String? = null,
     val replyTo: String? = null,
     val replyPreview: String? = null,
@@ -164,7 +162,8 @@ data class Message(
     val toolCallId: String? = null,
     val isError: Boolean? = null,
     val toolDetails: JsonElement? = null,
-    val sources: List<MessageSource>? = null,
+    val presentation: MessagePresentation? = null,
+    val replyReferences: List<dev.crumble.android.generated.TranscriptMessageReplyReferencesItem> = emptyList(),
 ) {
     val text: String
         get() = contentText(content)
@@ -177,17 +176,18 @@ data class AttachmentInfo(
     val mimeType: String = "",
     val size: Int = 0,
     val kind: String = "",
+    val id: String = "",
+    val deleted: Boolean = false,
 ) {
     val isImage: Boolean
-        get() = kind == "image"
+        get() = !deleted && (mimeType.startsWith("image/") || kind == "image")
 }
-
-typealias OutgoingAttachment = dev.crumble.android.generated.SendMessageRequestAttachmentsItem
 
 @Serializable
 data class ChatSnapshot(
     val messages: List<Message>? = null,
     val status: String? = null,
+    val working: String? = null,
     val partial: String? = null,
     val error: String? = null,
     val agentId: String? = null,
@@ -195,7 +195,7 @@ data class ChatSnapshot(
     val oldestEntryId: String? = null,
 ) {
     val isRunning: Boolean
-        get() = status == "running"
+        get() = working != null && working != "idle" && working != "failed"
 }
 
 @Serializable
@@ -249,6 +249,9 @@ data class Schedule(
     val notify: Boolean = true,
     val eventSourceId: String? = null,
     val nextRunAt: String? = null,
+    val nextRunLabel: String = "",
+    val description: String = "",
+    val timing: String = "",
 )
 
 @Serializable
@@ -438,17 +441,7 @@ sealed class ChatRow {
                 "toolResult" -> message.botRequest != null || message.callRequest != null || message.credentialRequest != null || message.loginRequest != null ||
                     jobOf(message) != null || displayOf(message) != null || isDesktopScreenshot(message)
                 "assistant" -> {
-                    val blocks = message.blocks
-                    if (blocks is JsonArray) {
-                        blocks.any { block ->
-                            val obj = block as? JsonObject ?: return@any false
-                            val type = (obj["type"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
-                            val text = (obj["text"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull ?: ""
-                            type == "text" && text.trim().isNotEmpty()
-                        }
-                    } else {
-                        contentText(blocks).isNotEmpty()
-                    }
+                    message.blocks.orEmpty().any { it is TranscriptBlock.Variant1 && it.value.text.isNotBlank() }
                 }
                 else -> false
             }
@@ -494,14 +487,9 @@ fun taskRunDate(value: String): Instant? {
 fun validateTask(
     name: String,
     prompt: String,
-    cron: String,
-    runAt: String,
-    timezone: String = ZoneId.systemDefault().id,
     kind: String = "prompt",
     command: String = "",
     timeoutSeconds: String = "600",
-    onEvent: Boolean = false,
-    eventSourceID: String = "",
 ): String? {
     if (kind == "script") {
         if (name.trim().isEmpty() || command.isBlank()) {
@@ -512,24 +500,6 @@ fun validateTask(
         }
     } else if (name.trim().isEmpty() || prompt.trim().isEmpty()) {
         return "Task name and prompt are required."
-    }
-    if (onEvent) {
-        return if (eventSourceID.isEmpty()) "Choose an event source." else null
-    }
-    if (cron.isEmpty() == runAt.isEmpty()) {
-        return "Choose either a recurring cron or a one-time run time."
-    }
-    val validZone = try {
-        ZoneId.of(timezone)
-        true
-    } catch (_: Exception) {
-        false
-    }
-    if (!validZone) {
-        return "Choose a valid time zone."
-    }
-    if (runAt.isNotEmpty() && taskRunDate(runAt) == null) {
-        return "Choose a valid date and time."
     }
     return null
 }

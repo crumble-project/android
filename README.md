@@ -24,9 +24,15 @@ Open the navigation drawer › **Settings**, enter the server URL (`http://10.0.
 
 The app doesn't configure the server or the account. Providers, credentials, logins, password managers, integrations, coding, users, message gateways, and the event relay are set in the web app: **Settings** › **Server settings** opens it in the browser.
 
+## Chat files
+
+Bot and group chats upload attachments as raw bytes, then send their file IDs with the message. Failed sends retain attachments for retry. Retries reuse confirmed uploads and the message request ID. Deleted transcript files display **File deleted** instead of an image.
+
+Library browsing is not included.
+
 ## Shared API contract
 
-`contract/assets/` holds a copy of the `bot` contract files from `bot/openapi/`. A running server also serves its document at `GET /openapi.json`. `scripts/generate-contract.py` generates Kotlin wire models and operations without external build-time dependencies.
+`contract/assets/` holds the HTTP contract and bot, group, activity, and heartbeat event schemas from `bot/openapi/`. A running server also serves its document at `GET /openapi.json`. `scripts/generate-contract.py` generates Kotlin wire models and operations without external build-time dependencies, including upload headers and binary bodies.
 
 ```bash
 python3 scripts/contract.py generate                         # Regenerate from contract/assets/
@@ -49,6 +55,10 @@ CRUMBLE_KEYSTORE_PATH=~/crumble-release.jks CRUMBLE_KEYSTORE_PASSWORD=... ./grad
 ## Push notifications (optional)
 
 Without `app/google-services.json`, the app builds cleanly and posts local notifications while connected to `/v1/events`. To enable background delivery via Firebase Cloud Messaging (FCM), place `google-services.json` registering `ng.crumbli.android` and `ng.crumbli.android.dev` in `app/` and set `CRUMBLE_FCM_SERVICE_ACCOUNT_PATH` on the server (see `bot/docs/native-push.md`).
+
+The app reports foreground bot and group chats through the chat-attention API, independently of notification permission and FCM registration. The server uses these reports to suppress account-wide pushes and waits at least three seconds before delivery.
+
+Seen acknowledgements identify the exact reply text or loaded request card visible in the chat viewport. Loading states, collapsed summaries, offscreen content, and unsupported group cards do not count as seen. Acknowledgement retries retain their original chat; account changes discard the old account's pending work.
 
 ## License
 

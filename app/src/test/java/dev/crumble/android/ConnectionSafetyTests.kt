@@ -5,7 +5,6 @@ import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.Route
 import dev.crumble.android.model.isExposedHttp
-import dev.crumble.android.model.splitSources
 import dev.crumble.android.network.APIClient
 import dev.crumble.android.network.HttpRequestData
 import dev.crumble.android.network.HttpResponseData
@@ -237,12 +236,6 @@ class ConnectionSafetyTests {
         model.signOut()
         runCurrent()
         assertEquals(2, resets)
-    }
-
-    @Test
-    fun citationsOfOtherSchemesNeverBecomeChips() {
-        val reply = splitSources("See [source](javascript:alert(1)) and [source](intent://x).", mapOf("x" to "Title"))
-        assertTrue(reply.chips.isEmpty())
     }
 
     @Test

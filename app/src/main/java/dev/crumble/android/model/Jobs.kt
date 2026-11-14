@@ -1,6 +1,8 @@
 package dev.crumble.android.model
 
 import dev.crumble.android.generated.CodingJobQuestion
+import dev.crumble.android.generated.JobHistoryItem
+import dev.crumble.android.generated.TranscriptBlock
 import java.util.Locale
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
@@ -40,6 +42,7 @@ data class JobSummary(
 data class JobPanel(
     val job: JobRef,
     val messages: List<Message> = emptyList(),
+    val items: List<JobHistoryItem> = emptyList(),
     val hasMore: Boolean = false,
     val oldestEntryID: String? = null,
     val loaded: Boolean = false,
@@ -49,17 +52,18 @@ data class JobPanel(
     val downloadFailed: Boolean = false,
 )
 
-sealed class JobItem {
-    abstract val id: String
+val JobHistoryItem.id: String
+    get() = when (this) {
+        is JobHistoryItem.Variant1 -> value.id
+        is JobHistoryItem.Variant2 -> value.id
+        is JobHistoryItem.Variant3 -> value.id
+    }
 
-    data class Task(override val id: String, val text: String) : JobItem()
-    data class Reply(override val id: String, val text: String) : JobItem()
-    data class Step(
-        override val id: String,
-        val tool: String,
-        val subject: String?,
-        val result: Message? = null,
-    ) : JobItem()
+data class JobHistoryPage(val messages: List<Message>, val items: List<JobHistoryItem>, val hasMore: Boolean, val oldestEntryId: String?)
+
+fun mergeJobItems(existing: List<JobHistoryItem>, newest: List<JobHistoryItem>): List<JobHistoryItem> {
+    val first = newest.firstOrNull()?.id ?: return existing
+    return existing.takeWhile { it.id != first } + newest
 }
 
 fun jobWorking(status: String?): Boolean = status == "working" || status == "running"
@@ -89,54 +93,6 @@ fun costLine(usage: JsonElement?): String? {
 
 private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
 
-private fun blocksOf(message: Message): List<JsonObject> =
-    (message.blocks as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
-
-private fun stepOf(message: Message, block: JsonObject, index: Int): JobItem.Step {
-    val arguments = block["arguments"] as? JsonObject
-    return JobItem.Step(
-        id = block.string("id") ?: "${message.id}:$index",
-        tool = block.string("name").orEmpty(),
-        subject = arguments?.string("command") ?: arguments?.string("path"),
-    )
-}
-
-/** The job's task, replies, and tool steps; a tool result attaches to the step that called it. */
-fun jobItems(messages: List<Message>): List<JobItem> {
-    val items = mutableListOf<JobItem>()
-    val steps = mutableMapOf<String, Int>()
-    for (message in messages) {
-        when (message.role) {
-            "user" -> if (message.text.isNotBlank()) items.add(JobItem.Task(message.id, message.text))
-            "assistant" -> blocksOf(message).forEachIndexed { index, block ->
-                val text = block.string("text").orEmpty()
-                if (block.string("type") == "text" && text.isNotBlank()) {
-                    items.add(JobItem.Reply("${message.id}:$index", text))
-                }
-                if (block.string("type") == "toolCall" && !block.string("name").isNullOrEmpty()) {
-                    val step = stepOf(message, block, index)
-                    steps[step.id] = items.size
-                    items.add(step)
-                }
-            }
-            "toolResult" -> steps[message.toolCallId]?.let { at ->
-                items[at] = (items[at] as JobItem.Step).copy(result = message)
-            }
-        }
-    }
-    return items
-}
-
-private val STEP_VERBS = mapOf(
-    "bash" to "Ran",
-    "read" to "Read",
-    "write" to "Wrote",
-    "edit" to "Edited",
-    "computer_use" to "Used the bot desktop",
-)
-
-fun jobStepVerb(tool: String): String = STEP_VERBS[tool] ?: tool.replaceFirstChar { it.uppercase() }
-
 /** Keeps pages loaded earlier and rows the newest page has scrolled past; entries never change. */
 fun mergeJobPages(existing: List<Message>, newest: List<Message>): List<Message> {
     val first = newest.firstOrNull()?.id ?: return existing
@@ -159,14 +115,13 @@ private val PrettyJson = Json {
 private fun messageMarkdown(message: Message): List<String> = when (message.role) {
     "user" -> listOf("## Task\n\n${message.text}")
     "toolResult" -> listOf((if (message.isError == true) "Failed:\n\n" else "") + fenced(message.text))
-    "assistant" -> blocksOf(message).mapNotNull { block ->
-        val text = block.string("text").orEmpty()
-        val name = block.string("name").orEmpty()
-        when {
-            block.string("type") == "text" && text.isNotBlank() -> text
-            block.string("type") == "toolCall" && name.isNotEmpty() -> {
-                val arguments = PrettyJson.encodeToString(JsonElement.serializer(), block["arguments"] ?: JsonObject(emptyMap()))
-                "### $name\n\n${fenced(arguments, "json")}"
+    "assistant" -> message.blocks.orEmpty().mapNotNull { block ->
+        when (block) {
+            is TranscriptBlock.Variant1 -> block.value.text.takeIf { it.isNotBlank() }
+            is TranscriptBlock.Variant4 -> {
+                val call = block.value
+                val arguments = PrettyJson.encodeToString(JsonElement.serializer(), JsonObject(call.arguments))
+                "### ${call.name}\n\n${fenced(arguments, "json")}"
             }
             else -> null
         }

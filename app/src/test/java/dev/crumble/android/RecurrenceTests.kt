@@ -1,16 +1,13 @@
 package dev.crumble.android
 
-import dev.crumble.android.model.NextRun
 import dev.crumble.android.model.Recurrence
 import dev.crumble.android.model.TaskDraft
 import dev.crumble.android.model.TaskWhen
 import dev.crumble.android.model.choice
 import dev.crumble.android.model.choosing
 import dev.crumble.android.model.cronOf
-import dev.crumble.android.model.humanRun
 import dev.crumble.android.model.inTimezone
 import dev.crumble.android.model.minuteChoices
-import dev.crumble.android.model.nextRunOf
 import dev.crumble.android.model.recurrenceOf
 import dev.crumble.android.model.runningAt
 import dev.crumble.android.model.timezoneChoices
@@ -105,33 +102,4 @@ class RecurrenceTests {
         assertTrue("Mars/Base" in timezoneChoices("", "Mars/Base", zones))
     }
 
-    @Test
-    fun runsReadRelativeToTheTasksZone() {
-        val zone = ZoneId.of("UTC")
-        fun at(text: String) = humanRun(Instant.parse(text), zone, now, Locale.UK)
-        assertEquals("today at 12:00", at("2026-11-05T12:00:00Z"))
-        assertEquals("tomorrow at 09:00", at("2026-11-06T09:00:00Z"))
-        assertEquals("Monday at 09:00", at("2026-11-09T09:00:00Z"))
-        assertEquals("Mon, Nov 16 at 09:00", humanRun(Instant.parse("2026-11-16T09:00:00Z"), zone, now, Locale.US).replace(' ', ' ').replace(" AM", "").replace("9:00", "09:00"))
-    }
-
-    @Test
-    fun theDayBoundaryIsTheTasksNotTheDevices() {
-        assertEquals("tomorrow at 00:30", humanRun(Instant.parse("2026-11-05T15:30:00Z"), ZoneId.of("Asia/Tokyo"), now, Locale.UK))
-    }
-
-    @Test
-    fun previewMatchesTheEditorStates() {
-        val repeating = draft().copy(repeats = true, cron = "0 9 * * *")
-        assertEquals(NextRun.At("Next run", "tomorrow at 09:00", "UTC"), nextRunOf(repeating, now, Locale.UK))
-        assertEquals(NextRun.Never, nextRunOf(repeating.copy(cron = "0 0 31 2 *"), now))
-        assertEquals(NextRun.Never, nextRunOf(repeating.copy(cron = "nonsense"), now))
-        assertEquals(NextRun.Never, nextRunOf(repeating.copy(cron = ""), now))
-        assertEquals(NextRun.Never, nextRunOf(repeating.copy(timezone = "Not/AZone"), now))
-        assertEquals(NextRun.Unknown, nextRunOf(repeating.copy(cron = "H * * * *"), now))
-
-        val once = draft().copy(runDate = Instant.parse("2026-11-05T12:00:00Z"))
-        assertEquals(NextRun.At("Runs", "today at 12:00", "UTC"), nextRunOf(once, now, Locale.UK))
-        assertEquals(NextRun.Passed, nextRunOf(once.copy(runDate = now.minusSeconds(60)), now))
-    }
 }

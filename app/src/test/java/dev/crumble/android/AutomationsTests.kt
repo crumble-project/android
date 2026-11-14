@@ -2,6 +2,7 @@ package dev.crumble.android
 
 import dev.crumble.android.generated.Capabilities
 import dev.crumble.android.generated.ScriptRun
+import dev.crumble.android.generated.SchedulePreview
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.CrumbleJson
@@ -21,7 +22,6 @@ import dev.crumble.android.model.recurrenceOf
 import dev.crumble.android.model.recurring
 import dev.crumble.android.model.runningAt
 import dev.crumble.android.model.canRunScripts
-import dev.crumble.android.model.describeTiming
 import dev.crumble.android.model.finished
 import dev.crumble.android.model.listedSchedules
 import dev.crumble.android.model.scriptRunDuration
@@ -38,6 +38,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -85,7 +86,7 @@ private fun scheduleJson(
     fun quoted(value: String?) = value?.let { "\"$it\"" } ?: "null"
     val command = if (kind == "script") "\"./backup.sh\"" else "null"
     val prompt = if (kind == "script") "" else "Say hi"
-    return """{"id":"$id","agentId":"a1","name":"Backup","kind":"$kind","prompt":"$prompt","command":$command,"timeoutSeconds":120,"notify":false,"eventSourceId":${quoted(eventSourceId)},"enabled":$enabled,"timezone":"UTC","runAt":${quoted(runAt)},"cron":${quoted(cron)},"nextRunAt":${quoted(nextRunAt)},"createdAt":"2026-11-05T10:00:00Z","createdByAgentId":null}"""
+    return """{"id":"$id","agentId":"a1","name":"Backup","kind":"$kind","prompt":"$prompt","command":$command,"timeoutSeconds":120,"notify":false,"eventSourceId":${quoted(eventSourceId)},"enabled":$enabled,"timezone":"UTC","runAt":${quoted(runAt)},"cron":${quoted(cron)},"nextRunAt":${quoted(nextRunAt)},"nextRunLabel":"Soon","description":"Once","timing":"Once","createdAt":"2026-11-05T10:00:00Z","createdByAgentId":null}"""
 }
 
 private fun schedule(json: String = scheduleJson()) = CrumbleJson.decodeFromString(Schedule.serializer(), json)
@@ -109,6 +110,94 @@ class AutomationsTests {
     }
 
     @Test
+    fun visibleTaskListRefreshesLabelsAndStopsWhenLeaving() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val transport = HeldTransport { 200 to "[${scheduleJson()}]" }
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val model = modelWith(transport, scope)
+        model.route = Route.Tasks
+        val api = model.client!!
+        val follow = scope.launch { model.followTaskSchedules(api) }
+        testScheduler.advanceTimeBy(59_999)
+        testScheduler.runCurrent()
+        assertTrue(transport.requests.isEmpty())
+        testScheduler.advanceTimeBy(1)
+        testScheduler.runCurrent()
+        assertEquals(1, transport.requests.size)
+        assertEquals("Soon", model.schedules.single().nextRunLabel)
+        transport.held["GET /v1/schedules"] = gate
+        testScheduler.advanceTimeBy(60_000)
+        testScheduler.runCurrent()
+        model.route = null
+        gate.complete(Unit)
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(60_000)
+        testScheduler.runCurrent()
+        assertEquals(2, transport.requests.size)
+        follow.cancel()
+    }
+
+    @Test
+    fun periodicTaskRefreshPreservesAnOptimisticEdit() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val transport = HeldTransport { request ->
+            if (request.method == "GET") 200 to "[${scheduleJson()}]" else 200 to scheduleJson(enabled = false)
+        }
+        transport.held["PATCH /v1/schedules/s1"] = gate
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val model = modelWith(transport, scope)
+        model.route = Route.Tasks
+        model.schedules = listOf(schedule())
+        val follow = scope.launch { model.followTaskSchedules(model.client!!) }
+        model.toggleSchedule("s1")
+        testScheduler.runCurrent()
+        assertFalse(model.schedules.single().enabled)
+        testScheduler.advanceTimeBy(60_000)
+        testScheduler.runCurrent()
+        assertFalse(model.schedules.single().enabled)
+        follow.cancel()
+        gate.complete(Unit)
+        testScheduler.runCurrent()
+    }
+
+    @Test
+    fun taskSaveRequiresTheCurrentSuccessfulPreview() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val transport = HeldTransport { request ->
+            if (request.pathWithQuery == "/v1/schedules/preview") {
+                200 to """{"description":"Daily","text":"Ready","isProblem":false,"nextRunAt":null}"""
+            } else 500 to ""
+        }
+        transport.held["POST /v1/schedules/preview"] = gate
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val model = modelWith(transport, scope)
+        val first = TaskDraft(scheduleID = "", agentID = "a1", name = "Task", prompt = "Go", repeats = true, cron = "0 9 * * *")
+        model.taskDraft = first
+        val loading = scope.launch { model.refreshTaskPreview(model.client!!, first) }
+        testScheduler.runCurrent()
+        model.saveTask()
+        assertTrue(model.schedules.isEmpty())
+        val newer = first.copy(cron = "0 10 * * *")
+        model.taskDraft = newer
+        gate.complete(Unit)
+        testScheduler.runCurrent()
+        loading.join()
+        assertNull(model.taskPreview)
+        model.acceptSchedulePreview(model.client!!, newer, SchedulePreview("", "Server warning", true, null))
+        model.saveTask()
+        assertTrue(model.schedules.isEmpty())
+        assertEquals("Server warning", model.errorText)
+        model.acceptSchedulePreview(model.client!!, newer, SchedulePreview("", "Ready", false, null))
+        model.taskDraft = first
+        assertNull(model.taskPreview)
+        model.taskDraft = newer
+        assertNull(model.taskPreview)
+        model.saveTask()
+        assertTrue(model.schedules.isEmpty())
+        assertEquals(1, transport.requests.size)
+    }
+
+    @Test
     fun scriptTaskOnAnEventAppearsAtOnceAndReconcilesWithoutDuplicates() = runTest {
         val transport = HeldTransport { 201 to scheduleJson() }
         val gate = CompletableDeferred<Unit>()
@@ -120,6 +209,7 @@ class AutomationsTests {
             timeoutSeconds = "120", notify = false, onEvent = true, eventSourceID = "e1",
         )
 
+        model.allowTaskSave()
         model.saveTask()
         testScheduler.runCurrent()
 
@@ -151,6 +241,7 @@ class AutomationsTests {
         val model = modelWith(transport, scope)
         model.taskDraft = TaskDraft(scheduleID = "", agentID = "a1", name = "Once", prompt = "Hi")
 
+        model.allowTaskSave()
         model.saveTask()
         testScheduler.runCurrent()
 
@@ -167,6 +258,7 @@ class AutomationsTests {
         val form = TaskDraft(scheduleID = "", agentID = "a1", name = "Backup", kind = "script", command = "./b.sh", timeoutSeconds = "90", notify = false)
         model.taskDraft = form
 
+        model.allowTaskSave()
         model.saveTask()
         testScheduler.advanceUntilIdle()
 
@@ -185,6 +277,7 @@ class AutomationsTests {
         assertTrue(model.taskDraft!!.repeats)
 
         model.taskDraft = model.taskDraft!!.copy(onEvent = true, eventSourceID = "e1")
+        model.allowTaskSave()
         model.saveTask()
         testScheduler.advanceUntilIdle()
 
@@ -278,6 +371,7 @@ class AutomationsTests {
         val scope = TestScope(StandardTestDispatcher(testScheduler))
         val model = modelWith(transport, scope)
         model.taskDraft = TaskDraft(scheduleID = "", agentID = "a1", name = "Backup", prompt = "Hi")
+        model.allowTaskSave()
         model.saveTask()
         testScheduler.runCurrent()
 
@@ -456,18 +550,13 @@ class AutomationsTests {
     @Test
     fun anEventTaskNamesItsSourceAndNeverCountsAsFinished() {
         val task = schedule()
-        assertEquals("On event · GitHub", describeTiming(task, listOf(SOURCE)))
-        assertEquals("On event", describeTiming(task, emptyList()))
         assertFalse(task.finished)
     }
 
     @Test
     fun aOneOffReadsRanOnlyAfterItFinished() {
-        val now = Instant.parse("2026-11-05T12:00:00Z")
         val done = schedule(scheduleJson(kind = "prompt", runAt = "2026-11-05T10:00:00Z", eventSourceId = null))
         val waiting = schedule(scheduleJson(kind = "prompt", runAt = "2026-11-05T14:00:00Z", eventSourceId = null, nextRunAt = "2026-11-05T14:00:00Z"))
-        assertTrue(describeTiming(done, emptyList(), now).startsWith("Ran "))
-        assertTrue(describeTiming(waiting, emptyList(), now).startsWith("Once, "))
         assertEquals(ScheduleStatus.Completed, done.status)
         assertEquals(ScheduleStatus.Active, waiting.status)
     }
@@ -487,18 +576,14 @@ class AutomationsTests {
 
     @Test
     fun scriptValidationMatchesTheWebsite() {
-        fun script(command: String = "./a.sh", timeout: String = "600", onEvent: Boolean = false, source: String = "") = validateTask(
-            name = "Task", prompt = "", cron = "0 9 * * *", runAt = "", kind = "script",
-            command = command, timeoutSeconds = timeout, onEvent = onEvent, eventSourceID = source,
+        fun script(command: String = "./a.sh", timeout: String = "600") = validateTask(
+            name = "Task", prompt = "", kind = "script", command = command, timeoutSeconds = timeout,
         )
         assertNull(script())
         assertEquals("Task name and command are required.", script(command = "  "))
         assertEquals("Timeout must be between 1 and 3600 seconds.", script(timeout = "0"))
         assertEquals("Timeout must be between 1 and 3600 seconds.", script(timeout = "3601"))
         assertEquals("Timeout must be between 1 and 3600 seconds.", script(timeout = "1.5"))
-        assertEquals("Choose an event source.", script(onEvent = true))
-        assertNull(script(onEvent = true, source = "e1"))
-        assertNull(validateTask(name = "T", prompt = "Hi", cron = "", runAt = "", onEvent = true, eventSourceID = "e1"))
     }
 
     @Test
@@ -508,13 +593,6 @@ class AutomationsTests {
         assertFalse(canRunScripts(CODING.copy(coding = false), coder))
         assertFalse(canRunScripts(null, coder))
         assertFalse(canRunScripts(CODING, Agent(id = "a2")))
-    }
-
-    @Test
-    fun aCronTaskShowsWordedTiming() {
-        val task = schedule(scheduleJson(kind = "prompt", cron = "0 9 * * 1-5", eventSourceId = null))
-        assertEquals("At 09:00, Monday through Friday", describeTiming(task, emptyList(), localZone = "UTC"))
-        assertEquals("At 09:00, Monday through Friday (UTC)", describeTiming(task, emptyList(), localZone = "Europe/Berlin"))
     }
 
     @Test
@@ -543,6 +621,7 @@ class AutomationsTests {
         draft = draft.choosing(TaskWhen.Weekly)
         draft = draft.recurring(recurrenceOf(draft.cron)!!.copy(days = listOf(2, 4), hour = 7, minute = 15))
         model.taskDraft = draft.inTimezone("Asia/Tokyo")
+        model.allowTaskSave()
         model.saveTask()
         testScheduler.runCurrent()
         val body = bodyOf(transport.requests.single())
@@ -559,6 +638,7 @@ class AutomationsTests {
         val draft = TaskDraft(scheduleID = "", agentID = "a1", name = "Once", prompt = "Go", timezone = "UTC")
             .runningAt(LocalDateTime.of(2026, 12, 1, 9, 0))
         model.taskDraft = draft.inTimezone("Asia/Tokyo")
+        model.allowTaskSave()
         model.saveTask()
         testScheduler.runCurrent()
         assertEquals("2026-12-01T00:00:00Z", bodyOf(transport.requests.single())["runAt"]?.jsonPrimitive?.content)

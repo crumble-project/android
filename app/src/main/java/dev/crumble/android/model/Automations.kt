@@ -60,27 +60,6 @@ fun listedSchedules(schedules: List<Schedule>): List<Schedule> = schedules
 fun automationsOf(agentID: String, schedules: List<Schedule>): List<Schedule> =
     schedules.filter { it.agentId == agentID && !it.finished }
 
-fun automationTiming(schedule: Schedule, sources: List<EventSource>, now: Instant = Instant.now()): String =
-    (if (schedule.enabled) "" else "Paused · ") + describeTiming(schedule, sources, now)
-
-fun describeTiming(
-    schedule: Schedule,
-    sources: List<EventSource>,
-    now: Instant = Instant.now(),
-    localZone: String = ZoneId.systemDefault().id,
-): String {
-    val sourceID = schedule.eventSourceId
-    if (sourceID != null) {
-        val source = sources.firstOrNull { it.id == sourceID }
-        return if (source != null) "On event · ${source.name}" else "On event"
-    }
-    if (!schedule.cron.isNullOrEmpty()) return describeCron(schedule.cron, schedule.timezone ?: localZone, localZone)
-    val runAt = schedule.runAt?.let(::taskRunDate) ?: return "Once"
-    val zone = runCatching { ZoneId.of(schedule.timezone) }.getOrDefault(ZoneId.systemDefault())
-    val text = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT).withZone(zone).format(runAt)
-    return if (runAt.isBefore(now) && schedule.nextRunAt == null) "Ran $text" else "Once, $text"
-}
-
 fun canRunScripts(capabilities: Capabilities?, agent: Agent?): Boolean =
     capabilities?.coding == true && agent?.tools?.contains("coding") == true
 

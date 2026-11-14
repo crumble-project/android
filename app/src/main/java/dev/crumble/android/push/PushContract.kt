@@ -30,12 +30,6 @@ data class PushRegistrationResult(
     val remoteDelivery: Boolean = false,
 )
 
-/** Presence used to suppress a notification for the chat currently on screen. */
-data class PushPresence(
-    val active: Boolean,
-    val agentId: String? = null,
-)
-
 /** The common reply payload sent by FCM data messages and APNs adapters. */
 @Serializable
 data class PushReply(

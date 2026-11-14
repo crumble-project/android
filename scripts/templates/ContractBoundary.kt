@@ -7,8 +7,8 @@ import kotlinx.serialization.json.Json
 interface ContractBoundary {
     val json: Json
     fun escape(value: String): String
-    fun request(method: String, path: String, body: ByteArray?, timeoutMs: Int): HttpRequestData
-    suspend fun send(method: String, path: String, body: ByteArray?, timeoutMs: Int): ByteArray
+    fun request(method: String, path: String, body: ByteArray?, timeoutMs: Int, headers: Map<String, String> = emptyMap()): HttpRequestData
+    suspend fun send(method: String, path: String, body: ByteArray?, timeoutMs: Int, headers: Map<String, String> = emptyMap()): ByteArray
 }
 
 @Serializable(with = OptionalFieldCodec::class)

@@ -250,7 +250,7 @@ class SecretsTests {
     fun transcriptResultsBecomeRequestCards() {
         fun message(tool: String, isError: Boolean = false) = CrumbleJson.decodeFromString(
             TranscriptMessage.serializer(),
-            """{"id":"m","entryId":"e","role":"toolResult","content":"","toolName":"$tool","isError":$isError,"toolDetails":{"name":"ACME","hosts":["a.io"],"requestedAt":"t1"}}""",
+            """{"id":"m","entryId":"e","role":"toolResult","content":"","replyReferences":[],"toolName":"$tool","isError":$isError,"toolDetails":{"name":"ACME","hosts":["a.io"],"requestedAt":"t1"}}""",
         ).domain()
         assertEquals(SecretRequestRef("ACME", listOf("a.io"), "t1"), message("request_credential").credentialRequest)
         assertEquals(SecretRequestRef("ACME", listOf("a.io"), "t1"), message("request_login").loginRequest)

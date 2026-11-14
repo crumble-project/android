@@ -1,5 +1,7 @@
 package dev.crumble.android
 
+import dev.crumble.android.generated.SchedulePreview
+import dev.crumble.android.model.AppModel
 import dev.crumble.android.model.ChatSnapshot
 import dev.crumble.android.model.CrumbleJson
 import kotlinx.serialization.json.*
@@ -36,7 +38,7 @@ internal fun snapshotFixture(snapshot: ChatSnapshot): String =
             put("id", "chat"); put("agentId", snapshot.agentId ?: "a1"); put("title", "Chat")
             put("createdAt", "2026-10-18T10:00:00Z"); put("updatedAt", "2026-10-18T10:00:00Z")
         })
-        put("status", snapshot.status ?: "idle"); put("partial", snapshot.partial.orEmpty())
+        put("status", snapshot.status ?: "idle"); put("working", snapshot.working ?: if (snapshot.status == "running") "thinking" else "idle"); put("partial", snapshot.partial.orEmpty())
         put("error", snapshot.error?.let(::JsonPrimitive) ?: JsonNull); put("updatedAt", 0)
         put("hasMore", snapshot.hasMore ?: false)
         put("oldestEntryId", snapshot.oldestEntryId?.let(::JsonPrimitive) ?: JsonNull)
@@ -44,8 +46,28 @@ internal fun snapshotFixture(snapshot: ChatSnapshot): String =
             val fields = (CrumbleJson.encodeToJsonElement(message) as JsonObject).toMutableMap()
             fields["entryId"] = JsonPrimitive(message.entryId ?: message.id)
             fields["content"] = JsonPrimitive(message.text)
+            fields["replyReferences"] = CrumbleJson.encodeToJsonElement(message.replyReferences)
+            fields.remove("attachments")
+            message.attachments?.let { attachments ->
+                fields["files"] = JsonArray(attachments.map { attachment ->
+                    buildJsonObject {
+                        put("id", attachment.id)
+                        if (attachment.deleted) {
+                            put("deleted", true)
+                        } else {
+                            put("name", attachment.name)
+                            put("mimeType", attachment.mimeType)
+                            put("size", attachment.size)
+                        }
+                    }
+                })
+            }
             JsonObject(fields)
         }))
     }.toString()
 
 internal const val executionFixture = """{"id":"e1","agentId":"a1","conversationId":"chat","scheduleId":null,"submissionId":null,"requestId":"req","status":"pending","prompt":"","error":null,"createdAt":"2026-10-18T10:00:00Z","updatedAt":"2026-10-18T10:00:00Z"}"""
+
+internal fun AppModel.allowTaskSave() {
+    acceptSchedulePreview(client!!, taskDraft!!, SchedulePreview("", "Ready", false, null))
+}

@@ -40,17 +40,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import dev.crumble.android.model.MAX_CRON_CHARS
-import dev.crumble.android.model.NextRun
 import dev.crumble.android.model.Recurrence
 import dev.crumble.android.model.TaskDraft
 import dev.crumble.android.model.TaskWhen
 import dev.crumble.android.model.WEEK
 import dev.crumble.android.model.choice
 import dev.crumble.android.model.choosing
-import dev.crumble.android.model.describeCron
 import dev.crumble.android.model.inTimezone
 import dev.crumble.android.model.minuteChoices
-import dev.crumble.android.model.nextRunOf
 import dev.crumble.android.model.recurrenceOf
 import dev.crumble.android.model.recurring
 import dev.crumble.android.model.runningAt
@@ -85,7 +82,6 @@ internal fun TaskTimeFields(draft: TaskDraft, onChange: (TaskDraft) -> Unit) {
         else -> RecurrenceFields(recurrence) { onChange(draft.recurring(it)) }
     }
     TimezoneField(draft.timezone) { onChange(draft.inTimezone(it)) }
-    NextRunLine(draft)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -226,7 +222,6 @@ private fun CronField(draft: TaskDraft, onChange: (TaskDraft) -> Unit) {
         onValueChange = { onChange(draft.copy(cron = it.take(MAX_CRON_CHARS))) },
         label = { Text("Cron expression") },
         placeholder = { Text("0 9 * * 1-5") },
-        supportingText = { Text(describeCron(draft.cron, draft.timezone.trim())) },
         textStyle = TextStyle(fontFamily = FontFamily.Monospace),
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
@@ -270,17 +265,5 @@ private fun TimezoneDialog(current: String, onDismiss: () -> Unit, onPick: (Stri
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         }
-    }
-}
-
-@Composable
-private fun NextRunLine(draft: TaskDraft) {
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val error = MaterialTheme.colorScheme.error
-    when (val run = nextRunOf(draft)) {
-        NextRun.Never -> Text("This schedule never runs.", style = MaterialTheme.typography.bodySmall, color = error)
-        NextRun.Passed -> Text("This time has passed.", style = MaterialTheme.typography.bodySmall, color = error)
-        NextRun.Unknown -> Unit
-        is NextRun.At -> Text("${run.label} ${run.time} (${run.zone})", style = MaterialTheme.typography.bodySmall, color = muted)
     }
 }

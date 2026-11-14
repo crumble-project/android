@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Align bot and group chat attachments with the server's file API: upload raw bytes, send file IDs, retain successful uploads for retry, and fetch transcript images by file ID. Deleted files display a placeholder and hide cached images.
+- Update the contract generator to 1.3.0 with upload headers, binary request bodies, binary downloads, and the group snapshot event schema.
+- Replace installation-linked notification presence with independent foreground chat views for bot and group chats. Acknowledge exact visible reply text and loaded request cards, retain per-chat acknowledgement retries, and clear old views before ending sessions. Presence works without notification permission or FCM registration.
+
+- Refresh task run labels while the task list is open.
+
+- Use server previews for task timing and reasoning, and server-provided reply citations.
+
+- Share generated transcript blocks and job activity types across HTTP and event streams.
+
+- Use server projections for job activity, chat work state, and task timing.
+
 ## 0.2.0
 
 - Remove the pages that configure the server or the account: Providers, Judge model, Vision model, Web search, Credentials, Logins, Password managers, Integrations, Coding, Message gateways, Event relay, and Users. The web app is the only client that configures them. Settings gains a Server settings row that opens the web app's settings in the browser, and the links that led to a removed page, such as Provider Settings on a failed reply, the bot editor's web search, integrations, and credentials notes, and Connect a password manager, open the matching web page. The `oauth/callback` deep link is gone with MCP sign-in. Bots' requests for credentials and logins are still answered in the chat.

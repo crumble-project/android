@@ -1,14 +1,9 @@
 package dev.crumble.android.model
 
 import java.time.DayOfWeek
-import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 import java.time.format.TextStyle
-import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 enum class TaskWhen(val label: String) {
@@ -115,37 +110,4 @@ fun timezoneChoices(query: String, current: String, available: Set<String> = Zon
     val needle = query.trim().replace(' ', '_').lowercase()
     val regions = available.filter { it == "UTC" || ('/' in it && !it.startsWith("Etc/") && !it.startsWith("SystemV/")) }
     return (regions + current).distinct().filter { it.isNotEmpty() && it.lowercase().contains(needle) }.sorted()
-}
-
-sealed interface NextRun {
-    data object Never : NextRun
-    data object Passed : NextRun
-    data object Unknown : NextRun
-    data class At(val label: String, val time: String, val zone: String) : NextRun
-}
-
-private fun validZone(id: String) = runCatching { ZoneId.of(id) }.isSuccess
-
-fun nextRunOf(draft: TaskDraft, now: Instant = Instant.now(), locale: Locale = Locale.getDefault()): NextRun {
-    val zoneID = draft.timezone.trim()
-    if (!validZone(zoneID)) return NextRun.Never
-    if (draft.repeats && hasHashedField(draft.cron)) return NextRun.Unknown
-    val zone = ZoneId.of(zoneID)
-    val run = if (draft.repeats) nextOccurrence(draft.cron, zone, now) ?: return NextRun.Never else draft.runDate
-    if (run.isBefore(now)) return NextRun.Passed
-    return NextRun.At(if (draft.repeats) "Next run" else "Runs", humanRun(run, zone, now, locale), zoneID)
-}
-
-/** "today at 09:00", "tomorrow at 09:00", a weekday this week, or a short date further out. */
-fun humanRun(run: Instant, zone: ZoneId, now: Instant, locale: Locale = Locale.getDefault()): String {
-    val date: ZonedDateTime = run.atZone(zone)
-    val days = ChronoUnit.DAYS.between(now.atZone(zone).toLocalDate(), date.toLocalDate())
-    val time = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale).format(date)
-    val day = when (days) {
-        0L -> "today"
-        1L -> "tomorrow"
-        in 2L..6L -> date.format(DateTimeFormatter.ofPattern("EEEE", locale))
-        else -> date.format(DateTimeFormatter.ofPattern("EEE, MMM d", locale))
-    }
-    return "$day at $time"
 }

@@ -95,12 +95,22 @@ private fun secretRequestRef(tool: String, toolName: String?, isError: Boolean?,
     return SecretRequestRef(name, hosts, (request["requestedAt"] as? JsonPrimitive)?.contentOrNull?.nilIfEmpty)
 }
 
+private fun TranscriptMessageFilesItem.domain(): dev.crumble.android.model.AttachmentInfo = when (this) {
+    is TranscriptMessageFilesItem.Variant1 -> dev.crumble.android.model.AttachmentInfo(value.name, value.mimeType, value.size.toInt(), id = value.id)
+    is TranscriptMessageFilesItem.Variant2 -> dev.crumble.android.model.AttachmentInfo(id = value.id, deleted = value.deleted)
+}
+
+private fun SnapshotEventPayloadMessagesItemFilesItem.domain(): dev.crumble.android.model.AttachmentInfo = when (this) {
+    is SnapshotEventPayloadMessagesItemFilesItem.Variant1 -> dev.crumble.android.model.AttachmentInfo(value.name, value.mimeType, value.size.toInt(), id = value.id)
+    is SnapshotEventPayloadMessagesItemFilesItem.Variant2 -> dev.crumble.android.model.AttachmentInfo(id = value.id, deleted = value.deleted)
+}
+
 internal fun TranscriptMessage.domain() = Message(
     id = id, entryId = entryId, role = role, content = JsonPrimitive(content), blocks = blocks,
     kind = kind, replyTo = replyTo, replyPreview = replyPreview,
     origin = origin?.let { dev.crumble.android.model.MessageOrigin(it.kind, it.name, it.agentId, it.source, it.via) },
     communication = communication?.let { dev.crumble.android.model.BotCommunication(it.executionId, it.fromAgentId, it.fromName, it.toAgentId, it.toName, it.status) },
-    timestamp = timestamp?.toLong(), attachments = attachments?.map { dev.crumble.android.model.AttachmentInfo(it.name, it.mimeType, it.size.toInt(), it.kind) },
+    timestamp = timestamp?.toLong(), attachments = files?.map { it.domain() },
     requestId = requestId,
     heldAction = heldAction?.let { HeldActionRef(it.id, it.job) },
     jobQuestion = jobQuestion?.let { JobQuestionRef(it.id, it.job) },
@@ -110,7 +120,7 @@ internal fun TranscriptMessage.domain() = Message(
     credentialRequest = secretRequestRef("request_credential", toolName, isError, toolDetails),
     loginRequest = secretRequestRef("request_login", toolName, isError, toolDetails),
     toolName = toolName, toolCallId = toolCallId, isError = isError, toolDetails = toolDetails,
-    sources = sources?.map { MessageSource(it.url, it.title) },
+    presentation = presentation, replyReferences = replyReferences,
 )
 
 internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
@@ -118,7 +128,7 @@ internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
     kind = kind, replyTo = replyTo, replyPreview = replyPreview,
     origin = origin?.let { dev.crumble.android.model.MessageOrigin(it.kind, it.name, it.agentId, it.source, it.via) },
     communication = communication?.let { dev.crumble.android.model.BotCommunication(it.executionId, it.fromAgentId, it.fromName, it.toAgentId, it.toName, it.status) },
-    timestamp = timestamp?.toLong(), attachments = attachments?.map { dev.crumble.android.model.AttachmentInfo(it.name, it.mimeType, it.size.toInt(), it.kind) },
+    timestamp = timestamp?.toLong(), attachments = files?.map { it.domain() },
     requestId = requestId,
     heldAction = heldAction?.let { HeldActionRef(it.id, it.job) },
     jobQuestion = jobQuestion?.let { JobQuestionRef(it.id, it.job) },
@@ -128,22 +138,26 @@ internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
     credentialRequest = secretRequestRef("request_credential", toolName, isError, toolDetails),
     loginRequest = secretRequestRef("request_login", toolName, isError, toolDetails),
     toolName = toolName, toolCallId = toolCallId, isError = isError, toolDetails = toolDetails,
-    sources = sources?.map { MessageSource(it.url, it.title) },
+    presentation = presentation,
+    replyReferences = replyReferences.map { CrumblePatchJson.decodeFromJsonElement<TranscriptMessageReplyReferencesItem>(CrumblePatchJson.encodeToJsonElement(it)) },
 )
 
 internal fun dev.crumble.android.generated.ChatSnapshot.domain() = dev.crumble.android.model.ChatSnapshot(
-    messages = messages.map { it.domain() }, status = status, partial = partial, error = error,
+    messages = messages.map { it.domain() }, status = status, working = working, partial = partial, error = error,
     agentId = agentId, hasMore = hasMore, oldestEntryId = oldestEntryId,
 )
 
 internal fun SnapshotEventPayload.domain() = dev.crumble.android.model.ChatSnapshot(
-    messages = messages.map { it.domain() }, status = status, partial = partial, error = error,
+    messages = messages.map { it.domain() }, status = status, working = working, partial = partial, error = error,
     agentId = agentId, hasMore = hasMore, oldestEntryId = oldestEntryId,
 )
 
 internal fun GroupChatSnapshot.domain() = GroupSnapshot(messages.map { it.domain() }, hasMore, oldestEntryId, groupChat, activity)
 
 internal fun TranscriptPage.domain() = ChatHistoryResponse(messages.map { it.domain() }, hasMore, oldestEntryId)
+internal fun dev.crumble.android.generated.JobHistoryPage.domain() = dev.crumble.android.model.JobHistoryPage(
+    messages.map { it.domain() }, items, hasMore, oldestEntryId,
+)
 internal fun dev.crumble.android.generated.Memory.domain() = dev.crumble.android.model.Memory(id, content, createdAt, agentId, source, updatedAt)
 internal fun dev.crumble.android.generated.Skill.domain() = SharedSkill(id, name, instructions)
 internal fun ListedSkill.domain(): SharedSkill = when (this) {
@@ -152,7 +166,7 @@ internal fun ListedSkill.domain(): SharedSkill = when (this) {
 }
 internal fun dev.crumble.android.generated.Schedule.domain() = dev.crumble.android.model.Schedule(
     id, agentId, name, cron, prompt, timezone, runAt, enabled, createdByAgentId,
-    kind, command, timeoutSeconds, notify, eventSourceId, nextRunAt,
+    kind, command, timeoutSeconds, notify, eventSourceId, nextRunAt, nextRunLabel, description, timing,
 )
 internal fun dev.crumble.android.generated.Execution.domain() = dev.crumble.android.model.Execution(
     id, agentId, conversationId, status, prompt, error, createdAt, updatedAt, scheduleId,
