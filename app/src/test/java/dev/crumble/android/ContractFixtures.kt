@@ -46,7 +46,7 @@ internal fun snapshotFixture(snapshot: ChatSnapshot): String =
             val fields = (CrumbleJson.encodeToJsonElement(message) as JsonObject).toMutableMap()
             fields["entryId"] = JsonPrimitive(message.entryId ?: message.id)
             fields["content"] = JsonPrimitive(message.text)
-            fields["replyReferences"] = JsonArray(emptyList())
+            fields["replyReferences"] = CrumbleJson.encodeToJsonElement(message.replyReferences)
             fields.remove("attachments")
             message.attachments?.let { attachments ->
                 fields["files"] = JsonArray(attachments.map { attachment ->

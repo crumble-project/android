@@ -163,6 +163,7 @@ data class Message(
     val isError: Boolean? = null,
     val toolDetails: JsonElement? = null,
     val presentation: MessagePresentation? = null,
+    val replyReferences: List<dev.crumble.android.generated.TranscriptMessageReplyReferencesItem> = emptyList(),
 ) {
     val text: String
         get() = contentText(content)

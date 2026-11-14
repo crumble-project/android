@@ -20,7 +20,6 @@ class PushSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
             installationId = runtime.installationId,
             firebaseConfigured = FirebaseApp.getApps(applicationContext).isNotEmpty(),
             fetchToken = { fetchToken() },
-            onRegistered = { runtime.sendPresence() },
         ).run()
         when (outcome) {
             PushSyncResult.SUCCESS -> Result.success()

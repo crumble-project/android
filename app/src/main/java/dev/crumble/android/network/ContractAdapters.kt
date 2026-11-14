@@ -120,7 +120,7 @@ internal fun TranscriptMessage.domain() = Message(
     credentialRequest = secretRequestRef("request_credential", toolName, isError, toolDetails),
     loginRequest = secretRequestRef("request_login", toolName, isError, toolDetails),
     toolName = toolName, toolCallId = toolCallId, isError = isError, toolDetails = toolDetails,
-    presentation = presentation,
+    presentation = presentation, replyReferences = replyReferences,
 )
 
 internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
@@ -139,6 +139,7 @@ internal fun SnapshotEventPayloadMessagesItem.domain() = Message(
     loginRequest = secretRequestRef("request_login", toolName, isError, toolDetails),
     toolName = toolName, toolCallId = toolCallId, isError = isError, toolDetails = toolDetails,
     presentation = presentation,
+    replyReferences = replyReferences.map { CrumblePatchJson.decodeFromJsonElement<TranscriptMessageReplyReferencesItem>(CrumblePatchJson.encodeToJsonElement(it)) },
 )
 
 internal fun dev.crumble.android.generated.ChatSnapshot.domain() = dev.crumble.android.model.ChatSnapshot(

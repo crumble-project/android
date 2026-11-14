@@ -24,12 +24,7 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /** Process-wide receiver state; registration and duplicate tracking survive process death. */
@@ -42,8 +37,6 @@ class PushRuntime private constructor(private val context: Context) : ReplyNotif
         sound = { settings.sound },
     )
     private val delivery = PushDelivery(store)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val presenceMutex = Mutex()
     @Volatile private var visible = NotificationContext(false, null)
 
     // This ID must not be restored onto a second device from Android Auto Backup.
@@ -107,27 +100,8 @@ class PushRuntime private constructor(private val context: Context) : ReplyNotif
         )
     }
 
-    fun updatePresence(active: Boolean, route: Route?) {
+    fun updateVisibility(active: Boolean, route: Route?) {
         visible = NotificationContext(active, route)
-        refreshPresence()
-    }
-
-    fun refreshPresence() {
-        scope.launch { sendPresence() }
-    }
-
-    suspend fun sendPresence() = presenceMutex.withLock {
-        val connection = store.read().current ?: return@withLock
-        if (connection.serverId == null || !connection.enabled) return@withLock
-        val state = visible
-        val agentId = (state.route as? Route.AgentChat)?.id
-        // Read the latest presence after acquiring the lock so a queued old resume cannot
-        // overwrite a more recent pause. The server expires this lease after 120 seconds.
-        runCatching {
-            APIClient(connection.url, connection.bearer).updatePushPresence(
-                installationId, PushPresence(state.appActive, if (state.appActive) agentId else null),
-            )
-        }
     }
 
     override fun handle(event: ActivityEvent, context: NotificationContext) {

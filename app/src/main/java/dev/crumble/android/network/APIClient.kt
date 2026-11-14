@@ -41,7 +41,11 @@ import dev.crumble.android.model.Schedule
 import dev.crumble.android.model.SharedSkill
 import dev.crumble.android.model.nilIfEmpty
 import dev.crumble.android.push.PushInfo
-import dev.crumble.android.push.PushPresence
+import dev.crumble.android.push.ChatAttentionChat
+import dev.crumble.android.generated.PutChatAttentionViewRequest
+import dev.crumble.android.generated.PutChatAttentionViewRequestChat
+import dev.crumble.android.generated.PostChatAttentionSeenRequest
+import dev.crumble.android.generated.PostChatAttentionSeenRequestChat
 import dev.crumble.android.push.PushRegistration
 import dev.crumble.android.push.PushRegistrationResult
 import java.io.ByteArrayInputStream
@@ -565,10 +569,11 @@ class APIClient(
     suspend fun registerPushDevice(installationId: String, registration: PushRegistration): PushRegistrationResult =
         operations.putPushDevice(registration.wire(), pushInstallationPath(installationId)).domain()
     suspend fun unregisterPushDevice(installationId: String) = operations.deletePushDevice(pushInstallationPath(installationId))
-    suspend fun updatePushPresence(installationId: String, presence: PushPresence) {
-        val fields = mapOf("active" to JsonPrimitive(presence.active), "agentId" to (presence.agentId?.let(::JsonPrimitive) ?: kotlinx.serialization.json.JsonNull))
-        val body = CrumbleJson.encodeToString(JsonObject(fields)).toByteArray(StandardCharsets.UTF_8)
-        send("PUT", "/v1/push/devices/${escape(pushInstallationPath(installationId))}/presence", body)
+    suspend fun putChatAttentionView(viewID: String, chat: ChatAttentionChat?) {
+        operations.putChatAttentionView(PutChatAttentionViewRequest(chat?.let { PutChatAttentionViewRequestChat(it.kind, it.id) }), viewID)
+    }
+    suspend fun postChatAttentionSeen(chat: ChatAttentionChat, eventIDs: List<String>) {
+        operations.postChatAttentionSeen(PostChatAttentionSeenRequest(PostChatAttentionSeenRequestChat(chat.kind, chat.id), eventIDs))
     }
     private fun pushInstallationPath(installationId: String): String {
         require(installationId.isNotBlank()) { "installationId must not be blank" }

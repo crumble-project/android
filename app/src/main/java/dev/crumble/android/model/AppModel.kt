@@ -31,6 +31,8 @@ import dev.crumble.android.network.UrlConnectionTransport
 import dev.crumble.android.network.domain
 import dev.crumble.android.network.edited
 import dev.crumble.android.network.friendlyError
+import dev.crumble.android.push.ChatAttention
+import dev.crumble.android.push.ChatAttentionChat
 import dev.crumble.android.storage.CredentialStore
 import dev.crumble.android.storage.InMemoryCredentialStore
 import dev.crumble.android.ui.BotState
@@ -248,6 +250,24 @@ class AppModel(
     private val onSessionReset: () -> Unit = {},
     private val onNotificationsChanged: () -> Unit = {},
 ) {
+    val chatAttention = ChatAttention(scope)
+    var attentionWindowID: String = ""
+        private set
+
+    fun newAttentionView(): String {
+        attentionWindowID = newRequestID()
+        chatAttention.newView()
+        return attentionWindowID
+    }
+
+    private var botSnapshotRevision = 0
+    private var groupSnapshotRevision = 0
+    private var attentionRefresh: Job? = null
+
+    fun updateChatAttention() {
+        chatAttention.update(client, appActive, route.attentionChat())
+    }
+
     var serverURL by mutableStateOf("http://127.0.0.1:7337")
     var token by mutableStateOf("")
     var email by mutableStateOf("")
@@ -587,7 +607,7 @@ class AppModel(
     var confirmingDelete by mutableStateOf(false)
 
 
-    var appActive: Boolean = true
+    var appActive by mutableStateOf(true)
 
     init {
         if (loadCredentials) {
@@ -874,6 +894,7 @@ class AppModel(
 
     /** Keeps older pages the owner already loaded; snapshots only carry the newest page. */
     fun applySnapshot(incoming: ChatSnapshot) {
+        botSnapshotRevision += 1
         val incomingMessages = incoming.messages ?: emptyList()
         val acknowledged = incomingMessages.mapNotNull { it.requestId }.toSet()
         if (acknowledged.isNotEmpty()) {
@@ -1554,8 +1575,33 @@ class AppModel(
                 agents = updated
             }
         }
+        if (event.type == "reply") refreshAttentionReferences(event)
         val context = NotificationContext(appActive = appActive, route = route)
         notifier.handle(event, context)
+    }
+
+    private fun refreshAttentionReferences(event: ActivityEvent) {
+        val api = client ?: return
+        if (!appActive) return
+        val chat = if (!event.groupId.isNullOrEmpty()) ChatAttentionChat("group", event.groupId) else ChatAttentionChat("bot", event.agentId)
+        if (route.attentionChat() != chat) return
+        val version = if (chat.kind == "group") groupVersion else selectionVersion
+        val revision = if (chat.kind == "group") groupSnapshotRevision else botSnapshotRevision
+        attentionRefresh?.cancel()
+        attentionRefresh = scope.launch {
+            try {
+                if (chat.kind == "group") {
+                    val incoming = api.groupSnapshot(chat.id)
+                    if (client === api && route.attentionChat() == chat && groupVersion == version && groupSnapshotRevision == revision) applyGroupSnapshot(incoming)
+                } else {
+                    val incoming = api.chat(chat.id, limit = 5)
+                    if (client === api && route.attentionChat() == chat && selectionVersion == version && botSnapshotRevision == revision) applySnapshot(incoming)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
     }
 
     fun loadOlder() {
@@ -1920,6 +1966,7 @@ class AppModel(
     }
 
     private fun applyGroupSnapshot(incoming: GroupSnapshot) {
+        groupSnapshotRevision += 1
         val id = incoming.groupChat.id
         val acknowledged = incoming.messages.mapNotNull { it.requestId }.toSet()
         val waiting = groupOutgoing[id].orEmpty()
@@ -3978,9 +4025,12 @@ class AppModel(
                 }
                 val candidate = APIClient(rawURL, session, transport)
                 candidate.agents()
-                val replaced = client?.takeIf { it.token.isNotEmpty() && it.token != session }
+                val replaced = client?.takeIf { it.token.isNotEmpty() && (it.token != session || it.baseURL != candidate.baseURL) }
                 // The server keeps one device row per installation, so this must land before the new session registers.
-                replaced?.let { old -> quietly { onSignOut(old) } }
+                replaced?.let { old ->
+                    chatAttention.disconnect(old)
+                    quietly { onSignOut(old) }
+                }
                 credentials.write("server-token", session)
                 credentials.write("account-email", trimmedEmail)
                 credentials.write("server-url", rawURL)
@@ -4020,6 +4070,8 @@ class AppModel(
 
     /** Drops everything that belonged to the old session, so nothing carries over to the next one. */
     private fun resetConnectionState() {
+        chatAttention.update(null, false, null)
+        attentionRefresh?.cancel()
         cancelStream()
         generation += 1
         pendingMutations = emptySet()
@@ -4105,6 +4157,7 @@ class AppModel(
         scope.launch {
             try {
                 val revoked = try {
+                    chatAttention.disconnect(api)
                     onSignOut(api)
                     api.signOut()
                     true

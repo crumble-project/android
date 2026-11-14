@@ -105,6 +105,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.crumble.android.model.Agent
 import dev.crumble.android.model.AppModel
+import dev.crumble.android.model.DisplayedReplySurface
+import dev.crumble.android.model.replyCardReady
+import dev.crumble.android.push.ChatAttentionChat
 import dev.crumble.android.model.ChatRow
 import dev.crumble.android.model.MentionCompletion
 import dev.crumble.android.model.CallMarker
@@ -170,34 +173,37 @@ fun ChatView(
         }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-        ) {
-            if (rows.isEmpty()) {
-                EmptyChatView(
-                    model = model,
-                    agent = agent,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    reverseLayout = true,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom),
-                ) {
-                    items(rows.asReversed(), key = { it.id }) { row ->
-                        ChatRowView(model = model, agent = agent, row = row, reactions = reactions)
+    AttentionChat(model, ChatAttentionChat("bot", agent.id), ready = model.snapshot != null) {
+        Column(modifier = modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .then(attentionViewport()),
+            ) {
+                if (rows.isEmpty()) {
+                    EmptyChatView(
+                        model = model,
+                        agent = agent,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        reverseLayout = true,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom),
+                    ) {
+                        items(rows.asReversed(), key = { it.id }) { row ->
+                            ChatRowView(model = model, agent = agent, row = row, reactions = reactions)
+                        }
                     }
                 }
             }
-        }
-        if (model.snapshot != null) {
-            Composer(model = model, agent = agent)
+            if (model.snapshot != null) {
+                Composer(model = model, agent = agent)
+            }
         }
     }
 }
@@ -375,7 +381,9 @@ fun MessageView(
     when (message.role) {
         "event" -> {
             when {
-                message.heldAction != null -> HeldActionCard(model, message.heldAction, message.text)
+                message.heldAction != null -> ReplyAttention(model, message, DisplayedReplySurface.HeldAction(message.heldAction.id), model.replyCardReady(message)) {
+                    HeldActionCard(model, message.heldAction, message.text)
+                }
                 message.jobQuestion != null -> JobQuestionCard(model, message.jobQuestion, message.text)
                 message.kind == "bot-message" -> BotMessageView(message = message)
                 else -> EventView(model = model, message = message)
@@ -387,10 +395,18 @@ fun MessageView(
             when {
                 display != null -> DisplayCardView(display)
                 isDesktopScreenshot(message) -> DesktopScreenshotCard(model, message)
-                message.botRequest != null -> BotRequestCard(model, message.botRequest)
-                message.callRequest != null -> CallRequestCard(model, message.callRequest)
-                message.credentialRequest != null -> CredentialRequestCard(model, message.credentialRequest)
-                message.loginRequest != null -> LoginRequestCard(model, message.loginRequest)
+                message.botRequest != null -> ReplyAttention(model, message, DisplayedReplySurface.ToolCard(message.toolCallId.orEmpty()), model.replyCardReady(message)) {
+                    BotRequestCard(model, message.botRequest)
+                }
+                message.callRequest != null -> ReplyAttention(model, message, DisplayedReplySurface.ToolCard(message.toolCallId.orEmpty()), model.replyCardReady(message)) {
+                    CallRequestCard(model, message.callRequest)
+                }
+                message.credentialRequest != null -> ReplyAttention(model, message, DisplayedReplySurface.ToolCard(message.toolCallId.orEmpty()), model.replyCardReady(message)) {
+                    CredentialRequestCard(model, message.credentialRequest)
+                }
+                message.loginRequest != null -> ReplyAttention(model, message, DisplayedReplySurface.ToolCard(message.toolCallId.orEmpty()), model.replyCardReady(message)) {
+                    LoginRequestCard(model, message.loginRequest)
+                }
                 job != null -> JobCard(model, job)
             }
         }
@@ -476,7 +492,10 @@ fun MessageView(
                                 onLongClick = { menuExpanded = true },
                             ),
                     ) {
-                        ReplyContent(message.text, message.presentation)
+                        ReplyContent(
+                            message.text, message.presentation,
+                            replyAttentionModifier(model, message, DisplayedReplySurface.Text, ready = message.role == "assistant" && (message.presentation?.text ?: message.text).isNotBlank()),
+                        )
                     }
                     MessageContextMenu(
                         expanded = menuExpanded,
@@ -531,10 +550,10 @@ internal fun DeliveryStatus(message: Message, onRetry: () -> Unit) {
 
 /** A bot's Markdown; citations of pages its turn read show as chips after it. */
 @Composable
-internal fun ReplyContent(text: String, presentation: MessagePresentation?) {
+internal fun ReplyContent(text: String, presentation: MessagePresentation?, textModifier: Modifier = Modifier) {
     val uriHandler = LocalUriHandler.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        MarkdownText(text = presentation?.text ?: text)
+        MarkdownText(text = presentation?.text ?: text, modifier = textModifier)
         if (!presentation?.citations.isNullOrEmpty()) {
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),

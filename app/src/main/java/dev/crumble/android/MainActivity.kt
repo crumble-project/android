@@ -20,11 +20,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.snapshotFlow
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.crumble.android.model.AppModel
@@ -32,10 +30,8 @@ import dev.crumble.android.model.ThemeChoice
 import dev.crumble.android.storage.AndroidKeyStoreCredentials
 import dev.crumble.android.theme.CrumbleTheme
 import dev.crumble.android.ui.CrumbleAppScreen
+import dev.crumble.android.ui.LocalAttentionWindowID
 import dev.crumble.android.push.PushRuntime
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 
 private val LIGHT_BAR_SCRIM = Color.argb(0xe6, 0xff, 0xff, 0xff)
 private val DARK_BAR_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
@@ -72,6 +68,7 @@ class MainActivity : ComponentActivity() {
     }
     private val model: AppModel
         get() = owner.model
+    private var attentionViewID: String? = null
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -82,6 +79,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        attentionViewID = model.newAttentionView()
+        model.appActive = false
+        model.updateChatAttention()
 
         if (push.repliesWanted) requestNotificationPermissionIfNeeded()
 
@@ -93,23 +93,17 @@ class MainActivity : ComponentActivity() {
             model.followActivity()
             handleIncomingIntent(intent)
         }
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                while (isActive) {
-                    push.refreshPresence()
-                    delay(30_000)
-                }
-            }
-        }
-
         enableEdgeToEdge()
         setContent {
             LaunchedEffect(model) {
                 snapshotFlow { model.client }.collect { api -> api?.let { push.configure(it) } }
             }
             LaunchedEffect(model) {
-                snapshotFlow { model.appActive to model.route }.collect { (active, route) ->
-                    push.updatePresence(active, route)
+                snapshotFlow { Triple(model.client, model.appActive, model.route) }.collect { (_, active, route) ->
+                    if (model.attentionWindowID == attentionViewID) {
+                        push.updateVisibility(active, route)
+                        model.updateChatAttention()
+                    }
                 }
             }
             val dark = when (model.theme) {
@@ -123,7 +117,9 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    CrumbleAppScreen(model = model)
+                    CompositionLocalProvider(LocalAttentionWindowID provides attentionViewID) {
+                        CrumbleAppScreen(model = model)
+                    }
                 }
             }
         }
@@ -136,17 +132,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (model.attentionWindowID != attentionViewID) return
         model.appActive = true
         model.notificationsAllowed = push.notificationsAllowed()
         model.client?.let { push.configure(it) }
-        push.updatePresence(true, model.route)
+        push.updateVisibility(true, model.route)
+        model.updateChatAttention()
     }
 
     override fun onPause() {
         super.onPause()
+        if (model.attentionWindowID != attentionViewID) return
         model.appActive = false
         model.saveDrafts()
-        push.updatePresence(false, model.route)
+        push.updateVisibility(false, model.route)
+        model.updateChatAttention()
     }
 
     override fun onDestroy() {

@@ -79,6 +79,6 @@ Library browsing, new picker types, notification migration, and unrelated cleanu
 - Generated-output verification, asset comparison with `../bot/openapi/`, `git diff --check`, lint, and debug assembly passed.
 - The first full Android run failed on stale transcript fixtures and exhausted memory in a polling test. Updating required `replyReferences` fields resolved both failures without changing runtime behavior.
 - Independent implementation review and focused correction review completed with no remaining findings.
-- Live server and device or emulator behavior were not tested. Notification compatibility remains deferred; the legacy presence call is intentionally unchanged on the wire.
+- Live server and device or emulator behavior were not tested. Notification compatibility was deferred in this phase. The owner subsequently approved [Android chat attention](2026-11-14-chat-attention.md) in the same PR, replacing the legacy presence boundary.
 
-Keep one implementer for the send lifecycle because upload progress and optimistic reconciliation share state. Commits are not authorized.
+Keep one implementer for the send lifecycle because upload progress and optimistic reconciliation share state. The owner authorized committing, pushing, and opening PR #17 after verification.

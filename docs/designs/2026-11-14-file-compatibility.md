@@ -26,6 +26,8 @@ Transcript file IDs are authoritative for content requests and cache identity, s
 
 ## Notification boundary
 
+This boundary applied to the initial file migration. After the server notification work finished, the owner approved [Android chat attention](2026-11-14-chat-attention.md) in the same PR; that design supersedes this boundary.
+
 Notification behavior belongs to another agent. Do not implement chat attention, alter notification suppression, or modify push registration/presence lifecycle code. Generated contract changes include server notification declarations mechanically. If removed operations block compilation, coordinate an integration boundary without preserving obsolete generated endpoints or inventing replacement behavior.
 
 ## Out of scope

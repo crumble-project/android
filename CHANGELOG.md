@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Align bot and group chat attachments with the server's file API: upload raw bytes, send file IDs, retain successful uploads for retry, and fetch transcript images by file ID. Deleted files display a placeholder and hide cached images.
-- Update the contract generator to 1.3.0 with upload headers, binary request bodies, binary downloads, and the group snapshot event schema. Notification migration remains separate; existing presence behavior is unchanged.
+- Update the contract generator to 1.3.0 with upload headers, binary request bodies, binary downloads, and the group snapshot event schema.
+- Replace installation-linked notification presence with independent foreground chat views for bot and group chats. Acknowledge exact visible reply text and loaded request cards, retain per-chat acknowledgement retries, and clear old views before ending sessions. Presence works without notification permission or FCM registration.
 
 - Refresh task run labels while the task list is open.
 
